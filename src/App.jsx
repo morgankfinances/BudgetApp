@@ -532,8 +532,8 @@ const STYLES = `
 .sidebar-stats .stat-net { color: var(--ink); font-weight: 600; font-size: 14px; }
 
 .main {
-  padding: 28px 36px 60px;
-  max-width: 980px;
+  padding: 28px 44px 60px;
+  max-width: 1360px;
   width: 100%;
   min-width: 0;
 }
@@ -601,7 +601,7 @@ const STYLES = `
   outline-offset: 1px;
 }
 
-.form-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 0 16px; }
+.form-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 0 16px; max-width: 640px; }
 .form-grid .field.span-2 { grid-column: 1 / -1; }
 
 .radio-row { display: flex; gap: 16px; margin-bottom: 16px; }
