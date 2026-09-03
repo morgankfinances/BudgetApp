@@ -429,6 +429,17 @@ function computeDuplicates(transactions) {
 const STYLES = `
 @import url('https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,500;9..144,600&family=Work+Sans:wght@400;500;600;700&display=swap');
 
+/* Neutralizes the default Vite template's #root centering (max-width /
+   margin: 0 auto / padding), which otherwise boxes this whole app into a
+   fixed-width column regardless of anything set below. */
+#root {
+  max-width: none;
+  margin: 0;
+  padding: 0;
+  text-align: left;
+  width: 100%;
+}
+
 .ledger-root {
   --bg: #F5F6F1;
   --panel: #FFFFFF;
@@ -2014,14 +2025,17 @@ function ReportsView({ transactions, accounts, categories, onGoCategories }) {
               <YAxis tick={{ fontSize: 11, fill: "var(--ink-muted)" }} tickFormatter={(v) => formatMoney(v)} width={72} />
               <Tooltip
                 formatter={(value) => formatMoney(value)}
+                wrapperStyle={{ zIndex: 100 }}
                 contentStyle={{
                   fontSize: 12.5,
                   fontFamily: "'Work Sans', sans-serif",
                   border: "1px solid var(--border)",
                   borderRadius: 6,
+                  background: "#fff",
+                  boxShadow: "0 4px 14px rgba(0,0,0,0.12)",
                 }}
               />
-              <Legend wrapperStyle={{ fontSize: 12 }} />
+              <Legend wrapperStyle={{ fontSize: 12, zIndex: 1 }} />
               {chartCategories.map((c, i) => (
                 <Bar key={c.key} dataKey={c.label} stackId="a" fill={CHART_PALETTE[i % CHART_PALETTE.length]} />
               ))}
