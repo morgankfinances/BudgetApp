@@ -12,7 +12,7 @@ import React, { useState, useEffect } from "react";
 
 const ACK_KEY = "ledger-disclosure-ack-v1";
 
-const CONTACT_EMAIL = "morgankfinances@gmail.com;
+const CONTACT_EMAIL = "morgankfinances@gmail.com";
 
 const boxStyle = {
   display: "flex",
