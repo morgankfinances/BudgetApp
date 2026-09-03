@@ -399,6 +399,7 @@ function buildFromBackupRows(rows) {
 function computeDuplicates(transactions) {
   const map = {};
   transactions.forEach((t) => {
+    if (t.notDuplicate) return; // explicitly dismissed by the user — never re-flag
     const amt = t.amountOut != null ? t.amountOut : t.amountIn;
     if (amt == null || !t.date) return;
     const direction = t.amountOut != null ? "out" : "in";
@@ -461,7 +462,7 @@ const STYLES = `
 
 .app-shell {
   display: grid;
-  grid-template-columns: 216px 1fr;
+  grid-template-columns: 216px minmax(0, 1fr);
   min-height: 100vh;
 }
 
@@ -534,6 +535,7 @@ const STYLES = `
   padding: 28px 36px 60px;
   max-width: 980px;
   width: 100%;
+  min-width: 0;
 }
 
 .view-header {
@@ -739,6 +741,9 @@ const STYLES = `
   padding: 2px 7px; border-radius: 999px; border: 1px solid var(--warn-border);
   background: var(--warn-bg); color: var(--warn-ink); cursor: pointer;
 }
+
+.dup-cell { display: flex; flex-direction: column; align-items: flex-start; gap: 3px; }
+.dup-cell .btn-ghost { padding: 0; font-size: 11px; color: var(--ink-muted); }
 
 .dup-detail-row td { background: #FBF8EF; padding: 10px 14px; }
 .dup-detail-title { font-size: 12px; font-weight: 600; color: var(--warn-ink); margin-bottom: 6px; }
@@ -1688,9 +1693,14 @@ function TransactionRow({ t, duplicateInfo, expanded, onToggleExpand, allTransac
         </td>
         <td>
           {isDup && (
-            <span className="badge" onClick={() => onToggleExpand(t.id)}>
-              possible duplicate {expanded ? "▲" : "▼"}
-            </span>
+            <div className="dup-cell">
+              <span className="badge" onClick={() => onToggleExpand(t.id)}>
+                possible duplicate {expanded ? "▲" : "▼"}
+              </span>
+              <button className="btn btn-ghost btn-sm" onClick={() => onUpdate(t.id, { notDuplicate: true })}>
+                Not a duplicate
+              </button>
+            </div>
           )}
         </td>
         <td>
