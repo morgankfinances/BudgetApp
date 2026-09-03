@@ -254,6 +254,9 @@ function HouseholdPanel({ onClose, onDataChanged }) {
   const [copied, setCopied] = useState(false);
   const [error, setError] = useState(null);
   const [leaveConfirming, setLeaveConfirming] = useState(false);
+  const [editingName, setEditingName] = useState(false);
+  const [nameDraft, setNameDraft] = useState("");
+  const [renaming, setRenaming] = useState(false);
 
   async function load() {
     setLoading(true);
@@ -370,6 +373,28 @@ function HouseholdPanel({ onClose, onDataChanged }) {
     await supabase.auth.signOut();
   }
 
+  function startEditName() {
+    setNameDraft(household.name);
+    setEditingName(true);
+  }
+
+  async function handleSaveName() {
+    if (!household || !nameDraft.trim()) return;
+    setRenaming(true);
+    setError(null);
+    const { error } = await supabase.rpc("rename_household", {
+      p_household_id: household.id,
+      p_name: nameDraft.trim(),
+    });
+    setRenaming(false);
+    if (error) {
+      setError(error.message);
+      return;
+    }
+    setEditingName(false);
+    load();
+  }
+
   const expiry = household ? formatExpiry(household.invite_code_expires_at) : null;
 
   return (
@@ -381,7 +406,34 @@ function HouseholdPanel({ onClose, onDataChanged }) {
           <p style={{ fontSize: 14, color: "#666" }}>Loading…</p>
         ) : household ? (
           <>
-            <p style={{ fontSize: 14, color: "#555", marginBottom: 4 }}>{household.name}</p>
+            {editingName ? (
+              <div style={{ display: "flex", gap: 6, marginBottom: 4 }}>
+                <input
+                  type="text"
+                  value={nameDraft}
+                  autoFocus
+                  onChange={(e) => setNameDraft(e.target.value)}
+                  style={{ flex: 1, fontSize: 14, padding: "5px 8px", border: "1px solid #ccc", borderRadius: 5 }}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") handleSaveName();
+                    if (e.key === "Escape") setEditingName(false);
+                  }}
+                />
+                <button style={smallBtnStyle} onClick={handleSaveName} disabled={renaming}>
+                  {renaming ? "Saving…" : "Save"}
+                </button>
+                <button style={smallBtnStyle} onClick={() => setEditingName(false)}>
+                  Cancel
+                </button>
+              </div>
+            ) : (
+              <p style={{ fontSize: 14, color: "#555", marginBottom: 4, display: "flex", alignItems: "center", gap: 8 }}>
+                {household.name}
+                <button style={smallBtnStyle} onClick={startEditName}>
+                  Rename
+                </button>
+              </p>
+            )}
 
             <div style={sectionLabelStyle}>Members</div>
             {members.map((m) => (
