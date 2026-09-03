@@ -1,30 +1,42 @@
 // src/storageAdapter.js
-// Drop-in replacement for the artifact's window.storage API, backed by
-// Supabase instead of localStorage. Same method shapes (get/set/delete/list,
-// each taking a "shared" flag), so App.jsx's existing loadData/saveData
-// calls work completely unchanged.
-//
-// Import this once, before your app renders (e.g. at the top of main.jsx),
-// AFTER the user is signed in — every method here requires an active
-// Supabase session, since rows are scoped to the signed-in user via RLS.
+// Same drop-in replacement for window.storage as before, but now scoped to
+// a household rather than an individual user — so everyone in a household
+// reads and writes the same data. Which household a request belongs to is
+// resolved once (via household_members) and cached for the session.
 
 import { supabase } from "./supabaseClient.js";
 
-async function getUserId() {
+let cachedHouseholdId = null;
+
+export function resetHouseholdCache() {
+  cachedHouseholdId = null;
+}
+
+async function getHouseholdId() {
+  if (cachedHouseholdId) return cachedHouseholdId;
   const {
     data: { user },
   } = await supabase.auth.getUser();
   if (!user) throw new Error("Not signed in");
-  return user.id;
+
+  const { data, error } = await supabase
+    .from("household_members")
+    .select("household_id")
+    .eq("user_id", user.id)
+    .maybeSingle();
+
+  if (error || !data) throw new Error("Not in a household yet");
+  cachedHouseholdId = data.household_id;
+  return cachedHouseholdId;
 }
 
 export const supabaseStorage = {
   async get(key, shared = false) {
-    const user_id = await getUserId();
+    const household_id = await getHouseholdId();
     const { data, error } = await supabase
       .from("app_storage")
       .select("value")
-      .eq("user_id", user_id)
+      .eq("household_id", household_id)
       .eq("key", key)
       .eq("shared", shared)
       .maybeSingle();
@@ -33,12 +45,12 @@ export const supabaseStorage = {
   },
 
   async set(key, value, shared = false) {
-    const user_id = await getUserId();
+    const household_id = await getHouseholdId();
     const { error } = await supabase
       .from("app_storage")
       .upsert(
-        { user_id, key, shared, value },
-        { onConflict: "user_id,key,shared" }
+        { household_id, key, shared, value },
+        { onConflict: "household_id,key,shared" }
       );
     if (error) {
       console.error("storage.set failed:", error.message);
@@ -48,11 +60,11 @@ export const supabaseStorage = {
   },
 
   async delete(key, shared = false) {
-    const user_id = await getUserId();
+    const household_id = await getHouseholdId();
     const { error } = await supabase
       .from("app_storage")
       .delete()
-      .eq("user_id", user_id)
+      .eq("household_id", household_id)
       .eq("key", key)
       .eq("shared", shared);
     if (error) {
@@ -63,11 +75,11 @@ export const supabaseStorage = {
   },
 
   async list(prefix = "", shared = false) {
-    const user_id = await getUserId();
+    const household_id = await getHouseholdId();
     const { data, error } = await supabase
       .from("app_storage")
       .select("key")
-      .eq("user_id", user_id)
+      .eq("household_id", household_id)
       .eq("shared", shared)
       .like("key", prefix + "%");
     if (error) {
@@ -78,6 +90,4 @@ export const supabaseStorage = {
   },
 };
 
-// The rest of the app (App.jsx) already calls window.storage.*, so wiring
-// it here means nothing else in that ~2,300-line file has to change.
 window.storage = supabaseStorage;

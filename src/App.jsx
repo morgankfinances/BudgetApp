@@ -268,6 +268,134 @@ function buildTransactions(rows, mapping, accountId, accountName) {
   return { valid, invalid };
 }
 
+/* ------------------------------------------------------------------ */
+/* Full backup: export everything to one CSV, and rebuild from one     */
+/* ------------------------------------------------------------------ */
+
+const BACKUP_COLUMNS = ["Account", "Date", "Description", "Money Out", "Money In", "Category", "Category Excluded"];
+
+function exportBackupCSV(accounts, transactions, categories) {
+  const categoryById = {};
+  categories.forEach((c) => {
+    categoryById[c.id] = c;
+  });
+
+  const sorted = [...transactions].sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0));
+
+  const rows = sorted.map((t) => {
+    const cat = t.categoryId ? categoryById[t.categoryId] : null;
+    return {
+      Account: t.accountName || "",
+      Date: t.date || "",
+      Description: t.description || "",
+      "Money Out": t.amountOut != null ? t.amountOut : "",
+      "Money In": t.amountIn != null ? t.amountIn : "",
+      Category: cat ? cat.name : "",
+      "Category Excluded": cat ? (cat.excluded ? "Yes" : "No") : "",
+    };
+  });
+
+  const csv = Papa.unparse(rows, { columns: BACKUP_COLUMNS });
+  const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = `ledger-backup-${new Date().toISOString().slice(0, 10)}.csv`;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+}
+
+function buildFromBackupRows(rows) {
+  const accountsByName = {};
+  const categoriesByName = {};
+  const transactions = [];
+  const invalid = [];
+
+  rows.forEach((row, idx) => {
+    const accountName = String(row["Account"] != null ? row["Account"] : "").trim();
+    const date = parseDateISO(row["Date"]);
+    const description = String(row["Description"] != null ? row["Description"] : "").trim();
+    const categoryName = String(row["Category"] != null ? row["Category"] : "").trim();
+    const categoryExcludedRaw = String(row["Category Excluded"] != null ? row["Category Excluded"] : "")
+      .trim()
+      .toLowerCase();
+
+    const reasons = [];
+    if (!accountName) reasons.push("missing account name");
+    if (!date) reasons.push("unrecognized date");
+
+    let amountOut = null;
+    let amountIn = null;
+    const outRaw = row["Money Out"];
+    const inRaw = row["Money In"];
+    if (outRaw !== "" && outRaw != null) {
+      const parsed = parseMoney(outRaw);
+      if (parsed === null) reasons.push("unrecognized money-out value");
+      else if (parsed !== 0) amountOut = Math.abs(parsed);
+    }
+    if (inRaw !== "" && inRaw != null) {
+      const parsed = parseMoney(inRaw);
+      if (parsed === null) reasons.push("unrecognized money-in value");
+      else if (parsed !== 0) amountIn = parsed;
+    }
+    if (amountOut == null && amountIn == null && reasons.length === 0) {
+      reasons.push("no amount in either column");
+    }
+
+    if (reasons.length > 0) {
+      invalid.push({ rowIndex: idx, raw: row, reasons });
+      return;
+    }
+
+    if (!accountsByName[accountName]) {
+      accountsByName[accountName] = {
+        id: uid(),
+        name: accountName,
+        dateCol: "",
+        descriptionCol: "",
+        outCol: "",
+        inCol: "",
+        invertSign: false,
+        createdAt: new Date().toISOString(),
+      };
+    }
+    const account = accountsByName[accountName];
+
+    let categoryId = null;
+    if (categoryName) {
+      if (!categoriesByName[categoryName]) {
+        categoriesByName[categoryName] = {
+          id: uid(),
+          name: categoryName,
+          excluded: categoryExcludedRaw === "yes",
+        };
+      }
+      categoryId = categoriesByName[categoryName].id;
+    }
+
+    transactions.push({
+      id: uid(),
+      accountId: account.id,
+      accountName: account.name,
+      date,
+      description,
+      amountOut,
+      amountIn,
+      categoryId,
+      raw: row,
+    });
+  });
+
+  return {
+    accounts: Object.values(accountsByName),
+    categories: Object.values(categoriesByName),
+    transactions,
+    invalid,
+  };
+}
+
 function computeDuplicates(transactions) {
   const map = {};
   transactions.forEach((t) => {
@@ -1949,6 +2077,157 @@ function ReportsView({ transactions, accounts, categories, onGoCategories }) {
 }
 
 /* ------------------------------------------------------------------ */
+/* Backup view                                                          */
+/* ------------------------------------------------------------------ */
+
+function BackupView({ accounts, transactions, categories, onRestore }) {
+  const [fileInfo, setFileInfo] = useState(null);
+  const [preview, setPreview] = useState(null);
+  const [parseError, setParseError] = useState(null);
+  const [confirming, setConfirming] = useState(false);
+  const [restoring, setRestoring] = useState(false);
+  const fileInputRef = useRef(null);
+
+  function handleExport() {
+    exportBackupCSV(accounts, transactions, categories);
+  }
+
+  async function handleFile(e) {
+    const file = e.target.files && e.target.files[0];
+    if (!file) return;
+    setParseError(null);
+    setPreview(null);
+    setConfirming(false);
+    try {
+      const { headers, rows } = await readFileAsRows(file);
+      if (!headers.includes("Account") || !headers.includes("Date")) {
+        throw new Error(
+          'This doesn\'t look like a backup file — expected columns like "Account" and "Date". Use a file from this app\'s Export button, or match its column headers exactly.'
+        );
+      }
+      setFileInfo({ headers, rows, fileName: file.name });
+      setPreview(buildFromBackupRows(rows));
+    } catch (err) {
+      setParseError(err.message || "Could not read this file.");
+      setFileInfo(null);
+    }
+  }
+
+  function resetRestore() {
+    setFileInfo(null);
+    setPreview(null);
+    setConfirming(false);
+    setParseError(null);
+    setRestoring(false);
+    if (fileInputRef.current) fileInputRef.current.value = "";
+  }
+
+  function handleConfirmRestore() {
+    if (!preview) return;
+    setRestoring(true);
+    onRestore(preview.accounts, preview.categories, preview.transactions);
+  }
+
+  return (
+    <div>
+      <div className="view-header">
+        <h1>Backup</h1>
+        <p>Download everything as one CSV file, or rebuild the app's data from a backup file.</p>
+      </div>
+
+      <div className="panel">
+        <h3 style={{ marginTop: 0 }}>Export</h3>
+        <p className="hint" style={{ marginBottom: 12 }}>
+          Downloads every transaction across all accounts — with its account and category — as a single CSV.
+          Good as a local backup, or to open and review in a spreadsheet.
+        </p>
+        <button className="btn btn-primary" onClick={handleExport} disabled={transactions.length === 0}>
+          Download all data as CSV
+        </button>
+      </div>
+
+      <div className="panel">
+        <h3 style={{ marginTop: 0 }}>Restore</h3>
+        <p className="hint" style={{ marginBottom: 12 }}>
+          Rebuilds accounts, categories, and transactions from a backup file — the same column format the
+          Export button above produces ({BACKUP_COLUMNS.join(", ")}). This replaces everything currently in the
+          app, it doesn't merge with it.
+        </p>
+
+        {parseError && <div className="error-banner">{parseError}</div>}
+
+        {!preview && (
+          <label className="file-input-label">
+            <input ref={fileInputRef} type="file" accept=".csv,.xlsx,.xls" onChange={handleFile} />
+            <span className="btn btn-secondary">Choose backup file</span>
+          </label>
+        )}
+
+        {preview && !confirming && (
+          <>
+            <div className="summary-row">
+              <StatBlock value={preview.accounts.length} label="Accounts found" />
+              <StatBlock value={preview.categories.length} label="Categories found" />
+              <StatBlock value={preview.transactions.length} label="Transactions ready" />
+              <StatBlock value={preview.invalid.length} label="Rows skipped" />
+            </div>
+
+            {preview.invalid.length > 0 && (
+              <>
+                <div className="hint" style={{ marginBottom: 8 }}>
+                  These rows will be left out:
+                </div>
+                <div className="invalid-list" style={{ marginBottom: 14 }}>
+                  {preview.invalid.slice(0, 50).map((inv) => (
+                    <div className="invalid-row" key={inv.rowIndex}>
+                      <span>Row {inv.rowIndex + 2}</span>
+                      <span className="reason">{inv.reasons.join(", ")}</span>
+                    </div>
+                  ))}
+                </div>
+              </>
+            )}
+
+            <div className="actions-row">
+              <button
+                className="btn btn-danger"
+                onClick={() => setConfirming(true)}
+                disabled={preview.transactions.length === 0}
+              >
+                Replace everything with this backup
+              </button>
+              <button className="btn btn-secondary" onClick={resetRestore}>
+                Cancel
+              </button>
+            </div>
+          </>
+        )}
+
+        {preview && confirming && (
+          <div>
+            <div className="error-banner">
+              This deletes the {accounts.length} account{accounts.length === 1 ? "" : "s"} and{" "}
+              {transactions.length} transaction{transactions.length === 1 ? "" : "s"} currently in the app,
+              replacing them with what's in this file. This can't be undone from this screen — if you're on the
+              version with account sync, the current data stays recoverable for 7 days from the Household
+              panel's Data History.
+            </div>
+            <div className="actions-row">
+              <button className="btn btn-danger" onClick={handleConfirmRestore} disabled={restoring}>
+                {restoring ? "Restoring…" : "Yes, replace everything"}
+              </button>
+              <button className="btn btn-secondary" onClick={() => setConfirming(false)}>
+                Cancel
+              </button>
+            </div>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+/* ------------------------------------------------------------------ */
 /* App                                                                  */
 /* ------------------------------------------------------------------ */
 
@@ -2096,6 +2375,17 @@ function App() {
     [accounts, transactions, categories, persist]
   );
 
+  const handleRestoreFromBackup = useCallback(
+    (newAccounts, newCategories, newTransactions) => {
+      persist(newAccounts, newTransactions, newCategories);
+      setView("transactions");
+      setToast(
+        `Restored ${newTransactions.length} transaction${newTransactions.length === 1 ? "" : "s"} from backup.`
+      );
+    },
+    [persist]
+  );
+
   const handleUpdateTransaction = useCallback(
     (id, updates) => {
       const nextTransactions = transactions.map((t) => (t.id === id ? { ...t, ...updates } : t));
@@ -2193,6 +2483,12 @@ function App() {
               Categories
             </button>
             <button
+              className={"nav-btn" + (view === "backup" ? " active" : "")}
+              onClick={() => setView("backup")}
+            >
+              Backup
+            </button>
+            <button
               className={"nav-btn" + (view === "upload" ? " active" : "")}
               onClick={() => goToUpload(null)}
             >
@@ -2259,6 +2555,14 @@ function App() {
               onRename={handleRenameCategory}
               onDelete={handleDeleteCategory}
               onToggleExcluded={handleToggleCategoryExcluded}
+            />
+          )}
+          {view === "backup" && (
+            <BackupView
+              accounts={accounts}
+              transactions={transactions}
+              categories={categories}
+              onRestore={handleRestoreFromBackup}
             />
           )}
         </div>
