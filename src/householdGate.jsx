@@ -42,13 +42,14 @@ const overlayStyle = {
 };
 
 const cardStyle = {
-  width: 380,
+  width: "min(380px, 92vw)",
   maxHeight: "85vh",
   overflowY: "auto",
   background: "#fff",
   borderRadius: 8,
   padding: 24,
   boxShadow: "0 10px 30px rgba(0,0,0,0.2)",
+  boxSizing: "border-box",
 };
 
 const sectionLabelStyle = {
@@ -393,6 +394,7 @@ function HouseholdPanel({ onClose, onDataChanged }) {
     }
     setEditingName(false);
     load();
+    onDataChanged?.();
   }
 
   const expiry = household ? formatExpiry(household.invite_code_expires_at) : null;
@@ -533,6 +535,7 @@ function HouseholdPanel({ onClose, onDataChanged }) {
 export default function HouseholdGate({ children }) {
   const [status, setStatus] = useState("checking"); // checking | none | pending | denied | ready
   const [householdName, setHouseholdName] = useState("");
+  const [activeHouseholdName, setActiveHouseholdName] = useState("");
   const [joinCode, setJoinCode] = useState("");
   const [createdCode, setCreatedCode] = useState(null);
   const [error, setError] = useState(null);
@@ -562,15 +565,17 @@ export default function HouseholdGate({ children }) {
 
     const { data: membership } = await supabase
       .from("household_members")
-      .select("household_id")
+      .select("household_id, households(name)")
       .eq("user_id", user.id)
       .maybeSingle();
 
     if (membership) {
       setStatus("ready");
+      setActiveHouseholdName(membership.households?.name || "");
       refreshPendingCount(membership.household_id);
       return;
     }
+    setActiveHouseholdName("");
 
     const { data: request } = await supabase
       .from("household_join_requests")
@@ -661,7 +666,7 @@ export default function HouseholdGate({ children }) {
   if (status === "pending") {
     return (
       <div style={boxStyle}>
-        <div style={{ width: 360, textAlign: "center" }}>
+        <div style={{ width: "min(360px, 92vw)", textAlign: "center", boxSizing: "border-box" }}>
           <h2 style={{ marginBottom: 4 }}>Waiting for approval</h2>
           <p style={{ fontSize: 14, color: "#555" }}>
             Your request to join has been sent. Someone already in the household needs to approve you before
@@ -681,7 +686,7 @@ export default function HouseholdGate({ children }) {
   if (status === "denied") {
     return (
       <div style={boxStyle}>
-        <div style={{ width: 360, textAlign: "center" }}>
+        <div style={{ width: "min(360px, 92vw)", textAlign: "center", boxSizing: "border-box" }}>
           <h2 style={{ marginBottom: 4 }}>Request not approved</h2>
           <p style={{ fontSize: 14, color: "#555", marginBottom: 16 }}>
             Your request to join wasn't approved. Double check the code with whoever sent it, or try again.
@@ -704,7 +709,7 @@ export default function HouseholdGate({ children }) {
     if (createdCode) {
       return (
         <div style={boxStyle}>
-          <div style={{ width: 360 }}>
+          <div style={{ width: "min(360px, 92vw)", boxSizing: "border-box" }}>
             <h2 style={{ marginBottom: 4 }}>Household created</h2>
             <p style={{ fontSize: 14, color: "#444" }}>
               Share this code with whoever you want to join. When they enter it, you'll see a request waiting
@@ -735,7 +740,7 @@ export default function HouseholdGate({ children }) {
 
     return (
       <div style={boxStyle}>
-        <div style={{ width: 360 }}>
+        <div style={{ width: "min(360px, 92vw)", boxSizing: "border-box" }}>
           <h2 style={{ marginBottom: 4 }}>Set up your household</h2>
           <p style={{ fontSize: 14, color: "#555" }}>
             Create a new household, or request to join one with an invite code someone shared with you.
@@ -785,7 +790,7 @@ export default function HouseholdGate({ children }) {
 
   return (
     <>
-      {children}
+      {React.cloneElement(children, { householdName: activeHouseholdName })}
       <button
         onClick={() => setPanelOpen(true)}
         style={{

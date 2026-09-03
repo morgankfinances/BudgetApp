@@ -493,6 +493,8 @@ const STYLES = `
   display: flex;
   align-items: baseline;
   gap: 6px;
+  line-height: 1.25;
+  word-break: break-word;
 }
 
 .sidebar-brand-mark {
@@ -814,9 +816,42 @@ const STYLES = `
   .sidebar { flex-direction: row; align-items: center; padding: 12px 16px; gap: 14px; overflow-x: auto; }
   .sidebar-brand { flex-shrink: 0; }
   .sidebar-nav { flex-direction: row; }
+  .sidebar-nav .nav-btn { flex-shrink: 0; }
   .sidebar-stats { display: none; }
-  .main { padding: 20px 18px 50px; }
+  .main { padding: 18px 14px 50px; }
   .form-grid { grid-template-columns: 1fr; }
+
+  /* Account and category rows: stack instead of squeezing into one line */
+  .account-card { flex-direction: column; align-items: flex-start; gap: 10px; }
+  .account-card .figures { text-align: left; margin-right: 0; }
+  .account-card .row-actions { flex-wrap: wrap; }
+
+  /* Transactions table -> stacked cards. Each <td> becomes its own line,
+     labeled via the data-label attribute set in TransactionRow, instead
+     of scrolling a wide table sideways on a narrow screen. */
+  .tx-table thead { display: none; }
+  .tx-table, .tx-table tbody, .tx-table tr, .tx-table td { display: block; width: 100%; }
+  .tx-table tr {
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 10px 12px;
+    margin-bottom: 10px;
+  }
+  .tx-table td { border-bottom: none; padding: 5px 0; }
+  .tx-table td[data-label]::before {
+    content: attr(data-label);
+    display: block;
+    font-size: 10.5px;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    color: var(--ink-muted);
+    margin-bottom: 2px;
+  }
+  .tx-table td.no-label-cell:empty { display: none; }
+  .tx-table td.desc-cell { max-width: none; white-space: normal; }
+  .tx-table td input[type="text"], .tx-table td input[type="date"] { width: 100% !important; box-sizing: border-box; }
+  .tx-table select { max-width: none; width: 100%; box-sizing: border-box; }
+  .dup-detail-row td { padding: 10px 12px !important; }
 }
 `;
 
@@ -1634,7 +1669,7 @@ function TransactionRow({ t, duplicateInfo, expanded, onToggleExpand, allTransac
   return (
     <>
       <tr>
-        <td>
+        <td data-label="Date">
           {editing ? (
             <input
               type="date"
@@ -1645,7 +1680,7 @@ function TransactionRow({ t, duplicateInfo, expanded, onToggleExpand, allTransac
             formatDateDisplay(t.date)
           )}
         </td>
-        <td className="desc-cell" title={t.description || ""}>
+        <td className="desc-cell" data-label="Description" title={t.description || ""}>
           {editing ? (
             <input
               type="text"
@@ -1658,8 +1693,8 @@ function TransactionRow({ t, duplicateInfo, expanded, onToggleExpand, allTransac
             t.description || <span className="muted-cell">—</span>
           )}
         </td>
-        <td>{t.accountName}</td>
-        <td>
+        <td data-label="Account">{t.accountName}</td>
+        <td data-label="Money out">
           {editing ? (
             <input
               type="text"
@@ -1674,7 +1709,7 @@ function TransactionRow({ t, duplicateInfo, expanded, onToggleExpand, allTransac
             </span>
           )}
         </td>
-        <td>
+        <td data-label="Money in">
           {editing ? (
             <input
               type="text"
@@ -1689,7 +1724,7 @@ function TransactionRow({ t, duplicateInfo, expanded, onToggleExpand, allTransac
             </span>
           )}
         </td>
-        <td>
+        <td data-label="Category">
           <select
             value={t.categoryId || ""}
             onChange={(e) => onUpdate(t.id, { categoryId: e.target.value || null })}
@@ -1702,7 +1737,7 @@ function TransactionRow({ t, duplicateInfo, expanded, onToggleExpand, allTransac
             ))}
           </select>
         </td>
-        <td>
+        <td className="no-label-cell">
           {isDup && (
             <div className="dup-cell">
               <span className="badge" onClick={() => onToggleExpand(t.id)}>
@@ -1714,7 +1749,7 @@ function TransactionRow({ t, duplicateInfo, expanded, onToggleExpand, allTransac
             </div>
           )}
         </td>
-        <td>
+        <td className="no-label-cell">
           {editing ? (
             <div className="row-actions">
               <button className="btn btn-primary btn-sm" onClick={saveEdit}>
@@ -2255,7 +2290,7 @@ function BackupView({ accounts, transactions, categories, onRestore }) {
 /* App                                                                  */
 /* ------------------------------------------------------------------ */
 
-function App() {
+function App({ householdName } = {}) {
   const [loaded, setLoaded] = useState(false);
   const [accounts, setAccounts] = useState([]);
   const [transactions, setTransactions] = useState([]);
@@ -2479,7 +2514,7 @@ function App() {
         <div className="sidebar">
           <div className="sidebar-brand">
             <span className="sidebar-brand-mark" />
-            Ledger
+            {householdName ? `${householdName} Ledger` : "Ledger"}
           </div>
           <div className="sidebar-nav">
             <button

@@ -47,7 +47,7 @@ export default function AuthGate({ children }) {
   if (!session) {
     return (
       <div style={{ display: "flex", minHeight: "100vh", alignItems: "center", justifyContent: "center", fontFamily: "sans-serif" }}>
-        <div style={{ width: 320 }}>
+        <div style={{ width: "min(320px, 92vw)", boxSizing: "border-box" }}>
           <h2 style={{ marginBottom: 4 }}>Sign in to Ledger</h2>
           {sent ? (
             <p style={{ color: "#444", fontSize: 14 }}>
