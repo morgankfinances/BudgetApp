@@ -31,24 +31,32 @@ async function loadData() {
     if (res && res.value) {
       const parsed = JSON.parse(res.value);
       const categories = Array.isArray(parsed.categories) ? parsed.categories : createDefaultCategories();
+      const budgetGroups = Array.isArray(parsed.budgetGroups) ? parsed.budgetGroups : [];
+      const normalizeBudgetItem = (b) => ({
+        ...b,
+        budgetType: b.budgetType === "accumulate" ? "accumulate" : "spend",
+        accumulateTarget: b.accumulateTarget != null ? b.accumulateTarget : null,
+        accumulateActuals: b.accumulateActuals && typeof b.accumulateActuals === "object" ? b.accumulateActuals : {},
+      });
       return {
         accounts: parsed.accounts || [],
         transactions: parsed.transactions || [],
-        categories: categories.map((c) => ({ ...c, excluded: !!c.excluded })),
-        budgetGroups: Array.isArray(parsed.budgetGroups) ? parsed.budgetGroups : [],
+        categories: categories.map((c) => normalizeBudgetItem({ ...c, excluded: !!c.excluded })),
+        budgetGroups: budgetGroups.map(normalizeBudgetItem),
+        plannedIncome: parsed.plannedIncome != null ? parsed.plannedIncome : null,
       };
     }
   } catch (e) {
     /* key doesn't exist yet on first run */
   }
-  return { accounts: [], transactions: [], categories: createDefaultCategories(), budgetGroups: [] };
+  return { accounts: [], transactions: [], categories: createDefaultCategories(), budgetGroups: [], plannedIncome: null };
 }
 
-async function saveData(accounts, transactions, categories, budgetGroups) {
+async function saveData(accounts, transactions, categories, budgetGroups, plannedIncome) {
   try {
     const result = await window.storage.set(
       STORAGE_KEY,
-      JSON.stringify({ accounts, transactions, categories, budgetGroups }),
+      JSON.stringify({ accounts, transactions, categories, budgetGroups, plannedIncome }),
       false
     );
     return !!result;
@@ -168,6 +176,43 @@ function formatMonthLabel(monthStartISO) {
   return dt.toLocaleDateString("en-US", { month: "short", year: "numeric", timeZone: "UTC" });
 }
 
+// The standard financial conversion for a weekly recurring amount to its
+// monthly equivalent: 52 weeks / 12 months. Deliberately not x4 — over a
+// full year x4 only accounts for 48 of the 52 weeks that actually happen,
+// which would systematically under-count what a weekly budget costs
+// annually. This is only used for the single-number income-allocation
+// check; everywhere else weekly and monthly stay in their own lanes.
+const WEEKS_PER_MONTH = 52 / 12;
+
+function monthlyEquivalent(amount, period) {
+  if (amount == null) return 0;
+  return period === "weekly" ? amount * WEEKS_PER_MONTH : amount;
+}
+
+function addPeriod(dateISO, periodType) {
+  const [y, m, d] = dateISO.split("-").map(Number);
+  const dt = new Date(Date.UTC(y, m - 1, d));
+  if (periodType === "weekly") dt.setUTCDate(dt.getUTCDate() + 7);
+  else dt.setUTCMonth(dt.getUTCMonth() + 1);
+  return dt.toISOString().slice(0, 10);
+}
+
+// Every period key from startKey through endKey (inclusive), stepping by
+// the given cadence. Capped as a safety net against a runaway loop from
+// a malformed date.
+function enumeratePeriodsBetween(startKey, endKey, periodType) {
+  const periods = [];
+  let cursor = startKey;
+  let guard = 0;
+  while (cursor <= endKey && guard < 1200) {
+    periods.push(cursor);
+    cursor = addPeriod(cursor, periodType);
+    guard++;
+  }
+  if (periods.length === 0 || periods[periods.length - 1] !== endKey) periods.push(endKey);
+  return periods;
+}
+
 const CHART_PALETTE = ["#3B5BA0", "#3F7D5C", "#AC4A2C", "#8A5A15", "#6B5B95", "#2E8B8B", "#9C4F6E"];
 
 function computeBudgetPeriodData(transactions, budgetItems, periodType) {
@@ -177,14 +222,16 @@ function computeBudgetPeriodData(transactions, budgetItems, periodType) {
   );
   if (budgeted.length === 0) return null;
 
+  const currentKey = periodKeyFn(new Date().toISOString().slice(0, 10));
   const spendMap = {};
-  const periodSet = new Set();
+  const periodSet = new Set([currentKey]);
 
+  const spendItems = budgeted.filter((b) => b.budgetType !== "accumulate");
   transactions.forEach((t) => {
     if (!t.categoryId || !t.date) return;
     const pKey = periodKeyFn(t.date);
     const spent = (t.amountOut || 0) - (t.amountIn || 0);
-    budgeted.forEach((b) => {
+    spendItems.forEach((b) => {
       if (b.categoryIds.has(t.categoryId)) {
         periodSet.add(pKey);
         if (!spendMap[b.id]) spendMap[b.id] = {};
@@ -193,8 +240,23 @@ function computeBudgetPeriodData(transactions, budgetItems, periodType) {
     });
   });
 
-  const currentKey = periodKeyFn(new Date().toISOString().slice(0, 10));
-  periodSet.add(currentKey);
+  // Accumulate items don't derive from transactions at all — each period
+  // defaults to "the full planned contribution happened," unless the user
+  // has explicitly logged what was actually set aside that period.
+  const accumulateItems = budgeted.filter((b) => b.budgetType === "accumulate");
+  accumulateItems.forEach((b) => {
+    const startKey = b.createdAt ? periodKeyFn(b.createdAt.slice(0, 10)) : currentKey;
+    const itemPeriods = enumeratePeriodsBetween(startKey, currentKey, periodType);
+    Object.keys(b.accumulateActuals || {}).forEach((k) => {
+      if (!itemPeriods.includes(k)) itemPeriods.push(k);
+    });
+    spendMap[b.id] = {};
+    itemPeriods.forEach((pKey) => {
+      periodSet.add(pKey);
+      const override = (b.accumulateActuals || {})[pKey];
+      spendMap[b.id][pKey] = override != null ? override : b.budgetAmount;
+    });
+  });
 
   const periods = Array.from(periodSet).sort();
 
@@ -429,6 +491,259 @@ function buildFromBackupRows(rows) {
   };
 }
 
+/* ------------------------------------------------------------------ */
+/* Budget backup: export budget setup to one CSV, and apply one back   */
+/* ------------------------------------------------------------------ */
+
+const BUDGET_BACKUP_COLUMNS = [
+  "Row Type",
+  "Item Type",
+  "Name",
+  "Budget Amount",
+  "Budget Period",
+  "Budget Type",
+  "Accumulate Target",
+  "Group",
+  "Members",
+  "Period",
+  "Amount",
+];
+
+function exportBudgetCSV(categories, budgetGroups, plannedIncome) {
+  const rows = [];
+
+  rows.push({
+    "Row Type": "Settings",
+    "Item Type": "",
+    Name: "Planned Monthly Income",
+    "Budget Amount": "",
+    "Budget Period": "",
+    "Budget Type": "",
+    "Accumulate Target": "",
+    Group: "",
+    Members: "",
+    Period: "",
+    Amount: plannedIncome != null ? plannedIncome : "",
+  });
+
+  const groupNameByCategoryId = {};
+  budgetGroups.forEach((g) => {
+    (g.categoryIds || []).forEach((id) => {
+      groupNameByCategoryId[id] = g.name;
+    });
+  });
+
+  categories.forEach((c) => {
+    rows.push({
+      "Row Type": "Category",
+      "Item Type": "Category",
+      Name: c.name,
+      "Budget Amount": c.budgetAmount != null ? c.budgetAmount : "",
+      "Budget Period": c.budgetAmount != null ? c.budgetPeriod || "monthly" : "",
+      "Budget Type": c.budgetAmount != null ? (c.budgetType === "accumulate" ? "Accumulate" : "Spend") : "",
+      "Accumulate Target": c.accumulateTarget != null ? c.accumulateTarget : "",
+      Group: groupNameByCategoryId[c.id] || "",
+      Members: "",
+      Period: "",
+      Amount: "",
+    });
+  });
+
+  budgetGroups.forEach((g) => {
+    const memberNames = (g.categoryIds || [])
+      .map((id) => categories.find((c) => c.id === id)?.name)
+      .filter(Boolean);
+    rows.push({
+      "Row Type": "Group",
+      "Item Type": "Group",
+      Name: g.name,
+      "Budget Amount": g.budgetAmount != null ? g.budgetAmount : "",
+      "Budget Period": g.budgetAmount != null ? g.budgetPeriod || "monthly" : "",
+      "Budget Type": g.budgetAmount != null ? (g.budgetType === "accumulate" ? "Accumulate" : "Spend") : "",
+      "Accumulate Target": g.accumulateTarget != null ? g.accumulateTarget : "",
+      Group: "",
+      Members: memberNames.join("|"),
+      Period: "",
+      Amount: "",
+    });
+  });
+
+  const pushOverrides = (item, itemType) => {
+    Object.entries(item.accumulateActuals || {}).forEach(([period, amount]) => {
+      rows.push({
+        "Row Type": "Override",
+        "Item Type": itemType,
+        Name: item.name,
+        "Budget Amount": "",
+        "Budget Period": "",
+        "Budget Type": "",
+        "Accumulate Target": "",
+        Group: "",
+        Members: "",
+        Period: period,
+        Amount: amount,
+      });
+    });
+  };
+  categories.forEach((c) => pushOverrides(c, "Category"));
+  budgetGroups.forEach((g) => pushOverrides(g, "Group"));
+
+  const csv = Papa.unparse(rows, { columns: BUDGET_BACKUP_COLUMNS });
+  const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = `budget-backup-${new Date().toISOString().slice(0, 10)}.csv`;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+}
+
+function buildBudgetFromRows(rows, currentCategories, currentBudgetGroups) {
+  let plannedIncome = null;
+  const categoryUpdates = {};
+  const groupDefs = {};
+  const categoryOverrides = {};
+  const groupOverrides = {};
+  const invalid = [];
+
+  const normPeriod = (v) => (String(v || "").trim().toLowerCase() === "weekly" ? "weekly" : "monthly");
+  const normType = (v) => (String(v || "").trim().toLowerCase() === "accumulate" ? "accumulate" : "spend");
+
+  rows.forEach((row, idx) => {
+    const rowType = String(row["Row Type"] || "").trim();
+    if (!rowType) return;
+
+    if (rowType === "Settings") {
+      const amt = parseMoney(row["Amount"]);
+      if (amt != null) plannedIncome = amt;
+    } else if (rowType === "Category") {
+      const name = String(row["Name"] || "").trim();
+      if (!name) {
+        invalid.push({ rowIndex: idx, reasons: ["missing category name"] });
+        return;
+      }
+      const rawAmount = row["Budget Amount"];
+      categoryUpdates[name] = {
+        budgetAmount: rawAmount !== "" && rawAmount != null ? parseMoney(rawAmount) : null,
+        budgetPeriod: normPeriod(row["Budget Period"]),
+        budgetType: normType(row["Budget Type"]),
+        accumulateTarget: row["Accumulate Target"] !== "" && row["Accumulate Target"] != null ? parseMoney(row["Accumulate Target"]) : null,
+      };
+    } else if (rowType === "Group") {
+      const name = String(row["Name"] || "").trim();
+      if (!name) {
+        invalid.push({ rowIndex: idx, reasons: ["missing group name"] });
+        return;
+      }
+      const rawAmount = row["Budget Amount"];
+      const members = String(row["Members"] || "")
+        .split("|")
+        .map((s) => s.trim())
+        .filter(Boolean);
+      groupDefs[name] = {
+        budgetAmount: rawAmount !== "" && rawAmount != null ? parseMoney(rawAmount) : null,
+        budgetPeriod: normPeriod(row["Budget Period"]),
+        budgetType: normType(row["Budget Type"]),
+        accumulateTarget: row["Accumulate Target"] !== "" && row["Accumulate Target"] != null ? parseMoney(row["Accumulate Target"]) : null,
+        memberNames: members,
+      };
+    } else if (rowType === "Override") {
+      const itemType = String(row["Item Type"] || "").trim();
+      const name = String(row["Name"] || "").trim();
+      const period = String(row["Period"] || "").trim();
+      const amt = parseMoney(row["Amount"]);
+      if (name && period && amt != null) {
+        const bucket = itemType === "Group" ? groupOverrides : categoryOverrides;
+        if (!bucket[name]) bucket[name] = {};
+        bucket[name][period] = amt;
+      } else {
+        invalid.push({ rowIndex: idx, reasons: ["incomplete override row"] });
+      }
+    } else {
+      invalid.push({ rowIndex: idx, reasons: [`unrecognized row type "${rowType}"`] });
+    }
+  });
+
+  const existingCategoryNames = new Set(currentCategories.map((c) => c.name));
+  const updatedExistingCategories = currentCategories.map((c) => {
+    const upd = categoryUpdates[c.name];
+    if (!upd) return c;
+    return {
+      ...c,
+      budgetAmount: upd.budgetAmount,
+      budgetPeriod: upd.budgetPeriod,
+      budgetType: upd.budgetType,
+      accumulateTarget: upd.accumulateTarget,
+      accumulateActuals: categoryOverrides[c.name] || c.accumulateActuals || {},
+    };
+  });
+  const newCategoryEntries = Object.keys(categoryUpdates)
+    .filter((name) => !existingCategoryNames.has(name))
+    .map((name) => {
+      const upd = categoryUpdates[name];
+      return {
+        id: uid(),
+        name,
+        excluded: false,
+        budgetAmount: upd.budgetAmount,
+        budgetPeriod: upd.budgetPeriod,
+        budgetType: upd.budgetType,
+        accumulateTarget: upd.accumulateTarget,
+        accumulateActuals: categoryOverrides[name] || {},
+        createdAt: new Date().toISOString(),
+      };
+    });
+  const nextCategories = [...updatedExistingCategories, ...newCategoryEntries];
+
+  const nameToId = {};
+  nextCategories.forEach((c) => {
+    nameToId[c.name] = c.id;
+  });
+
+  const existingGroupNames = new Set(currentBudgetGroups.map((g) => g.name));
+  const updatedExistingGroups = currentBudgetGroups.map((g) => {
+    const def = groupDefs[g.name];
+    if (!def) return g;
+    return {
+      ...g,
+      budgetAmount: def.budgetAmount,
+      budgetPeriod: def.budgetPeriod,
+      budgetType: def.budgetType,
+      accumulateTarget: def.accumulateTarget,
+      categoryIds: def.memberNames.map((n) => nameToId[n]).filter(Boolean),
+      accumulateActuals: groupOverrides[g.name] || g.accumulateActuals || {},
+    };
+  });
+  const newGroupEntries = Object.keys(groupDefs)
+    .filter((name) => !existingGroupNames.has(name))
+    .map((name) => {
+      const def = groupDefs[name];
+      return {
+        id: uid(),
+        name,
+        budgetAmount: def.budgetAmount,
+        budgetPeriod: def.budgetPeriod,
+        budgetType: def.budgetType,
+        accumulateTarget: def.accumulateTarget,
+        categoryIds: def.memberNames.map((n) => nameToId[n]).filter(Boolean),
+        accumulateActuals: groupOverrides[name] || {},
+        createdAt: new Date().toISOString(),
+      };
+    });
+  const nextBudgetGroups = [...updatedExistingGroups, ...newGroupEntries];
+
+  return {
+    plannedIncome,
+    categories: nextCategories,
+    budgetGroups: nextBudgetGroups,
+    invalid,
+    categoryCount: Object.keys(categoryUpdates).length,
+    groupCount: Object.keys(groupDefs).length,
+  };
+}
+
 function computeDuplicates(transactions) {
   const map = {};
   transactions.forEach((t) => {
@@ -543,6 +858,16 @@ const STYLES = `
   flex-direction: column;
   gap: 2px;
 }
+
+.sidebar-nav-label {
+  font-size: 10.5px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--ink-muted);
+  font-weight: 600;
+  padding: 14px 10px 4px;
+}
+.sidebar-nav-label:first-child { padding-top: 2px; }
 
 .nav-btn {
   display: flex;
@@ -889,6 +1214,7 @@ const STYLES = `
   .sidebar-brand { flex-shrink: 0; }
   .sidebar-nav { flex-direction: row; }
   .sidebar-nav .nav-btn { flex-shrink: 0; }
+  .sidebar-nav-label { display: none; }
   .sidebar-stats { display: none; }
   .main { padding: 18px 14px 50px; }
   .form-grid { grid-template-columns: 1fr; }
@@ -1569,6 +1895,10 @@ function CategoryCard({ category, categories, budgetGroups, txCount, onRename, o
     category.budgetAmount != null ? String(category.budgetAmount) : ""
   );
   const [budgetPeriodDraft, setBudgetPeriodDraft] = useState(category.budgetPeriod || "monthly");
+  const [budgetTypeDraft, setBudgetTypeDraft] = useState(category.budgetType || "spend");
+  const [accumulateTargetDraft, setAccumulateTargetDraft] = useState(
+    category.accumulateTarget != null ? String(category.accumulateTarget) : ""
+  );
 
   const otherCategories = categories.filter((c) => c.id !== category.id);
   const memberOfGroup = (budgetGroups || []).find((g) => (g.categoryIds || []).includes(category.id));
@@ -1576,7 +1906,15 @@ function CategoryCard({ category, categories, budgetGroups, txCount, onRename, o
   function handleSaveBudget() {
     const trimmed = budgetAmountDraft.trim();
     const amount = trimmed === "" ? null : parseMoney(trimmed);
-    onSetBudget(category.id, amount != null && amount > 0 ? amount : null, budgetPeriodDraft);
+    const targetTrimmed = accumulateTargetDraft.trim();
+    const target = targetTrimmed === "" ? null : parseMoney(targetTrimmed);
+    onSetBudget(
+      category.id,
+      amount != null && amount > 0 ? amount : null,
+      budgetPeriodDraft,
+      budgetTypeDraft,
+      target != null && target > 0 ? target : null
+    );
   }
 
   function startEdit() {
@@ -1651,23 +1989,43 @@ function CategoryCard({ category, categories, budgetGroups, txCount, onRename, o
             </span>
           </div>
         ) : (
-          <div className="budget-row">
-            <span className="budget-row-label">Budget:</span>
-            <input
-              type="text"
-              className="budget-amount-input"
-              placeholder="none"
-              value={budgetAmountDraft}
-              onChange={(e) => setBudgetAmountDraft(e.target.value)}
-            />
-            <select value={budgetPeriodDraft} onChange={(e) => setBudgetPeriodDraft(e.target.value)}>
-              <option value="weekly">per week</option>
-              <option value="monthly">per month</option>
-            </select>
-            <button className="btn btn-ghost btn-sm" onClick={handleSaveBudget}>
-              Save
-            </button>
-          </div>
+          <>
+            <div className="budget-row">
+              <span className="budget-row-label">Budget:</span>
+              <input
+                type="text"
+                className="budget-amount-input"
+                placeholder="none"
+                value={budgetAmountDraft}
+                onChange={(e) => setBudgetAmountDraft(e.target.value)}
+              />
+              <select value={budgetPeriodDraft} onChange={(e) => setBudgetPeriodDraft(e.target.value)}>
+                <option value="weekly">per week</option>
+                <option value="monthly">per month</option>
+              </select>
+              <select value={budgetTypeDraft} onChange={(e) => setBudgetTypeDraft(e.target.value)}>
+                <option value="spend">Spend</option>
+                <option value="accumulate">Accumulate</option>
+              </select>
+              <button className="btn btn-ghost btn-sm" onClick={handleSaveBudget}>
+                Save
+              </button>
+            </div>
+            {budgetTypeDraft === "accumulate" && (
+              <div className="budget-row" style={{ marginTop: 4 }}>
+                <span className="budget-row-label" style={{ fontWeight: 400 }}>
+                  Target (optional):
+                </span>
+                <input
+                  type="text"
+                  className="budget-amount-input"
+                  placeholder="e.g. 3000"
+                  value={accumulateTargetDraft}
+                  onChange={(e) => setAccumulateTargetDraft(e.target.value)}
+                />
+              </div>
+            )}
+          </>
         )}
       </div>
       <div className="row-actions">
@@ -2307,11 +2665,37 @@ function ReportsView({ transactions, accounts, categories, onGoCategories }) {
 /* Budget view                                                          */
 /* ------------------------------------------------------------------ */
 
-function BudgetProgressCard({ item, spent }) {
+function BudgetProgressCard({ item, spent, cumulativeSaved, periodKey, onSetActual }) {
   const budget = item.budgetAmount;
   const ratio = budget > 0 ? spent / budget : 0;
-  const barColor = ratio >= 1 ? "var(--expense)" : ratio >= 0.8 ? "var(--warn-border)" : "var(--income)";
+  const isAccumulate = item.budgetType === "accumulate";
+  const barColor = isAccumulate
+    ? ratio >= 1
+      ? "var(--income)"
+      : ratio >= 0.8
+      ? "var(--warn-border)"
+      : "var(--expense)"
+    : ratio >= 1
+    ? "var(--expense)"
+    : ratio >= 0.8
+    ? "var(--warn-border)"
+    : "var(--income)";
   const remaining = budget - spent;
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState(String(spent));
+
+  function startEdit() {
+    setDraft(String(spent));
+    setEditing(true);
+  }
+
+  function saveEdit() {
+    const amount = parseMoney(draft.trim());
+    if (amount != null) onSetActual(item.id, periodKey, amount);
+    setEditing(false);
+  }
+
+  const targetRatio = isAccumulate && item.accumulateTarget > 0 ? Math.min(cumulativeSaved / item.accumulateTarget, 1) : null;
 
   return (
     <div className="budget-card">
@@ -2319,6 +2703,11 @@ function BudgetProgressCard({ item, spent }) {
         <span className="budget-card-name">
           {item.name}
           {item.isGroup && <span className="budget-group-tag">group</span>}
+          {isAccumulate && (
+            <span className="budget-group-tag" style={{ borderColor: "var(--income)", color: "var(--income)" }}>
+              saving
+            </span>
+          )}
         </span>
         <span className="budget-card-period">{item.budgetPeriod === "weekly" ? "this week" : "this month"}</span>
       </div>
@@ -2326,15 +2715,67 @@ function BudgetProgressCard({ item, spent }) {
         <div className="budget-bar-fill" style={{ width: `${Math.min(Math.max(ratio, 0), 1) * 100}%`, background: barColor }} />
       </div>
       <div className="budget-card-figures">
-        <span className={ratio >= 1 ? "money-out" : ""}>{formatMoney(spent)}</span>
-        <span className="muted-cell"> of {formatMoney(budget)}</span>
-        <br />
-        {remaining >= 0 ? (
-          <span className="money-in">{formatMoney(remaining)} left</span>
+        {editing ? (
+          <div style={{ display: "flex", gap: 6, alignItems: "center", marginBottom: 4 }}>
+            <input
+              type="text"
+              value={draft}
+              autoFocus
+              onChange={(e) => setDraft(e.target.value)}
+              style={{ width: 80, fontFamily: "inherit", fontSize: 13, padding: "4px 6px", border: "1px solid var(--border)", borderRadius: 4 }}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") saveEdit();
+                if (e.key === "Escape") setEditing(false);
+              }}
+            />
+            <button className="btn btn-primary btn-sm" onClick={saveEdit}>
+              Save
+            </button>
+            <button className="btn btn-ghost btn-sm" onClick={() => setEditing(false)}>
+              Cancel
+            </button>
+          </div>
         ) : (
-          <span className="money-out">{formatMoney(Math.abs(remaining))} over</span>
+          <>
+            <span className={!isAccumulate && ratio >= 1 ? "money-out" : ""}>{formatMoney(spent)}</span>
+            <span className="muted-cell"> {isAccumulate ? "set aside of" : "of"} {formatMoney(budget)}{isAccumulate ? " planned" : ""}</span>
+            {isAccumulate && (
+              <button className="btn btn-ghost btn-sm" onClick={startEdit} style={{ marginLeft: 6, padding: "1px 6px" }}>
+                Adjust
+              </button>
+            )}
+            <br />
+            {isAccumulate ? (
+              remaining > 0 ? (
+                <span className="money-out">{formatMoney(remaining)} short this period</span>
+              ) : (
+                <span className="money-in">On track{remaining < 0 ? ` (+${formatMoney(Math.abs(remaining))})` : ""}</span>
+              )
+            ) : remaining >= 0 ? (
+              <span className="money-in">{formatMoney(remaining)} left</span>
+            ) : (
+              <span className="money-out">{formatMoney(Math.abs(remaining))} over</span>
+            )}
+          </>
         )}
       </div>
+      {isAccumulate && (
+        <div style={{ marginTop: 10, paddingTop: 10, borderTop: "1px dashed var(--border)" }}>
+          {item.accumulateTarget > 0 ? (
+            <>
+              <div className="budget-bar-track" style={{ height: 6 }}>
+                <div className="budget-bar-fill" style={{ width: `${targetRatio * 100}%`, background: "var(--accent)" }} />
+              </div>
+              <div className="muted-cell" style={{ fontSize: 12 }}>
+                {formatMoney(cumulativeSaved)} saved of {formatMoney(item.accumulateTarget)} goal (
+                {Math.round(targetRatio * 100)}%)
+              </div>
+            </>
+          ) : (
+            <div className="muted-cell" style={{ fontSize: 12 }}>{formatMoney(cumulativeSaved)} saved so far — no target set</div>
+          )}
+        </div>
+      )}
     </div>
   );
 }
@@ -2365,8 +2806,20 @@ function BudgetHistoryTable({ budgeted, periods, spendMap, periodLabelFn }) {
               {periods.map((p) => {
                 const spent = spendMap[c.id]?.[p] || 0;
                 const ratio = c.budgetAmount > 0 ? spent / c.budgetAmount : 0;
+                const isAccumulate = c.budgetType === "accumulate";
+                const cls = isAccumulate
+                  ? ratio >= 1
+                    ? "money-in"
+                    : ratio >= 0.8
+                    ? ""
+                    : "money-out"
+                  : ratio >= 1
+                  ? "money-out"
+                  : ratio >= 0.8
+                  ? ""
+                  : "money-in";
                 return (
-                  <td key={p} className={ratio >= 1 ? "money-out" : ratio >= 0.8 ? "" : "money-in"}>
+                  <td key={p} className={cls}>
                     {formatMoney(spent)}
                   </td>
                 );
@@ -2421,33 +2874,43 @@ function BudgetTrendChart({ title, periods, budgeted, spendMap, periodLabelFn })
   );
 }
 
-function BudgetView({ transactions, categories, budgetGroups, onGoCategories }) {
-  const budgetItems = useMemo(() => {
-    const groupedCategoryIds = new Set();
-    budgetGroups.forEach((g) => (g.categoryIds || []).forEach((id) => groupedCategoryIds.add(id)));
+function buildBudgetItems(categories, budgetGroups) {
+  const groupedCategoryIds = new Set();
+  budgetGroups.forEach((g) => (g.categoryIds || []).forEach((id) => groupedCategoryIds.add(id)));
 
-    const groupItems = budgetGroups.map((g) => ({
-      id: "group:" + g.id,
-      name: g.name,
-      budgetAmount: g.budgetAmount,
-      budgetPeriod: g.budgetPeriod,
-      categoryIds: new Set(g.categoryIds || []),
-      isGroup: true,
+  const groupItems = budgetGroups.map((g) => ({
+    id: "group:" + g.id,
+    name: g.name,
+    budgetAmount: g.budgetAmount,
+    budgetPeriod: g.budgetPeriod,
+    budgetType: g.budgetType || "spend",
+    accumulateTarget: g.accumulateTarget,
+    accumulateActuals: g.accumulateActuals || {},
+    createdAt: g.createdAt,
+    categoryIds: new Set(g.categoryIds || []),
+    isGroup: true,
+  }));
+
+  const categoryItems = categories
+    .filter((c) => !groupedCategoryIds.has(c.id))
+    .map((c) => ({
+      id: "cat:" + c.id,
+      name: c.name,
+      budgetAmount: c.budgetAmount,
+      budgetPeriod: c.budgetPeriod,
+      budgetType: c.budgetType || "spend",
+      accumulateTarget: c.accumulateTarget,
+      accumulateActuals: c.accumulateActuals || {},
+      createdAt: c.createdAt,
+      categoryIds: new Set([c.id]),
+      isGroup: false,
     }));
 
-    const categoryItems = categories
-      .filter((c) => !groupedCategoryIds.has(c.id))
-      .map((c) => ({
-        id: "cat:" + c.id,
-        name: c.name,
-        budgetAmount: c.budgetAmount,
-        budgetPeriod: c.budgetPeriod,
-        categoryIds: new Set([c.id]),
-        isGroup: false,
-      }));
+  return [...groupItems, ...categoryItems];
+}
 
-    return [...groupItems, ...categoryItems];
-  }, [categories, budgetGroups]);
+function BudgetView({ transactions, categories, budgetGroups, onSetActual, onGoCategories }) {
+  const budgetItems = useMemo(() => buildBudgetItems(categories, budgetGroups), [categories, budgetGroups]);
 
   const weeklyData = useMemo(
     () => computeBudgetPeriodData(transactions, budgetItems, "weekly"),
@@ -2471,13 +2934,19 @@ function BudgetView({ transactions, categories, budgetGroups, onGoCategories }) 
     );
   }
 
+  function cumulativeFor(data, itemId) {
+    if (!data) return 0;
+    const cells = data.spendMap[itemId] || {};
+    return Object.values(cells).reduce((s, v) => s + v, 0);
+  }
+
   return (
     <div>
       <div className="view-header">
         <h1>Budget</h1>
         <p>
           How you're tracking against what you've budgeted, by category or group. "Spent" here means money out
-          minus money in.
+          minus money in — for Accumulate items, it means what's been set aside.
         </p>
       </div>
 
@@ -2486,7 +2955,14 @@ function BudgetView({ transactions, categories, budgetGroups, onGoCategories }) 
           <h3 style={{ marginTop: 0, marginBottom: 10, fontSize: 16 }}>This week</h3>
           <div className="budget-card-grid">
             {weeklyData.budgeted.map((item) => (
-              <BudgetProgressCard key={item.id} item={item} spent={weeklyData.spendMap[item.id]?.[weeklyData.currentKey] || 0} />
+              <BudgetProgressCard
+                key={item.id}
+                item={item}
+                spent={weeklyData.spendMap[item.id]?.[weeklyData.currentKey] || 0}
+                cumulativeSaved={cumulativeFor(weeklyData, item.id)}
+                periodKey={weeklyData.currentKey}
+                onSetActual={onSetActual}
+              />
             ))}
           </div>
         </>
@@ -2497,7 +2973,14 @@ function BudgetView({ transactions, categories, budgetGroups, onGoCategories }) 
           <h3 style={{ marginBottom: 10, fontSize: 16 }}>This month</h3>
           <div className="budget-card-grid">
             {monthlyData.budgeted.map((item) => (
-              <BudgetProgressCard key={item.id} item={item} spent={monthlyData.spendMap[item.id]?.[monthlyData.currentKey] || 0} />
+              <BudgetProgressCard
+                key={item.id}
+                item={item}
+                spent={monthlyData.spendMap[item.id]?.[monthlyData.currentKey] || 0}
+                cumulativeSaved={cumulativeFor(monthlyData, item.id)}
+                periodKey={monthlyData.currentKey}
+                onSetActual={onSetActual}
+              />
             ))}
           </div>
         </>
@@ -2568,6 +3051,10 @@ function BudgetGroupCard({ group, allCategories, onRename, onSetBudget, onAddCat
     group.budgetAmount != null ? String(group.budgetAmount) : ""
   );
   const [budgetPeriodDraft, setBudgetPeriodDraft] = useState(group.budgetPeriod || "monthly");
+  const [budgetTypeDraft, setBudgetTypeDraft] = useState(group.budgetType || "spend");
+  const [accumulateTargetDraft, setAccumulateTargetDraft] = useState(
+    group.accumulateTarget != null ? String(group.accumulateTarget) : ""
+  );
   const [addCategoryId, setAddCategoryId] = useState("");
 
   const memberCategories = allCategories.filter((c) => (group.categoryIds || []).includes(c.id));
@@ -2587,7 +3074,15 @@ function BudgetGroupCard({ group, allCategories, onRename, onSetBudget, onAddCat
   function handleSaveBudget() {
     const trimmed = budgetAmountDraft.trim();
     const amount = trimmed === "" ? null : parseMoney(trimmed);
-    onSetBudget(group.id, amount != null && amount > 0 ? amount : null, budgetPeriodDraft);
+    const targetTrimmed = accumulateTargetDraft.trim();
+    const target = targetTrimmed === "" ? null : parseMoney(targetTrimmed);
+    onSetBudget(
+      group.id,
+      amount != null && amount > 0 ? amount : null,
+      budgetPeriodDraft,
+      budgetTypeDraft,
+      target != null && target > 0 ? target : null
+    );
   }
 
   function handleAddCategory() {
@@ -2692,10 +3187,28 @@ function BudgetGroupCard({ group, allCategories, onRename, onSetBudget, onAddCat
           <option value="weekly">per week</option>
           <option value="monthly">per month</option>
         </select>
+        <select value={budgetTypeDraft} onChange={(e) => setBudgetTypeDraft(e.target.value)}>
+          <option value="spend">Spend</option>
+          <option value="accumulate">Accumulate</option>
+        </select>
         <button className="btn btn-ghost btn-sm" onClick={handleSaveBudget}>
           Save
         </button>
       </div>
+      {budgetTypeDraft === "accumulate" && (
+        <div className="budget-row" style={{ marginTop: 4 }}>
+          <span className="budget-row-label" style={{ fontWeight: 400 }}>
+            Target (optional):
+          </span>
+          <input
+            type="text"
+            className="budget-amount-input"
+            placeholder="e.g. 3000"
+            value={accumulateTargetDraft}
+            onChange={(e) => setAccumulateTargetDraft(e.target.value)}
+          />
+        </div>
+      )}
     </div>
   );
 }
@@ -2766,16 +3279,194 @@ function BudgetGroupsView({ budgetGroups, categories, onAdd, onRename, onDelete,
 }
 
 /* ------------------------------------------------------------------ */
+/* Planning view                                                        */
+/* ------------------------------------------------------------------ */
+
+function PlanningView({ transactions, categories, budgetGroups, plannedIncome, onSetPlannedIncome }) {
+  const [draft, setDraft] = useState(plannedIncome != null ? String(plannedIncome) : "");
+  const [editing, setEditing] = useState(plannedIncome == null);
+
+  const budgetItems = useMemo(() => buildBudgetItems(categories, budgetGroups), [categories, budgetGroups]);
+  const budgeted = budgetItems.filter((b) => b.budgetAmount != null && b.budgetAmount > 0);
+  const totalAssigned = budgeted.reduce((s, b) => s + monthlyEquivalent(b.budgetAmount, b.budgetPeriod), 0);
+  const unassigned = (plannedIncome || 0) - totalAssigned;
+
+  const monthlyActualIncome = useMemo(() => {
+    const excludedIds = new Set(categories.filter((c) => c.excluded).map((c) => c.id));
+    const byMonth = {};
+    transactions.forEach((t) => {
+      if (!t.date) return;
+      if (t.categoryId && excludedIds.has(t.categoryId)) return;
+      const mKey = getMonthStartISO(t.date);
+      byMonth[mKey] = (byMonth[mKey] || 0) + (t.amountIn || 0);
+    });
+    return byMonth;
+  }, [transactions, categories]);
+
+  const currentMonthKey = getMonthStartISO(new Date().toISOString().slice(0, 10));
+  const completeMonths = Object.keys(monthlyActualIncome)
+    .filter((k) => k < currentMonthKey)
+    .sort();
+  const recentMonths = completeMonths.slice(-6);
+  const avgActualIncome =
+    recentMonths.length > 0
+      ? recentMonths.reduce((s, k) => s + monthlyActualIncome[k], 0) / recentMonths.length
+      : null;
+  const incomeDriftPct =
+    avgActualIncome != null && plannedIncome > 0 ? ((avgActualIncome - plannedIncome) / plannedIncome) * 100 : null;
+  const showIncomeDriftWarning = recentMonths.length >= 2 && incomeDriftPct != null && Math.abs(incomeDriftPct) >= 10;
+
+  function handleSave() {
+    const amount = draft.trim() === "" ? null : parseMoney(draft.trim());
+    onSetPlannedIncome(amount != null && amount > 0 ? amount : null);
+    setEditing(false);
+  }
+
+  return (
+    <div>
+      <div className="view-header">
+        <h1>Planning</h1>
+        <p>Set your planned monthly income, then see how much of it is already assigned across your budgets.</p>
+      </div>
+
+      <div className="panel" style={{ marginBottom: 16 }}>
+        <h3 style={{ marginTop: 0, fontSize: 16 }}>Planned monthly income</h3>
+        {editing ? (
+          <div style={{ display: "flex", gap: 8 }}>
+            <input
+              type="text"
+              placeholder="e.g. 4000"
+              value={draft}
+              onChange={(e) => setDraft(e.target.value)}
+              style={{
+                fontFamily: "inherit",
+                fontSize: 14,
+                padding: "8px 10px",
+                border: "1px solid var(--border)",
+                borderRadius: "var(--radius)",
+                width: 160,
+              }}
+            />
+            <button className="btn btn-primary" onClick={handleSave}>
+              Save
+            </button>
+            {plannedIncome != null && (
+              <button
+                className="btn btn-ghost"
+                onClick={() => {
+                  setDraft(String(plannedIncome));
+                  setEditing(false);
+                }}
+              >
+                Cancel
+              </button>
+            )}
+          </div>
+        ) : (
+          <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+            <span style={{ fontFamily: "'Fraunces', serif", fontSize: 22 }}>{formatMoney(plannedIncome)}</span>
+            <button
+              className="btn btn-ghost btn-sm"
+              onClick={() => {
+                setDraft(String(plannedIncome));
+                setEditing(true);
+              }}
+            >
+              Edit
+            </button>
+          </div>
+        )}
+      </div>
+
+      {plannedIncome != null && (
+        <>
+          <div className="summary-row">
+            <StatBlock value={formatMoney(plannedIncome)} label="Planned income" />
+            <StatBlock value={formatMoney(totalAssigned)} label="Assigned to budgets" />
+            <StatBlock value={formatMoney(unassigned)} label={unassigned >= 0 ? "Unassigned" : "Over-assigned"} />
+          </div>
+
+          {unassigned < 0 && (
+            <div className="error-banner">
+              You've assigned {formatMoney(Math.abs(unassigned))} more than your planned income covers.
+            </div>
+          )}
+
+          {showIncomeDriftWarning && (
+            <div className="error-banner">
+              Your actual income has averaged {formatMoney(avgActualIncome)}/month over the last{" "}
+              {recentMonths.length} month{recentMonths.length === 1 ? "" : "s"} — {Math.abs(Math.round(incomeDriftPct))}%{" "}
+              {incomeDriftPct > 0 ? "above" : "below"} your planned {formatMoney(plannedIncome)}. Worth updating
+              your plan.
+            </div>
+          )}
+
+          {budgeted.length === 0 ? (
+            <div className="panel">
+              <div className="hint">No budgets assigned yet — set one from Categories or Budget Groups.</div>
+            </div>
+          ) : (
+            <div className="panel" style={{ padding: 0, overflowX: "auto" }}>
+              <table className="pivot-table">
+                <thead>
+                  <tr>
+                    <th>Category / Group</th>
+                    <th>Budgeted</th>
+                    <th>Monthly equivalent</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {budgeted.map((b) => (
+                    <tr key={b.id}>
+                      <td className="pivot-row-label">
+                        {b.name}
+                        {b.isGroup && <span className="budget-group-tag">group</span>}
+                        {b.budgetType === "accumulate" && (
+                          <span className="budget-group-tag" style={{ borderColor: "var(--income)", color: "var(--income)" }}>
+                            saving
+                          </span>
+                        )}
+                      </td>
+                      <td>
+                        {formatMoney(b.budgetAmount)} / {b.budgetPeriod === "weekly" ? "week" : "month"}
+                      </td>
+                      <td>{formatMoney(monthlyEquivalent(b.budgetAmount, b.budgetPeriod))}</td>
+                    </tr>
+                  ))}
+                </tbody>
+                <tfoot>
+                  <tr>
+                    <td className="pivot-row-label">Total</td>
+                    <td></td>
+                    <td style={{ fontWeight: 700 }}>{formatMoney(totalAssigned)}</td>
+                  </tr>
+                </tfoot>
+              </table>
+            </div>
+          )}
+        </>
+      )}
+    </div>
+  );
+}
+
+/* ------------------------------------------------------------------ */
 /* Backup view                                                          */
 /* ------------------------------------------------------------------ */
 
-function BackupView({ accounts, transactions, categories, onRestore }) {
+function BackupView({ accounts, transactions, categories, budgetGroups, plannedIncome, onRestore, onRestoreBudget }) {
   const [fileInfo, setFileInfo] = useState(null);
   const [preview, setPreview] = useState(null);
   const [parseError, setParseError] = useState(null);
   const [confirming, setConfirming] = useState(false);
   const [restoring, setRestoring] = useState(false);
   const fileInputRef = useRef(null);
+
+  const [budgetPreview, setBudgetPreview] = useState(null);
+  const [budgetParseError, setBudgetParseError] = useState(null);
+  const [budgetApplying, setBudgetApplying] = useState(false);
+  const [budgetApplied, setBudgetApplied] = useState(false);
+  const budgetFileInputRef = useRef(null);
 
   function handleExport() {
     exportBackupCSV(accounts, transactions, categories);
@@ -2815,6 +3506,45 @@ function BackupView({ accounts, transactions, categories, onRestore }) {
     if (!preview) return;
     setRestoring(true);
     onRestore(preview.accounts, preview.categories, preview.transactions);
+  }
+
+  function handleExportBudget() {
+    exportBudgetCSV(categories, budgetGroups, plannedIncome);
+  }
+
+  async function handleBudgetFile(e) {
+    const file = e.target.files && e.target.files[0];
+    if (!file) return;
+    setBudgetParseError(null);
+    setBudgetPreview(null);
+    setBudgetApplied(false);
+    try {
+      const { headers, rows } = await readFileAsRows(file);
+      if (!headers.includes("Row Type") || !headers.includes("Name")) {
+        throw new Error(
+          'This doesn\'t look like a budget backup file — expected columns like "Row Type" and "Name". Use a file from the Export button below.'
+        );
+      }
+      setBudgetPreview(buildBudgetFromRows(rows, categories, budgetGroups));
+    } catch (err) {
+      setBudgetParseError(err.message || "Could not read this file.");
+    }
+  }
+
+  function resetBudgetRestore() {
+    setBudgetPreview(null);
+    setBudgetParseError(null);
+    setBudgetApplying(false);
+    setBudgetApplied(false);
+    if (budgetFileInputRef.current) budgetFileInputRef.current.value = "";
+  }
+
+  function handleApplyBudget() {
+    if (!budgetPreview) return;
+    setBudgetApplying(true);
+    onRestoreBudget(budgetPreview.categories, budgetPreview.budgetGroups, budgetPreview.plannedIncome);
+    setBudgetApplying(false);
+    setBudgetApplied(true);
   }
 
   return (
@@ -2912,6 +3642,78 @@ function BackupView({ accounts, transactions, categories, onRestore }) {
           </div>
         )}
       </div>
+
+      <div className="panel">
+        <h3 style={{ marginTop: 0 }}>Budget data</h3>
+        <p className="hint" style={{ marginBottom: 12 }}>
+          A separate backup just for your budget setup — category and group budgets, Accumulate targets and
+          what's actually been set aside each period, and your planned income. Handy for saving your setup
+          before experimenting, or restoring it if something's lost.
+        </p>
+        <button
+          className="btn btn-primary"
+          onClick={handleExportBudget}
+          disabled={categories.length === 0 && budgetGroups.length === 0 && plannedIncome == null}
+        >
+          Download budget setup as CSV
+        </button>
+
+        <div style={{ marginTop: 18, paddingTop: 18, borderTop: "1px dashed var(--border)" }}>
+          <p className="hint" style={{ marginBottom: 12 }}>
+            Applying a budget file <strong>updates or creates</strong> categories and groups by name — unlike
+            the restore above, it never deletes anything not mentioned in the file.
+          </p>
+
+          {budgetParseError && <div className="error-banner">{budgetParseError}</div>}
+
+          {!budgetPreview && (
+            <label className="file-input-label">
+              <input ref={budgetFileInputRef} type="file" accept=".csv,.xlsx,.xls" onChange={handleBudgetFile} />
+              <span className="btn btn-secondary">Choose budget file</span>
+            </label>
+          )}
+
+          {budgetPreview && !budgetApplied && (
+            <>
+              <div className="summary-row">
+                <StatBlock value={budgetPreview.categoryCount} label="Categories in file" />
+                <StatBlock value={budgetPreview.groupCount} label="Groups in file" />
+                <StatBlock value={budgetPreview.plannedIncome != null ? formatMoney(budgetPreview.plannedIncome) : "—"} label="Planned income" />
+                <StatBlock value={budgetPreview.invalid.length} label="Rows skipped" />
+              </div>
+
+              {budgetPreview.invalid.length > 0 && (
+                <div className="invalid-list" style={{ marginBottom: 14 }}>
+                  {budgetPreview.invalid.slice(0, 50).map((inv) => (
+                    <div className="invalid-row" key={inv.rowIndex}>
+                      <span>Row {inv.rowIndex + 2}</span>
+                      <span className="reason">{inv.reasons.join(", ")}</span>
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              <div className="actions-row">
+                <button className="btn btn-primary" onClick={handleApplyBudget} disabled={budgetApplying}>
+                  {budgetApplying ? "Applying…" : "Apply budget file"}
+                </button>
+                <button className="btn btn-secondary" onClick={resetBudgetRestore}>
+                  Cancel
+                </button>
+              </div>
+            </>
+          )}
+
+          {budgetApplied && (
+            <div>
+              <p className="hint" style={{ marginBottom: 10 }}>Applied.</p>
+              <button className="btn btn-secondary" onClick={resetBudgetRestore}>
+                Choose another file
+              </button>
+            </div>
+          )}
+        </div>
+      </div>
     </div>
   );
 }
@@ -2926,6 +3728,7 @@ function App({ householdName } = {}) {
   const [transactions, setTransactions] = useState([]);
   const [categories, setCategories] = useState([]);
   const [budgetGroups, setBudgetGroups] = useState([]);
+  const [plannedIncome, setPlannedIncome] = useState(null);
   const [view, setView] = useState("upload");
   const [saveError, setSaveError] = useState(null);
   const [toast, setToast] = useState(null);
@@ -2941,6 +3744,7 @@ function App({ householdName } = {}) {
       setTransactions(data.transactions || []);
       setCategories(data.categories || []);
       setBudgetGroups(data.budgetGroups || []);
+      setPlannedIncome(data.plannedIncome != null ? data.plannedIncome : null);
       setLoaded(true);
       if (nextAccounts.length > 0) setView("transactions");
     });
@@ -2955,12 +3759,13 @@ function App({ householdName } = {}) {
     return () => clearTimeout(timer);
   }, [toast]);
 
-  const persist = useCallback(async (nextAccounts, nextTransactions, nextCategories, nextBudgetGroups) => {
+  const persist = useCallback(async (nextAccounts, nextTransactions, nextCategories, nextBudgetGroups, nextPlannedIncome) => {
     setAccounts(nextAccounts);
     setTransactions(nextTransactions);
     setCategories(nextCategories);
     setBudgetGroups(nextBudgetGroups);
-    const ok = await saveData(nextAccounts, nextTransactions, nextCategories, nextBudgetGroups);
+    setPlannedIncome(nextPlannedIncome);
+    const ok = await saveData(nextAccounts, nextTransactions, nextCategories, nextBudgetGroups, nextPlannedIncome);
     setSaveError(ok ? null : "Your last change couldn't be saved locally — it may not persist after reload.");
   }, []);
 
@@ -3004,20 +3809,20 @@ function App({ householdName } = {}) {
         );
       }
       const nextTransactions = [...transactions, ...valid];
-      persist(nextAccounts, nextTransactions, categories, budgetGroups);
+      persist(nextAccounts, nextTransactions, categories, budgetGroups, plannedIncome);
       setView("transactions");
       setToast(`Imported ${valid.length} transaction${valid.length === 1 ? "" : "s"} into ${accountMeta.name}.`);
     },
-    [accounts, transactions, categories, budgetGroups, persist]
+    [accounts, transactions, categories, budgetGroups, plannedIncome, persist]
   );
 
   const handleDeleteAccount = useCallback(
     (accountId) => {
       const nextAccounts = accounts.filter((a) => a.id !== accountId);
       const nextTransactions = transactions.filter((t) => t.accountId !== accountId);
-      persist(nextAccounts, nextTransactions, categories, budgetGroups);
+      persist(nextAccounts, nextTransactions, categories, budgetGroups, plannedIncome);
     },
-    [accounts, transactions, categories, budgetGroups, persist]
+    [accounts, transactions, categories, budgetGroups, plannedIncome, persist]
   );
 
   const handleRenameAccount = useCallback(
@@ -3028,9 +3833,9 @@ function App({ householdName } = {}) {
       const nextTransactions = transactions.map((t) =>
         t.accountId === accountId ? { ...t, accountName: trimmed } : t
       );
-      persist(nextAccounts, nextTransactions, categories, budgetGroups);
+      persist(nextAccounts, nextTransactions, categories, budgetGroups, plannedIncome);
     },
-    [accounts, transactions, categories, budgetGroups, persist]
+    [accounts, transactions, categories, budgetGroups, plannedIncome, persist]
   );
 
   const handleUpdateAccountSettings = useCallback(
@@ -3057,75 +3862,111 @@ function App({ householdName } = {}) {
         }
         return { ...t, date: mapped.date, description: mapped.description, amountOut: mapped.amountOut, amountIn: mapped.amountIn };
       });
-      persist(nextAccounts, nextTransactions, categories, budgetGroups);
+      persist(nextAccounts, nextTransactions, categories, budgetGroups, plannedIncome);
       setToast(
         skipped > 0
           ? `Updated account settings. ${skipped} transaction${skipped === 1 ? "" : "s"} couldn't be remapped and were left as-is.`
           : "Updated account settings and reapplied them to existing transactions."
       );
     },
-    [accounts, transactions, categories, budgetGroups, persist]
+    [accounts, transactions, categories, budgetGroups, plannedIncome, persist]
   );
 
   const handleRestoreFromBackup = useCallback(
     (newAccounts, newCategories, newTransactions) => {
-      persist(newAccounts, newTransactions, newCategories, budgetGroups);
+      persist(newAccounts, newTransactions, newCategories, budgetGroups, plannedIncome);
       setView("transactions");
       setToast(
         `Restored ${newTransactions.length} transaction${newTransactions.length === 1 ? "" : "s"} from backup.`
       );
     },
-    [budgetGroups, persist]
+    [budgetGroups, plannedIncome, persist]
+  );
+
+  const handleRestoreBudget = useCallback(
+    (newCategories, newBudgetGroups, restoredPlannedIncome) => {
+      persist(
+        accounts,
+        transactions,
+        newCategories,
+        newBudgetGroups,
+        restoredPlannedIncome != null ? restoredPlannedIncome : plannedIncome
+      );
+      setToast("Applied budget setup from file.");
+    },
+    [accounts, transactions, plannedIncome, persist]
   );
 
   const handleUpdateTransaction = useCallback(
     (id, updates) => {
       const nextTransactions = transactions.map((t) => (t.id === id ? { ...t, ...updates } : t));
-      persist(accounts, nextTransactions, categories, budgetGroups);
+      persist(accounts, nextTransactions, categories, budgetGroups, plannedIncome);
     },
-    [accounts, transactions, categories, budgetGroups, persist]
+    [accounts, transactions, categories, budgetGroups, plannedIncome, persist]
   );
 
   const handleDeleteTransaction = useCallback(
     (id) => {
       const nextTransactions = transactions.filter((t) => t.id !== id);
-      persist(accounts, nextTransactions, categories, budgetGroups);
+      persist(accounts, nextTransactions, categories, budgetGroups, plannedIncome);
     },
-    [accounts, transactions, categories, budgetGroups, persist]
+    [accounts, transactions, categories, budgetGroups, plannedIncome, persist]
   );
 
   const handleAddCategory = useCallback(
     (name) => {
-      const nextCategories = [...categories, { id: uid(), name, excluded: false, budgetAmount: null, budgetPeriod: "monthly" }];
-      persist(accounts, transactions, nextCategories, budgetGroups);
+      const nextCategories = [
+        ...categories,
+        {
+          id: uid(),
+          name,
+          excluded: false,
+          budgetAmount: null,
+          budgetPeriod: "monthly",
+          budgetType: "spend",
+          accumulateTarget: null,
+          accumulateActuals: {},
+          createdAt: new Date().toISOString(),
+        },
+      ];
+      persist(accounts, transactions, nextCategories, budgetGroups, plannedIncome);
     },
-    [accounts, transactions, categories, budgetGroups, persist]
+    [accounts, transactions, categories, budgetGroups, plannedIncome, persist]
   );
 
   const handleRenameCategory = useCallback(
     (categoryId, newName) => {
       const nextCategories = categories.map((c) => (c.id === categoryId ? { ...c, name: newName } : c));
-      persist(accounts, transactions, nextCategories, budgetGroups);
+      persist(accounts, transactions, nextCategories, budgetGroups, plannedIncome);
     },
-    [accounts, transactions, categories, budgetGroups, persist]
+    [accounts, transactions, categories, budgetGroups, plannedIncome, persist]
   );
 
   const handleToggleCategoryExcluded = useCallback(
     (categoryId, excluded) => {
       const nextCategories = categories.map((c) => (c.id === categoryId ? { ...c, excluded } : c));
-      persist(accounts, transactions, nextCategories, budgetGroups);
+      persist(accounts, transactions, nextCategories, budgetGroups, plannedIncome);
     },
-    [accounts, transactions, categories, budgetGroups, persist]
+    [accounts, transactions, categories, budgetGroups, plannedIncome, persist]
   );
 
   const handleSetCategoryBudget = useCallback(
-    (categoryId, budgetAmount, budgetPeriod) => {
+    (categoryId, budgetAmount, budgetPeriod, budgetType, accumulateTarget) => {
       const nextCategories = categories.map((c) =>
-        c.id === categoryId ? { ...c, budgetAmount, budgetPeriod: budgetPeriod || "monthly" } : c
+        c.id === categoryId
+          ? {
+              ...c,
+              budgetAmount,
+              budgetPeriod: budgetPeriod || "monthly",
+              budgetType: budgetType === "accumulate" ? "accumulate" : "spend",
+              accumulateTarget: accumulateTarget != null ? accumulateTarget : null,
+              createdAt: c.createdAt || new Date().toISOString(),
+            }
+          : c
       );
-      persist(accounts, transactions, nextCategories, budgetGroups);
+      persist(accounts, transactions, nextCategories, budgetGroups, plannedIncome);
     },
-    [accounts, transactions, categories, budgetGroups, persist]
+    [accounts, transactions, categories, budgetGroups, plannedIncome, persist]
   );
 
   const handleMergeCategory = useCallback(
@@ -3137,34 +3978,82 @@ function App({ householdName } = {}) {
       const nextTransactions = transactions.map((t) =>
         t.categoryId === sourceCategoryId ? { ...t, categoryId: targetCategoryId } : t
       );
-      persist(accounts, nextTransactions, nextCategories, budgetGroups);
+      persist(accounts, nextTransactions, nextCategories, budgetGroups, plannedIncome);
       setToast(`Merged "${source?.name || "category"}" into "${target?.name || "category"}".`);
     },
-    [accounts, transactions, categories, budgetGroups, persist]
+    [accounts, transactions, categories, budgetGroups, plannedIncome, persist]
   );
 
   const handleAddBudgetGroup = useCallback(
     (name) => {
-      const nextGroups = [...budgetGroups, { id: uid(), name, budgetAmount: null, budgetPeriod: "monthly", categoryIds: [] }];
-      persist(accounts, transactions, categories, nextGroups);
+      const nextGroups = [
+        ...budgetGroups,
+        {
+          id: uid(),
+          name,
+          budgetAmount: null,
+          budgetPeriod: "monthly",
+          budgetType: "spend",
+          accumulateTarget: null,
+          accumulateActuals: {},
+          categoryIds: [],
+          createdAt: new Date().toISOString(),
+        },
+      ];
+      persist(accounts, transactions, categories, nextGroups, plannedIncome);
     },
-    [accounts, transactions, categories, budgetGroups, persist]
+    [accounts, transactions, categories, budgetGroups, plannedIncome, persist]
   );
 
   const handleRenameBudgetGroup = useCallback(
     (groupId, newName) => {
       const nextGroups = budgetGroups.map((g) => (g.id === groupId ? { ...g, name: newName } : g));
-      persist(accounts, transactions, categories, nextGroups);
+      persist(accounts, transactions, categories, nextGroups, plannedIncome);
     },
-    [accounts, transactions, categories, budgetGroups, persist]
+    [accounts, transactions, categories, budgetGroups, plannedIncome, persist]
   );
 
   const handleSetBudgetGroupBudget = useCallback(
-    (groupId, budgetAmount, budgetPeriod) => {
+    (groupId, budgetAmount, budgetPeriod, budgetType, accumulateTarget) => {
       const nextGroups = budgetGroups.map((g) =>
-        g.id === groupId ? { ...g, budgetAmount, budgetPeriod: budgetPeriod || "monthly" } : g
+        g.id === groupId
+          ? {
+              ...g,
+              budgetAmount,
+              budgetPeriod: budgetPeriod || "monthly",
+              budgetType: budgetType === "accumulate" ? "accumulate" : "spend",
+              accumulateTarget: accumulateTarget != null ? accumulateTarget : null,
+              createdAt: g.createdAt || new Date().toISOString(),
+            }
+          : g
       );
-      persist(accounts, transactions, categories, nextGroups);
+      persist(accounts, transactions, categories, nextGroups, plannedIncome);
+    },
+    [accounts, transactions, categories, budgetGroups, plannedIncome, persist]
+  );
+
+  const handleSetAccumulateActual = useCallback(
+    (prefixedId, periodKey, amount) => {
+      const isGroup = prefixedId.startsWith("group:");
+      const rawId = prefixedId.slice(prefixedId.indexOf(":") + 1);
+      if (isGroup) {
+        const nextGroups = budgetGroups.map((g) =>
+          g.id === rawId ? { ...g, accumulateActuals: { ...(g.accumulateActuals || {}), [periodKey]: amount } } : g
+        );
+        persist(accounts, transactions, categories, nextGroups, plannedIncome);
+      } else {
+        const nextCategories = categories.map((c) =>
+          c.id === rawId ? { ...c, accumulateActuals: { ...(c.accumulateActuals || {}), [periodKey]: amount } } : c
+        );
+        persist(accounts, transactions, nextCategories, budgetGroups, plannedIncome);
+      }
+    },
+    [accounts, transactions, categories, budgetGroups, plannedIncome, persist]
+  );
+
+  const handleSetPlannedIncome = useCallback(
+    (amount) => {
+      persist(accounts, transactions, categories, budgetGroups, amount);
     },
     [accounts, transactions, categories, budgetGroups, persist]
   );
@@ -3181,9 +4070,9 @@ function App({ householdName } = {}) {
         const ids = g.categoryIds || [];
         return ids.includes(categoryId) ? { ...g, categoryIds: ids.filter((id) => id !== categoryId) } : g;
       });
-      persist(accounts, transactions, categories, nextGroups);
+      persist(accounts, transactions, categories, nextGroups, plannedIncome);
     },
-    [accounts, transactions, categories, budgetGroups, persist]
+    [accounts, transactions, categories, budgetGroups, plannedIncome, persist]
   );
 
   const handleRemoveCategoryFromGroup = useCallback(
@@ -3191,17 +4080,17 @@ function App({ householdName } = {}) {
       const nextGroups = budgetGroups.map((g) =>
         g.id === groupId ? { ...g, categoryIds: (g.categoryIds || []).filter((id) => id !== categoryId) } : g
       );
-      persist(accounts, transactions, categories, nextGroups);
+      persist(accounts, transactions, categories, nextGroups, plannedIncome);
     },
-    [accounts, transactions, categories, budgetGroups, persist]
+    [accounts, transactions, categories, budgetGroups, plannedIncome, persist]
   );
 
   const handleDeleteBudgetGroup = useCallback(
     (groupId) => {
       const nextGroups = budgetGroups.filter((g) => g.id !== groupId);
-      persist(accounts, transactions, categories, nextGroups);
+      persist(accounts, transactions, categories, nextGroups, plannedIncome);
     },
-    [accounts, transactions, categories, budgetGroups, persist]
+    [accounts, transactions, categories, budgetGroups, plannedIncome, persist]
   );
 
   const handleDeleteCategory = useCallback(
@@ -3210,9 +4099,9 @@ function App({ householdName } = {}) {
       const nextTransactions = transactions.map((t) =>
         t.categoryId === categoryId ? { ...t, categoryId: null } : t
       );
-      persist(accounts, nextTransactions, nextCategories, budgetGroups);
+      persist(accounts, nextTransactions, nextCategories, budgetGroups, plannedIncome);
     },
-    [accounts, transactions, categories, budgetGroups, persist]
+    [accounts, transactions, categories, budgetGroups, plannedIncome, persist]
   );
 
   if (!loaded) {
@@ -3236,6 +4125,7 @@ function App({ householdName } = {}) {
             {householdName ? `${householdName} Ledger` : "Ledger"}
           </div>
           <div className="sidebar-nav">
+            <div className="sidebar-nav-label">Ledger</div>
             <button
               className={"nav-btn" + (view === "transactions" ? " active" : "")}
               onClick={() => setView("transactions")}
@@ -3247,18 +4137,6 @@ function App({ householdName } = {}) {
               onClick={() => setView("reports")}
             >
               Reports
-            </button>
-            <button
-              className={"nav-btn" + (view === "budget" ? " active" : "")}
-              onClick={() => setView("budget")}
-            >
-              Budget
-            </button>
-            <button
-              className={"nav-btn" + (view === "budgetGroups" ? " active" : "")}
-              onClick={() => setView("budgetGroups")}
-            >
-              Budget Groups
             </button>
             <button
               className={"nav-btn" + (view === "accounts" ? " active" : "")}
@@ -3283,6 +4161,26 @@ function App({ householdName } = {}) {
               onClick={() => goToUpload(null)}
             >
               Upload
+            </button>
+
+            <div className="sidebar-nav-label">Budgeting</div>
+            <button
+              className={"nav-btn" + (view === "planning" ? " active" : "")}
+              onClick={() => setView("planning")}
+            >
+              Planning
+            </button>
+            <button
+              className={"nav-btn" + (view === "budget" ? " active" : "")}
+              onClick={() => setView("budget")}
+            >
+              Budget
+            </button>
+            <button
+              className={"nav-btn" + (view === "budgetGroups" ? " active" : "")}
+              onClick={() => setView("budgetGroups")}
+            >
+              Budget Groups
             </button>
           </div>
           <div className="sidebar-stats">
@@ -3326,11 +4224,21 @@ function App({ householdName } = {}) {
               onGoCategories={() => setView("categories")}
             />
           )}
+          {view === "planning" && (
+            <PlanningView
+              transactions={transactions}
+              categories={categories}
+              budgetGroups={budgetGroups}
+              plannedIncome={plannedIncome}
+              onSetPlannedIncome={handleSetPlannedIncome}
+            />
+          )}
           {view === "budget" && (
             <BudgetView
               transactions={transactions}
               categories={categories}
               budgetGroups={budgetGroups}
+              onSetActual={handleSetAccumulateActual}
               onGoCategories={() => setView("categories")}
             />
           )}
@@ -3375,7 +4283,10 @@ function App({ householdName } = {}) {
               accounts={accounts}
               transactions={transactions}
               categories={categories}
+              budgetGroups={budgetGroups}
+              plannedIncome={plannedIncome}
               onRestore={handleRestoreFromBackup}
+              onRestoreBudget={handleRestoreBudget}
             />
           )}
         </div>
