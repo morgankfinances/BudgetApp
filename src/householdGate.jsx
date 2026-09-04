@@ -255,6 +255,14 @@ function HouseholdPanel({ onClose, onDataChanged }) {
   const [copied, setCopied] = useState(false);
   const [error, setError] = useState(null);
   const [leaveConfirming, setLeaveConfirming] = useState(false);
+  const [deleteConfirming, setDeleteConfirming] = useState(false);
+  const [deleting, setDeleting] = useState(false);
+  const [switchOpen, setSwitchOpen] = useState(false);
+  const [switchCode, setSwitchCode] = useState("");
+  const [switchConfirming, setSwitchConfirming] = useState(false);
+  const [switchBusy, setSwitchBusy] = useState(false);
+  const [switchSent, setSwitchSent] = useState(false);
+  const [switchError, setSwitchError] = useState(null);
   const [editingName, setEditingName] = useState(false);
   const [nameDraft, setNameDraft] = useState("");
   const [renaming, setRenaming] = useState(false);
@@ -374,6 +382,41 @@ function HouseholdPanel({ onClose, onDataChanged }) {
     await supabase.auth.signOut();
   }
 
+  async function handleDeleteEverything() {
+    setDeleting(true);
+    setError(null);
+    const { error } = await supabase.rpc("delete_my_household_data");
+    if (error) {
+      setDeleting(false);
+      setError(error.message);
+      return;
+    }
+    await supabase.auth.signOut();
+  }
+
+  async function handleSendSwitchRequest() {
+    setSwitchBusy(true);
+    setSwitchError(null);
+    const { error } = await supabase.rpc("request_join_household", {
+      p_invite_code: switchCode.trim(),
+    });
+    setSwitchBusy(false);
+    if (error) {
+      setSwitchError(error.message || "Couldn't request to join with that code.");
+      return;
+    }
+    setSwitchConfirming(false);
+    setSwitchSent(true);
+  }
+
+  function resetSwitchForm() {
+    setSwitchOpen(false);
+    setSwitchCode("");
+    setSwitchConfirming(false);
+    setSwitchSent(false);
+    setSwitchError(null);
+  }
+
   function startEditName() {
     setNameDraft(household.name);
     setEditingName(true);
@@ -489,6 +532,76 @@ function HouseholdPanel({ onClose, onDataChanged }) {
             {error && <p style={{ color: "#b3261e", fontSize: 13 }}>{error}</p>}
 
             <HistorySection />
+
+            <div style={sectionLabelStyle}>Switch households</div>
+            {!switchOpen ? (
+              <button style={{ ...buttonStyle, marginBottom: 8 }} onClick={() => setSwitchOpen(true)}>
+                Join a different household
+              </button>
+            ) : switchSent ? (
+              <div style={{ marginBottom: 8 }}>
+                <p style={{ fontSize: 12.5, color: "#3f7d5c", marginBottom: 8 }}>
+                  Request sent. You'll keep using {household.name} normally until someone in the other household
+                  approves it.
+                </p>
+                <button style={buttonStyle} onClick={resetSwitchForm}>
+                  Done
+                </button>
+              </div>
+            ) : switchConfirming ? (
+              <div style={{ marginBottom: 8 }}>
+                <p style={{ fontSize: 12.5, color: "#b3261e", marginBottom: 8 }}>
+                  If this is accepted, your current data in <strong>{household.name}</strong> will be merged into
+                  the household for this code, and you'll leave {household.name} — it won't be usable from here
+                  afterward. Any of your accounts or categories with names that collide will be renamed so
+                  nothing gets confused between the two. This still requires someone in the other household to
+                  approve you first.
+                </p>
+                <div style={{ display: "flex", gap: 8 }}>
+                  <button
+                    style={{ ...buttonStyle, border: "1px solid #b3261e", color: "#b3261e" }}
+                    onClick={handleSendSwitchRequest}
+                    disabled={switchBusy}
+                  >
+                    {switchBusy ? "Sending…" : "Send request"}
+                  </button>
+                  <button style={buttonStyle} onClick={() => setSwitchConfirming(false)}>
+                    Cancel
+                  </button>
+                </div>
+              </div>
+            ) : (
+              <div style={{ marginBottom: 8 }}>
+                <input
+                  type="text"
+                  placeholder="Enter invite code"
+                  value={switchCode}
+                  onChange={(e) => setSwitchCode(e.target.value)}
+                  style={{
+                    width: "100%",
+                    fontSize: 14,
+                    padding: "8px 10px",
+                    marginBottom: 8,
+                    border: "1px solid #ccc",
+                    borderRadius: 5,
+                    boxSizing: "border-box",
+                  }}
+                />
+                <div style={{ display: "flex", gap: 8 }}>
+                  <button
+                    style={buttonStyle}
+                    onClick={() => setSwitchConfirming(true)}
+                    disabled={!switchCode.trim()}
+                  >
+                    Continue
+                  </button>
+                  <button style={buttonStyle} onClick={resetSwitchForm}>
+                    Cancel
+                  </button>
+                </div>
+              </div>
+            )}
+            {switchError && <p style={{ color: "#b3261e", fontSize: 13 }}>{switchError}</p>}
           </>
         ) : (
           <p style={{ color: "#b3261e", fontSize: 13 }}>{error}</p>
@@ -520,6 +633,41 @@ function HouseholdPanel({ onClose, onDataChanged }) {
         <button style={{ ...buttonStyle, marginBottom: 8 }} onClick={handleSignOut}>
           Sign out
         </button>
+
+        <div style={{ ...sectionLabelStyle, color: "#b3261e" }}>Danger zone</div>
+        {members.length > 1 ? (
+          <p style={{ fontSize: 12.5, color: "#888", marginBottom: 8 }}>
+            This household has other members, so its data isn't only yours to delete. Use "Leave this household"
+            above if you want to disconnect — that keeps everyone's data intact, including your own copy.
+          </p>
+        ) : deleteConfirming ? (
+          <div style={{ marginBottom: 8 }}>
+            <p style={{ fontSize: 12.5, color: "#b3261e", marginBottom: 8 }}>
+              This permanently deletes every account, transaction, and category in this household right now.
+              Unlike leaving, nothing is kept anywhere — not a copy, not even in Data History. This cannot be
+              undone.
+            </p>
+            <div style={{ display: "flex", gap: 8 }}>
+              <button
+                style={{ ...buttonStyle, border: "1px solid #b3261e", color: "#b3261e" }}
+                onClick={handleDeleteEverything}
+                disabled={deleting}
+              >
+                {deleting ? "Deleting…" : "Yes, delete everything"}
+              </button>
+              <button style={buttonStyle} onClick={() => setDeleteConfirming(false)}>
+                Cancel
+              </button>
+            </div>
+          </div>
+        ) : (
+          <button
+            style={{ ...buttonStyle, marginBottom: 8, border: "1px solid #b3261e", color: "#b3261e" }}
+            onClick={() => setDeleteConfirming(true)}
+          >
+            Delete all my data
+          </button>
+        )}
 
         <button
           style={{ ...buttonStyle, marginTop: 8, background: "none", border: "1px solid #ddd" }}

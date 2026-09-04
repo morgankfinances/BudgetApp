@@ -169,6 +169,35 @@ function formatMonthLabel(monthStartISO) {
 
 const CHART_PALETTE = ["#3B5BA0", "#3F7D5C", "#AC4A2C", "#8A5A15", "#6B5B95", "#2E8B8B", "#9C4F6E"];
 
+function computeBudgetPeriodData(transactions, categories, periodType) {
+  const periodKeyFn = periodType === "weekly" ? getWeekStartISO : getMonthStartISO;
+  const budgeted = categories.filter(
+    (c) => c.budgetAmount != null && c.budgetAmount > 0 && (c.budgetPeriod || "monthly") === periodType
+  );
+  if (budgeted.length === 0) return null;
+
+  const catIds = new Set(budgeted.map((c) => c.id));
+  const spendMap = {};
+  const periodSet = new Set();
+
+  transactions.forEach((t) => {
+    if (!t.categoryId || !catIds.has(t.categoryId) || !t.date) return;
+    const pKey = periodKeyFn(t.date);
+    periodSet.add(pKey);
+    const spent = (t.amountOut || 0) - (t.amountIn || 0);
+    if (!spendMap[t.categoryId]) spendMap[t.categoryId] = {};
+    spendMap[t.categoryId][pKey] = (spendMap[t.categoryId][pKey] || 0) + spent;
+  });
+
+  const currentKey = periodKeyFn(new Date().toISOString().slice(0, 10));
+  periodSet.add(currentKey);
+
+  const periods = Array.from(periodSet).sort();
+
+  return { budgeted, periods, spendMap, currentKey };
+}
+
+
 async function readFileAsRows(file) {
   const name = file.name.toLowerCase();
   if (name.endsWith(".csv")) {
@@ -620,6 +649,17 @@ const STYLES = `
 .radio-row { display: flex; gap: 16px; margin-bottom: 16px; }
 .radio-option { display: flex; align-items: center; gap: 6px; font-size: 14px; cursor: pointer; }
 
+.budget-row { display: flex; align-items: center; gap: 6px; margin-top: 8px; }
+.budget-row-label { font-size: 12.5px; color: var(--ink-muted); font-weight: 600; }
+.budget-amount-input {
+  width: 70px; font-family: inherit; font-size: 13px; padding: 5px 7px;
+  border: 1px solid var(--border); border-radius: var(--radius);
+}
+.budget-row select {
+  font-family: inherit; font-size: 12.5px; padding: 5px 7px;
+  border: 1px solid var(--border); border-radius: var(--radius); background: #fff; color: var(--ink);
+}
+
 .invert-note {
   background: var(--warn-bg);
   border: 1px solid var(--warn-border);
@@ -748,6 +788,19 @@ const STYLES = `
   font-size: 12.5px; color: var(--ink-muted); margin-top: 12px; padding: 10px 14px;
   border: 1px solid var(--border); border-radius: var(--radius); background: #FAFAF6;
 }
+
+.budget-card-grid { display: flex; flex-wrap: wrap; gap: 14px; margin-bottom: 22px; }
+.budget-card {
+  background: var(--panel); border: 1px solid var(--border); border-radius: var(--radius);
+  padding: 14px 16px; flex: 1 1 230px; max-width: 280px;
+}
+.budget-card-head { display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 8px; gap: 8px; }
+.budget-card-name { font-weight: 600; font-size: 14px; }
+.budget-card-period { font-size: 10.5px; color: var(--ink-muted); text-transform: uppercase; letter-spacing: 0.04em; white-space: nowrap; }
+.budget-bar-track { height: 8px; border-radius: 999px; background: #EEECE2; overflow: hidden; margin-bottom: 8px; }
+.budget-bar-fill { height: 100%; border-radius: 999px; transition: width 0.2s ease; }
+.budget-card-figures { font-size: 13px; }
+.budget-card-figures .muted-cell { font-size: 12.5px; }
 
 .badge {
   display: inline-flex; align-items: center; gap: 4px; font-size: 11px; font-weight: 600;
@@ -1486,10 +1539,25 @@ function AccountsView({ accounts, transactions, onDelete, onAddTransactions, onR
 /* Categories view                                                      */
 /* ------------------------------------------------------------------ */
 
-function CategoryCard({ category, txCount, onRename, onDelete, onToggleExcluded }) {
+function CategoryCard({ category, categories, txCount, onRename, onDelete, onToggleExcluded, onMerge, onSetBudget }) {
   const [editing, setEditing] = useState(false);
   const [draftName, setDraftName] = useState(category.name);
   const [confirming, setConfirming] = useState(false);
+  const [merging, setMerging] = useState(false);
+  const [mergeTargetId, setMergeTargetId] = useState("");
+  const [mergeConfirming, setMergeConfirming] = useState(false);
+  const [budgetAmountDraft, setBudgetAmountDraft] = useState(
+    category.budgetAmount != null ? String(category.budgetAmount) : ""
+  );
+  const [budgetPeriodDraft, setBudgetPeriodDraft] = useState(category.budgetPeriod || "monthly");
+
+  const otherCategories = categories.filter((c) => c.id !== category.id);
+
+  function handleSaveBudget() {
+    const trimmed = budgetAmountDraft.trim();
+    const amount = trimmed === "" ? null : parseMoney(trimmed);
+    onSetBudget(category.id, amount != null && amount > 0 ? amount : null, budgetPeriodDraft);
+  }
 
   function startEdit() {
     setDraftName(category.name);
@@ -1501,6 +1569,19 @@ function CategoryCard({ category, txCount, onRename, onDelete, onToggleExcluded 
     if (trimmed && trimmed !== category.name) onRename(category.id, trimmed);
     setEditing(false);
   }
+
+  function startMerge() {
+    setMergeTargetId(otherCategories[0]?.id || "");
+    setMergeConfirming(false);
+    setMerging(true);
+  }
+
+  function handleConfirmMerge() {
+    if (!mergeTargetId) return;
+    onMerge(category.id, mergeTargetId);
+  }
+
+  const mergeTarget = otherCategories.find((c) => c.id === mergeTargetId);
 
   return (
     <div className="account-card">
@@ -1543,9 +1624,59 @@ function CategoryCard({ category, txCount, onRename, onDelete, onToggleExcluded 
           />
           Exclude from totals &amp; reports (e.g. transfers between your own accounts)
         </label>
+        <div className="budget-row">
+          <span className="budget-row-label">Budget:</span>
+          <input
+            type="text"
+            className="budget-amount-input"
+            placeholder="none"
+            value={budgetAmountDraft}
+            onChange={(e) => setBudgetAmountDraft(e.target.value)}
+          />
+          <select value={budgetPeriodDraft} onChange={(e) => setBudgetPeriodDraft(e.target.value)}>
+            <option value="weekly">per week</option>
+            <option value="monthly">per month</option>
+          </select>
+          <button className="btn btn-ghost btn-sm" onClick={handleSaveBudget}>
+            Save
+          </button>
+        </div>
       </div>
       <div className="row-actions">
-        {confirming ? (
+        {merging ? (
+          mergeConfirming ? (
+            <span className="confirm-inline">
+              Move {txCount} transaction{txCount === 1 ? "" : "s"} into "{mergeTarget?.name}" and delete "
+              {category.name}"?
+              <button className="btn btn-danger btn-sm" onClick={handleConfirmMerge}>
+                Confirm
+              </button>
+              <button className="btn btn-ghost btn-sm" onClick={() => setMergeConfirming(false)}>
+                Cancel
+              </button>
+            </span>
+          ) : (
+            <span className="row-actions">
+              <select value={mergeTargetId} onChange={(e) => setMergeTargetId(e.target.value)}>
+                {otherCategories.map((c) => (
+                  <option key={c.id} value={c.id}>
+                    {c.name}
+                  </option>
+                ))}
+              </select>
+              <button
+                className="btn btn-primary btn-sm"
+                onClick={() => setMergeConfirming(true)}
+                disabled={!mergeTargetId}
+              >
+                Merge
+              </button>
+              <button className="btn btn-ghost btn-sm" onClick={() => setMerging(false)}>
+                Cancel
+              </button>
+            </span>
+          )
+        ) : confirming ? (
           <span className="confirm-inline">
             Delete this category?{txCount > 0 ? ` ${txCount} transaction${txCount === 1 ? "" : "s"} will become uncategorized.` : ""}
             <button className="btn btn-danger btn-sm" onClick={() => onDelete(category.id)}>
@@ -1556,16 +1687,21 @@ function CategoryCard({ category, txCount, onRename, onDelete, onToggleExcluded 
             </button>
           </span>
         ) : (
-          <button className="btn btn-ghost btn-sm" onClick={() => setConfirming(true)}>
-            Delete
-          </button>
+          <>
+            <button className="btn btn-ghost btn-sm" onClick={startMerge} disabled={otherCategories.length === 0}>
+              Merge into…
+            </button>
+            <button className="btn btn-ghost btn-sm" onClick={() => setConfirming(true)}>
+              Delete
+            </button>
+          </>
         )}
       </div>
     </div>
   );
 }
 
-function CategoriesView({ categories, transactions, onAdd, onRename, onDelete, onToggleExcluded }) {
+function CategoriesView({ categories, transactions, onAdd, onRename, onDelete, onToggleExcluded, onMerge, onSetBudget }) {
   const [newName, setNewName] = useState("");
 
   function handleAdd(e) {
@@ -1611,10 +1747,13 @@ function CategoriesView({ categories, transactions, onAdd, onRename, onDelete, o
             <CategoryCard
               key={cat.id}
               category={cat}
+              categories={categories}
               txCount={transactions.filter((t) => t.categoryId === cat.id).length}
               onRename={onRename}
               onDelete={onDelete}
               onToggleExcluded={onToggleExcluded}
+              onMerge={onMerge}
+              onSetBudget={onSetBudget}
             />
           ))
         )}
@@ -2136,6 +2275,157 @@ function ReportsView({ transactions, accounts, categories, onGoCategories }) {
 }
 
 /* ------------------------------------------------------------------ */
+/* Budget view                                                          */
+/* ------------------------------------------------------------------ */
+
+function BudgetProgressCard({ category, spent }) {
+  const budget = category.budgetAmount;
+  const ratio = budget > 0 ? spent / budget : 0;
+  const barColor = ratio >= 1 ? "var(--expense)" : ratio >= 0.8 ? "var(--warn-border)" : "var(--income)";
+  const remaining = budget - spent;
+
+  return (
+    <div className="budget-card">
+      <div className="budget-card-head">
+        <span className="budget-card-name">{category.name}</span>
+        <span className="budget-card-period">{category.budgetPeriod === "weekly" ? "this week" : "this month"}</span>
+      </div>
+      <div className="budget-bar-track">
+        <div className="budget-bar-fill" style={{ width: `${Math.min(Math.max(ratio, 0), 1) * 100}%`, background: barColor }} />
+      </div>
+      <div className="budget-card-figures">
+        <span className={ratio >= 1 ? "money-out" : ""}>{formatMoney(spent)}</span>
+        <span className="muted-cell"> of {formatMoney(budget)}</span>
+        <br />
+        {remaining >= 0 ? (
+          <span className="money-in">{formatMoney(remaining)} left</span>
+        ) : (
+          <span className="money-out">{formatMoney(Math.abs(remaining))} over</span>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function BudgetHistoryTable({ budgeted, periods, spendMap, periodLabelFn }) {
+  return (
+    <div className="panel" style={{ padding: 0, overflowX: "auto" }}>
+      <table className="pivot-table">
+        <thead>
+          <tr>
+            <th>Category</th>
+            {periods.map((p) => (
+              <th key={p}>{periodLabelFn(p)}</th>
+            ))}
+          </tr>
+        </thead>
+        <tbody>
+          {budgeted.map((c) => (
+            <tr key={c.id}>
+              <td className="pivot-row-label">
+                {c.name}
+                <span className="muted-cell" style={{ fontWeight: 400 }}>
+                  {" "}
+                  / {formatMoney(c.budgetAmount)}
+                </span>
+              </td>
+              {periods.map((p) => {
+                const spent = spendMap[c.id]?.[p] || 0;
+                const ratio = c.budgetAmount > 0 ? spent / c.budgetAmount : 0;
+                return (
+                  <td key={p} className={ratio >= 1 ? "money-out" : ratio >= 0.8 ? "" : "money-in"}>
+                    {formatMoney(spent)}
+                  </td>
+                );
+              })}
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+function BudgetView({ transactions, categories, onGoCategories }) {
+  const weeklyData = useMemo(
+    () => computeBudgetPeriodData(transactions, categories, "weekly"),
+    [transactions, categories]
+  );
+  const monthlyData = useMemo(
+    () => computeBudgetPeriodData(transactions, categories, "monthly"),
+    [transactions, categories]
+  );
+
+  const hasBudgets = (weeklyData && weeklyData.budgeted.length > 0) || (monthlyData && monthlyData.budgeted.length > 0);
+
+  if (!hasBudgets) {
+    return (
+      <EmptyState
+        title="No budgets set yet"
+        body="Set a weekly or monthly budget on any category from the Categories tab, and your progress against it will show up here."
+        ctaLabel="Go to Categories"
+        onCta={onGoCategories}
+      />
+    );
+  }
+
+  return (
+    <div>
+      <div className="view-header">
+        <h1>Budget</h1>
+        <p>How you're tracking against what you've budgeted, by category. "Spent" here means money out minus money in for that category.</p>
+      </div>
+
+      {weeklyData && (
+        <>
+          <h3 style={{ marginTop: 0, marginBottom: 10, fontSize: 16 }}>This week</h3>
+          <div className="budget-card-grid">
+            {weeklyData.budgeted.map((c) => (
+              <BudgetProgressCard key={c.id} category={c} spent={weeklyData.spendMap[c.id]?.[weeklyData.currentKey] || 0} />
+            ))}
+          </div>
+        </>
+      )}
+
+      {monthlyData && (
+        <>
+          <h3 style={{ marginBottom: 10, fontSize: 16 }}>This month</h3>
+          <div className="budget-card-grid">
+            {monthlyData.budgeted.map((c) => (
+              <BudgetProgressCard key={c.id} category={c} spent={monthlyData.spendMap[c.id]?.[monthlyData.currentKey] || 0} />
+            ))}
+          </div>
+        </>
+      )}
+
+      {weeklyData && weeklyData.periods.length > 1 && (
+        <>
+          <h3 style={{ marginBottom: 10, fontSize: 16 }}>Weekly history</h3>
+          <BudgetHistoryTable
+            budgeted={weeklyData.budgeted}
+            periods={weeklyData.periods}
+            spendMap={weeklyData.spendMap}
+            periodLabelFn={formatWeekLabel}
+          />
+        </>
+      )}
+
+      {monthlyData && monthlyData.periods.length > 1 && (
+        <>
+          <h3 style={{ marginTop: 22, marginBottom: 10, fontSize: 16 }}>Monthly history</h3>
+          <BudgetHistoryTable
+            budgeted={monthlyData.budgeted}
+            periods={monthlyData.periods}
+            spendMap={monthlyData.spendMap}
+            periodLabelFn={formatMonthLabel}
+          />
+        </>
+      )}
+    </div>
+  );
+}
+
+/* ------------------------------------------------------------------ */
 /* Backup view                                                          */
 /* ------------------------------------------------------------------ */
 
@@ -2463,7 +2753,7 @@ function App({ householdName } = {}) {
 
   const handleAddCategory = useCallback(
     (name) => {
-      const nextCategories = [...categories, { id: uid(), name, excluded: false }];
+      const nextCategories = [...categories, { id: uid(), name, excluded: false, budgetAmount: null, budgetPeriod: "monthly" }];
       persist(accounts, transactions, nextCategories);
     },
     [accounts, transactions, categories, persist]
@@ -2481,6 +2771,31 @@ function App({ householdName } = {}) {
     (categoryId, excluded) => {
       const nextCategories = categories.map((c) => (c.id === categoryId ? { ...c, excluded } : c));
       persist(accounts, transactions, nextCategories);
+    },
+    [accounts, transactions, categories, persist]
+  );
+
+  const handleSetCategoryBudget = useCallback(
+    (categoryId, budgetAmount, budgetPeriod) => {
+      const nextCategories = categories.map((c) =>
+        c.id === categoryId ? { ...c, budgetAmount, budgetPeriod: budgetPeriod || "monthly" } : c
+      );
+      persist(accounts, transactions, nextCategories);
+    },
+    [accounts, transactions, categories, persist]
+  );
+
+  const handleMergeCategory = useCallback(
+    (sourceCategoryId, targetCategoryId) => {
+      if (!sourceCategoryId || !targetCategoryId || sourceCategoryId === targetCategoryId) return;
+      const source = categories.find((c) => c.id === sourceCategoryId);
+      const target = categories.find((c) => c.id === targetCategoryId);
+      const nextCategories = categories.filter((c) => c.id !== sourceCategoryId);
+      const nextTransactions = transactions.map((t) =>
+        t.categoryId === sourceCategoryId ? { ...t, categoryId: targetCategoryId } : t
+      );
+      persist(accounts, nextTransactions, nextCategories);
+      setToast(`Merged "${source?.name || "category"}" into "${target?.name || "category"}".`);
     },
     [accounts, transactions, categories, persist]
   );
@@ -2528,6 +2843,12 @@ function App({ householdName } = {}) {
               onClick={() => setView("reports")}
             >
               Reports
+            </button>
+            <button
+              className={"nav-btn" + (view === "budget" ? " active" : "")}
+              onClick={() => setView("budget")}
+            >
+              Budget
             </button>
             <button
               className={"nav-btn" + (view === "accounts" ? " active" : "")}
@@ -2595,6 +2916,13 @@ function App({ householdName } = {}) {
               onGoCategories={() => setView("categories")}
             />
           )}
+          {view === "budget" && (
+            <BudgetView
+              transactions={transactions}
+              categories={categories}
+              onGoCategories={() => setView("categories")}
+            />
+          )}
           {view === "accounts" && (
             <AccountsView
               accounts={accounts}
@@ -2614,6 +2942,8 @@ function App({ householdName } = {}) {
               onRename={handleRenameCategory}
               onDelete={handleDeleteCategory}
               onToggleExcluded={handleToggleCategoryExcluded}
+              onMerge={handleMergeCategory}
+              onSetBudget={handleSetCategoryBudget}
             />
           )}
           {view === "backup" && (
