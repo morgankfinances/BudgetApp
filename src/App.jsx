@@ -247,7 +247,7 @@ function computeBudgetPeriodData(transactions, budgetItems, periodType) {
   const spendItems = budgeted.filter((b) => b.budgetType !== "accumulate");
   transactions.forEach((t) => {
     if (!t.categoryId || !t.date) return;
-    const pKey = periodKeyFn(t.date);
+    const pKey = periodKeyFn(t.budgetPeriodOverride || t.date);
     const spent = (t.amountOut || 0) - (t.amountIn || 0);
     spendItems.forEach((b) => {
       if (b.categoryIds.has(t.categoryId)) {
@@ -2114,6 +2114,7 @@ function TransactionRow({ t, duplicateInfo, expanded, onToggleExpand, allTransac
     description: t.description || "",
     amountOut: t.amountOut != null ? String(t.amountOut) : "",
     amountIn: t.amountIn != null ? String(t.amountIn) : "",
+    budgetPeriodOverride: t.budgetPeriodOverride || "",
   });
   const [confirmingDelete, setConfirmingDelete] = useState(false);
 
@@ -2125,6 +2126,7 @@ function TransactionRow({ t, duplicateInfo, expanded, onToggleExpand, allTransac
       description: t.description || "",
       amountOut: t.amountOut != null ? String(t.amountOut) : "",
       amountIn: t.amountIn != null ? String(t.amountIn) : "",
+      budgetPeriodOverride: t.budgetPeriodOverride || "",
     });
     setEditing(true);
   }
@@ -2137,6 +2139,7 @@ function TransactionRow({ t, duplicateInfo, expanded, onToggleExpand, allTransac
       description: draft.description,
       amountOut: out,
       amountIn: inn,
+      budgetPeriodOverride: draft.budgetPeriodOverride || null,
     });
     setEditing(false);
   }
@@ -2151,13 +2154,43 @@ function TransactionRow({ t, duplicateInfo, expanded, onToggleExpand, allTransac
       <tr>
         <td data-label="Date">
           {editing ? (
-            <input
-              type="date"
-              value={draft.date}
-              onChange={(e) => setDraft({ ...draft, date: e.target.value })}
-            />
+            <>
+              <input
+                type="date"
+                value={draft.date}
+                onChange={(e) => setDraft({ ...draft, date: e.target.value })}
+              />
+              <div style={{ marginTop: 6 }}>
+                <label className="muted-cell" style={{ fontSize: 11, display: "block", marginBottom: 2 }}>
+                  Counts toward budget period:
+                </label>
+                <input
+                  type="date"
+                  style={{ width: 130 }}
+                  value={draft.budgetPeriodOverride}
+                  onChange={(e) => setDraft({ ...draft, budgetPeriodOverride: e.target.value })}
+                />
+                {draft.budgetPeriodOverride && (
+                  <button
+                    type="button"
+                    className="btn btn-ghost btn-sm"
+                    style={{ marginLeft: 4 }}
+                    onClick={() => setDraft({ ...draft, budgetPeriodOverride: "" })}
+                  >
+                    Clear
+                  </button>
+                )}
+              </div>
+            </>
           ) : (
-            formatDateDisplay(t.date)
+            <>
+              {formatDateDisplay(t.date)}
+              {t.budgetPeriodOverride && (
+                <div className="muted-cell" style={{ fontSize: 11 }}>
+                  counts toward {formatMonthLabel(getMonthStartISO(t.budgetPeriodOverride))}
+                </div>
+              )}
+            </>
           )}
         </td>
         <td className="desc-cell" data-label="Description" title={t.description || ""}>
