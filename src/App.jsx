@@ -2734,6 +2734,16 @@ function BudgetProgressCard({ item, spent, cumulativeSaved, periodKey, onSetActu
   );
 }
 
+// Positive = good, negative = bad, regardless of item type — for a Spend
+// item, coming in under budget is good; for an Accumulate item, meeting
+// or beating the planned contribution is good, which is the opposite
+// direction. This is what lets a chart or total blend both types into
+// one consistent number instead of contradicting the per-item coloring.
+function budgetPerformance(item, actual) {
+  const budget = item.budgetAmount || 0;
+  return item.budgetType === "accumulate" ? actual - budget : budget - actual;
+}
+
 function BudgetHistoryTable({ budgeted, periods, spendMap, periodLabelFn }) {
   return (
     <div className="panel" style={{ padding: 0, overflowX: "auto" }}>
@@ -2759,28 +2769,47 @@ function BudgetHistoryTable({ budgeted, periods, spendMap, periodLabelFn }) {
               </td>
               {periods.map((p) => {
                 const spent = spendMap[c.id]?.[p] || 0;
-                const ratio = c.budgetAmount > 0 ? spent / c.budgetAmount : 0;
-                const isAccumulate = c.budgetType === "accumulate";
-                const cls = isAccumulate
-                  ? ratio >= 1
-                    ? "money-in"
-                    : ratio >= 0.8
-                    ? ""
-                    : "money-out"
-                  : ratio >= 1
-                  ? "money-out"
-                  : ratio >= 0.8
-                  ? ""
-                  : "money-in";
+                const perf = budgetPerformance(c, spent);
+                const cls = perf >= 0 ? "money-in" : "money-out";
                 return (
                   <td key={p} className={cls}>
-                    {formatMoney(spent)}
+                    <div style={{ fontWeight: 600 }}>
+                      {perf >= 0 ? "+" : "\u2212"}
+                      {formatMoney(Math.abs(perf))}
+                    </div>
+                    <div className="muted-cell" style={{ fontSize: 11 }}>
+                      {formatMoney(spent)} {c.budgetType === "accumulate" ? "saved" : "spent"}
+                    </div>
                   </td>
                 );
               })}
             </tr>
           ))}
         </tbody>
+        <tfoot>
+          <tr>
+            <td className="pivot-row-label" style={{ fontWeight: 700 }}>
+              Total
+            </td>
+            {periods.map((p) => {
+              const totalSpent = budgeted.reduce((s, b) => s + (spendMap[b.id]?.[p] || 0), 0);
+              const totalBudget = budgeted.reduce((s, b) => s + (b.budgetAmount || 0), 0);
+              const perf = budgeted.reduce((s, b) => s + budgetPerformance(b, spendMap[b.id]?.[p] || 0), 0);
+              const cls = perf >= 0 ? "money-in" : "money-out";
+              return (
+                <td key={p} className={cls}>
+                  <div style={{ fontWeight: 700 }}>
+                    {formatMoney(totalSpent)} / {formatMoney(totalBudget)}
+                  </div>
+                  <div style={{ fontSize: 11, fontWeight: 600 }}>
+                    {perf >= 0 ? "+" : "\u2212"}
+                    {formatMoney(Math.abs(perf))}
+                  </div>
+                </td>
+              );
+            })}
+          </tr>
+        </tfoot>
       </table>
     </div>
   );
@@ -2788,9 +2817,8 @@ function BudgetHistoryTable({ budgeted, periods, spendMap, periodLabelFn }) {
 
 function BudgetPerformanceChart({ title, periods, budgeted, spendMap, periodLabelFn }) {
   const data = periods.map((p) => {
-    const totalBudget = budgeted.reduce((s, b) => s + (b.budgetAmount || 0), 0);
-    const totalSpent = budgeted.reduce((s, b) => s + (spendMap[b.id]?.[p] || 0), 0);
-    return { period: periodLabelFn(p), delta: totalBudget - totalSpent };
+    const delta = budgeted.reduce((s, b) => s + budgetPerformance(b, spendMap[b.id]?.[p] || 0), 0);
+    return { period: periodLabelFn(p), delta };
   });
 
   return (
@@ -3425,6 +3453,27 @@ function PlanningView({
     return map;
   }, [budgetGroups]);
 
+  const unassignedCategories = categories.filter(
+    (c) => !groupNameByCategoryId[c.id] && !(c.budgetAmount != null && c.budgetAmount > 0)
+  );
+  const budgetedCategories = categories.filter(
+    (c) => !groupNameByCategoryId[c.id] && c.budgetAmount != null && c.budgetAmount > 0
+  );
+  const groupedCategories = categories.filter((c) => groupNameByCategoryId[c.id]);
+
+  const unassignedSpendThisMonth = useMemo(() => {
+    const ids = new Set(unassignedCategories.map((c) => c.id));
+    const thisMonth = getMonthStartISO(new Date().toISOString().slice(0, 10));
+    let total = 0;
+    transactions.forEach((t) => {
+      if (!t.categoryId || !ids.has(t.categoryId) || !t.date) return;
+      if (getMonthStartISO(t.date) !== thisMonth) return;
+      total += (t.amountOut || 0) - (t.amountIn || 0);
+    });
+    return total;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [transactions, categories, groupNameByCategoryId]);
+
   const monthlyActualIncome = useMemo(() => {
     const excludedIds = new Set(categories.filter((c) => c.excluded).map((c) => c.id));
     const byMonth = {};
@@ -3567,26 +3616,66 @@ function PlanningView({
             </div>
           )}
 
-          <h3 style={{ marginTop: 6, marginBottom: 10, fontSize: 16 }}>Category budgets</h3>
+          <h3 style={{ marginTop: 6, marginBottom: 4, fontSize: 16 }}>Currently Unassigned</h3>
           <p className="hint" style={{ marginBottom: 12 }}>
-            Set a budget on any category here. Categories already rolled into a group show up for reference,
-            but are budgeted from Budget Groups instead.
+            These categories have no budget and aren't in a group, so nothing about their spending is being
+            tracked.{" "}
+            {unassignedCategories.length > 0 && (
+              <>
+                So far this month: <strong>{formatMoney(unassignedSpendThisMonth)}</strong> across{" "}
+                {unassignedCategories.length} categor{unassignedCategories.length === 1 ? "y" : "ies"}.
+              </>
+            )}
           </p>
           {categories.length === 0 ? (
             <div className="panel">
               <div className="hint">No categories yet — add some from the Categories tab first.</div>
             </div>
           ) : (
-            <div className="panel">
-              {categories.map((c) => (
-                <PlanningCategoryRow
-                  key={c.id}
-                  category={c}
-                  groupName={groupNameByCategoryId[c.id]}
-                  onSetBudget={onSetCategoryBudget}
-                />
-              ))}
-            </div>
+            <>
+              {unassignedCategories.length === 0 ? (
+                <div className="panel">
+                  <div className="hint">
+                    Nothing unassigned — every category is either budgeted or in a group.
+                  </div>
+                </div>
+              ) : (
+                <div className="panel">
+                  {unassignedCategories.map((c) => (
+                    <PlanningCategoryRow key={c.id} category={c} groupName={null} onSetBudget={onSetCategoryBudget} />
+                  ))}
+                </div>
+              )}
+
+              <h3 style={{ marginTop: 22, marginBottom: 10, fontSize: 16 }}>Budgeted</h3>
+              {budgetedCategories.length === 0 ? (
+                <div className="panel">
+                  <div className="hint">None yet — set a budget on a category above.</div>
+                </div>
+              ) : (
+                <div className="panel">
+                  {budgetedCategories.map((c) => (
+                    <PlanningCategoryRow key={c.id} category={c} groupName={null} onSetBudget={onSetCategoryBudget} />
+                  ))}
+                </div>
+              )}
+
+              {groupedCategories.length > 0 && (
+                <>
+                  <h3 style={{ marginTop: 22, marginBottom: 10, fontSize: 16 }}>Part of a group</h3>
+                  <div className="panel">
+                    {groupedCategories.map((c) => (
+                      <PlanningCategoryRow
+                        key={c.id}
+                        category={c}
+                        groupName={groupNameByCategoryId[c.id]}
+                        onSetBudget={onSetCategoryBudget}
+                      />
+                    ))}
+                  </div>
+                </>
+              )}
+            </>
           )}
         </>
       )}
