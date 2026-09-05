@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useMemo, useCallback, useRef } from "react";
 import Papa from "papaparse";
 import * as XLSX from "xlsx";
-import { BarChart, Bar, LineChart, Line, ReferenceLine, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from "recharts";
+import { BarChart, Bar, Cell, ReferenceLine, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from "recharts";
 
 /* ------------------------------------------------------------------ */
 /* Storage                                                             */
@@ -45,6 +45,7 @@ async function loadData() {
         budgetGroups: budgetGroups.map(normalizeBudgetItem),
         plannedIncome: parsed.plannedIncome != null ? parsed.plannedIncome : null,
         incomeWarningDismissed: !!parsed.incomeWarningDismissed,
+        hiddenBudgetMonths: Array.isArray(parsed.hiddenBudgetMonths) ? parsed.hiddenBudgetMonths : [],
       };
     }
   } catch (e) {
@@ -57,14 +58,23 @@ async function loadData() {
     budgetGroups: [],
     plannedIncome: null,
     incomeWarningDismissed: false,
+    hiddenBudgetMonths: [],
   };
 }
 
-async function saveData(accounts, transactions, categories, budgetGroups, plannedIncome, incomeWarningDismissed) {
+async function saveData(accounts, transactions, categories, budgetGroups, plannedIncome, incomeWarningDismissed, hiddenBudgetMonths) {
   try {
     const result = await window.storage.set(
       STORAGE_KEY,
-      JSON.stringify({ accounts, transactions, categories, budgetGroups, plannedIncome, incomeWarningDismissed }),
+      JSON.stringify({
+        accounts,
+        transactions,
+        categories,
+        budgetGroups,
+        plannedIncome,
+        incomeWarningDismissed,
+        hiddenBudgetMonths,
+      }),
       false
     );
     return !!result;
@@ -2776,28 +2786,26 @@ function BudgetHistoryTable({ budgeted, periods, spendMap, periodLabelFn }) {
   );
 }
 
-function BudgetTrendChart({ title, periods, budgeted, spendMap, periodLabelFn }) {
-  let running = 0;
+function BudgetPerformanceChart({ title, periods, budgeted, spendMap, periodLabelFn }) {
   const data = periods.map((p) => {
     const totalBudget = budgeted.reduce((s, b) => s + (b.budgetAmount || 0), 0);
     const totalSpent = budgeted.reduce((s, b) => s + (spendMap[b.id]?.[p] || 0), 0);
-    running += totalBudget - totalSpent;
-    return { period: periodLabelFn(p), cumulative: running };
+    return { period: periodLabelFn(p), delta: totalBudget - totalSpent };
   });
 
   return (
     <div className="panel chart-card">
       <div className="hint" style={{ marginBottom: 4 }}>
-        {title} — running total saved (above the line) or over budget (below it), combined across every
-        budgeted category and group on this cadence
+        {title} — how much was saved (green, above the line) or overspent (red, below it) that period,
+        combined across every budgeted category and group on this cadence
       </div>
       <div className="chart-wrap" style={{ height: 220 }}>
         <ResponsiveContainer>
-          <LineChart data={data} margin={{ top: 10, right: 16, left: 0, bottom: 0 }}>
+          <BarChart data={data} margin={{ top: 10, right: 16, left: 0, bottom: 0 }}>
             <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" />
             <XAxis dataKey="period" tick={{ fontSize: 11, fill: "var(--ink-muted)" }} />
             <YAxis tick={{ fontSize: 11, fill: "var(--ink-muted)" }} tickFormatter={(v) => formatMoney(v)} width={72} />
-            <ReferenceLine y={0} stroke="var(--ink-muted)" strokeDasharray="4 4" />
+            <ReferenceLine y={0} stroke="var(--ink-muted)" />
             <Tooltip
               formatter={(value) => formatMoney(value)}
               wrapperStyle={{ zIndex: 100 }}
@@ -2810,8 +2818,12 @@ function BudgetTrendChart({ title, periods, budgeted, spendMap, periodLabelFn })
                 boxShadow: "0 4px 14px rgba(0,0,0,0.12)",
               }}
             />
-            <Line type="monotone" dataKey="cumulative" stroke="var(--accent)" strokeWidth={2} dot={{ r: 3 }} />
-          </LineChart>
+            <Bar dataKey="delta">
+              {data.map((entry, i) => (
+                <Cell key={i} fill={entry.delta >= 0 ? "var(--income)" : "var(--expense)"} />
+              ))}
+            </Bar>
+          </BarChart>
         </ResponsiveContainer>
       </div>
     </div>
@@ -2853,7 +2865,7 @@ function buildBudgetItems(categories, budgetGroups) {
   return [...groupItems, ...categoryItems];
 }
 
-function BudgetView({ transactions, categories, budgetGroups, onSetActual, onGoCategories }) {
+function BudgetView({ transactions, categories, budgetGroups, hiddenBudgetMonths, onSetActual, onToggleHiddenMonth, onGoCategories }) {
   const budgetItems = useMemo(() => buildBudgetItems(categories, budgetGroups), [categories, budgetGroups]);
 
   const weeklyData = useMemo(
@@ -2883,6 +2895,25 @@ function BudgetView({ transactions, categories, budgetGroups, onSetActual, onGoC
     const cells = data.spendMap[itemId] || {};
     return Object.values(cells).reduce((s, v) => s + v, 0);
   }
+
+  const hiddenSet = new Set(hiddenBudgetMonths || []);
+
+  // Only the chart and history table look at this — the "this week/this
+  // month" progress cards above them are about the live current period,
+  // which doesn't make sense to hide.
+  function visiblePeriods(data) {
+    if (!data) return [];
+    return data.periods.filter((p) => !hiddenSet.has(getMonthStartISO(p)));
+  }
+  const weeklyVisiblePeriods = visiblePeriods(weeklyData);
+  const monthlyVisiblePeriods = visiblePeriods(monthlyData);
+
+  const allMonthsPresent = useMemo(() => {
+    const months = new Set();
+    (weeklyData?.periods || []).forEach((p) => months.add(getMonthStartISO(p)));
+    (monthlyData?.periods || []).forEach((p) => months.add(p));
+    return Array.from(months).sort();
+  }, [weeklyData, monthlyData]);
 
   return (
     <div>
@@ -2930,12 +2961,43 @@ function BudgetView({ transactions, categories, budgetGroups, onSetActual, onGoC
         </>
       )}
 
-      {weeklyData && weeklyData.periods.length > 1 && (
+      {allMonthsPresent.length > 0 && (
         <>
-          <h3 style={{ marginBottom: 10, fontSize: 16 }}>Weekly trend</h3>
-          <BudgetTrendChart
+          <h3 style={{ marginBottom: 10, fontSize: 16 }}>Excluded months</h3>
+          <div className="panel" style={{ marginBottom: 22 }}>
+            <p className="hint" style={{ marginBottom: 10 }}>
+              Hide a month from the chart and history below — handy for a starting month that's only partially
+              imported and throws everything else off.
+            </p>
+            <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
+              {allMonthsPresent.map((m) => {
+                const hidden = hiddenSet.has(m);
+                return (
+                  <button
+                    key={m}
+                    className="btn btn-sm"
+                    style={
+                      hidden
+                        ? { border: "1px solid var(--expense)", color: "var(--expense)", background: "#fff" }
+                        : { border: "1px solid var(--border)", color: "var(--ink)", background: "#fff" }
+                    }
+                    onClick={() => onToggleHiddenMonth(m)}
+                  >
+                    {formatMonthLabel(m)} {hidden ? "(hidden) — show" : "— hide"}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+        </>
+      )}
+
+      {weeklyVisiblePeriods.length > 1 && (
+        <>
+          <h3 style={{ marginBottom: 10, fontSize: 16 }}>Weekly performance</h3>
+          <BudgetPerformanceChart
             title="Weekly"
-            periods={weeklyData.periods}
+            periods={weeklyVisiblePeriods}
             budgeted={weeklyData.budgeted}
             spendMap={weeklyData.spendMap}
             periodLabelFn={formatWeekLabel}
@@ -2943,12 +3005,12 @@ function BudgetView({ transactions, categories, budgetGroups, onSetActual, onGoC
         </>
       )}
 
-      {monthlyData && monthlyData.periods.length > 1 && (
+      {monthlyVisiblePeriods.length > 1 && (
         <>
-          <h3 style={{ marginTop: 22, marginBottom: 10, fontSize: 16 }}>Monthly trend</h3>
-          <BudgetTrendChart
+          <h3 style={{ marginTop: 22, marginBottom: 10, fontSize: 16 }}>Monthly performance</h3>
+          <BudgetPerformanceChart
             title="Monthly"
-            periods={monthlyData.periods}
+            periods={monthlyVisiblePeriods}
             budgeted={monthlyData.budgeted}
             spendMap={monthlyData.spendMap}
             periodLabelFn={formatMonthLabel}
@@ -2956,24 +3018,24 @@ function BudgetView({ transactions, categories, budgetGroups, onSetActual, onGoC
         </>
       )}
 
-      {weeklyData && weeklyData.periods.length > 1 && (
+      {weeklyVisiblePeriods.length > 1 && (
         <>
           <h3 style={{ marginTop: 22, marginBottom: 10, fontSize: 16 }}>Weekly history</h3>
           <BudgetHistoryTable
             budgeted={weeklyData.budgeted}
-            periods={weeklyData.periods}
+            periods={weeklyVisiblePeriods}
             spendMap={weeklyData.spendMap}
             periodLabelFn={formatWeekLabel}
           />
         </>
       )}
 
-      {monthlyData && monthlyData.periods.length > 1 && (
+      {monthlyVisiblePeriods.length > 1 && (
         <>
           <h3 style={{ marginTop: 22, marginBottom: 10, fontSize: 16 }}>Monthly history</h3>
           <BudgetHistoryTable
             budgeted={monthlyData.budgeted}
-            periods={monthlyData.periods}
+            periods={monthlyVisiblePeriods}
             spendMap={monthlyData.spendMap}
             periodLabelFn={formatMonthLabel}
           />
@@ -3526,51 +3588,6 @@ function PlanningView({
               ))}
             </div>
           )}
-
-          <h3 style={{ marginTop: 22, marginBottom: 10, fontSize: 16 }}>Assigned so far</h3>
-          {budgeted.length === 0 ? (
-            <div className="panel">
-              <div className="hint">No budgets assigned yet — set one from Categories or Budget Groups.</div>
-            </div>
-          ) : (
-            <div className="panel" style={{ padding: 0, overflowX: "auto" }}>
-              <table className="pivot-table">
-                <thead>
-                  <tr>
-                    <th>Category / Group</th>
-                    <th>Budgeted</th>
-                    <th>Monthly equivalent</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {budgeted.map((b) => (
-                    <tr key={b.id}>
-                      <td className="pivot-row-label">
-                        {b.name}
-                        {b.isGroup && <span className="budget-group-tag">group</span>}
-                        {b.budgetType === "accumulate" && (
-                          <span className="budget-group-tag" style={{ borderColor: "var(--income)", color: "var(--income)" }}>
-                            saving
-                          </span>
-                        )}
-                      </td>
-                      <td>
-                        {formatMoney(b.budgetAmount)} / {b.budgetPeriod === "weekly" ? "week" : "month"}
-                      </td>
-                      <td>{formatMoney(monthlyEquivalent(b.budgetAmount, b.budgetPeriod))}</td>
-                    </tr>
-                  ))}
-                </tbody>
-                <tfoot>
-                  <tr>
-                    <td className="pivot-row-label">Total</td>
-                    <td></td>
-                    <td style={{ fontWeight: 700 }}>{formatMoney(totalAssigned)}</td>
-                  </tr>
-                </tfoot>
-              </table>
-            </div>
-          )}
         </>
       )}
     </div>
@@ -3866,6 +3883,7 @@ function App({ householdName } = {}) {
   const [budgetGroups, setBudgetGroups] = useState([]);
   const [plannedIncome, setPlannedIncome] = useState(null);
   const [incomeWarningDismissed, setIncomeWarningDismissed] = useState(false);
+  const [hiddenBudgetMonths, setHiddenBudgetMonths] = useState([]);
   const [view, setView] = useState("upload");
   const [saveError, setSaveError] = useState(null);
   const [toast, setToast] = useState(null);
@@ -3883,6 +3901,7 @@ function App({ householdName } = {}) {
       setBudgetGroups(data.budgetGroups || []);
       setPlannedIncome(data.plannedIncome != null ? data.plannedIncome : null);
       setIncomeWarningDismissed(!!data.incomeWarningDismissed);
+      setHiddenBudgetMonths(data.hiddenBudgetMonths || []);
       setLoaded(true);
       if (nextAccounts.length > 0) setView("transactions");
     });
@@ -3898,20 +3917,30 @@ function App({ householdName } = {}) {
   }, [toast]);
 
   const persist = useCallback(
-    async (nextAccounts, nextTransactions, nextCategories, nextBudgetGroups, nextPlannedIncome, nextIncomeWarningDismissed) => {
+    async (
+      nextAccounts,
+      nextTransactions,
+      nextCategories,
+      nextBudgetGroups,
+      nextPlannedIncome,
+      nextIncomeWarningDismissed,
+      nextHiddenBudgetMonths
+    ) => {
       setAccounts(nextAccounts);
       setTransactions(nextTransactions);
       setCategories(nextCategories);
       setBudgetGroups(nextBudgetGroups);
       setPlannedIncome(nextPlannedIncome);
       setIncomeWarningDismissed(nextIncomeWarningDismissed);
+      setHiddenBudgetMonths(nextHiddenBudgetMonths);
       const ok = await saveData(
         nextAccounts,
         nextTransactions,
         nextCategories,
         nextBudgetGroups,
         nextPlannedIncome,
-        nextIncomeWarningDismissed
+        nextIncomeWarningDismissed,
+        nextHiddenBudgetMonths
       );
       setSaveError(ok ? null : "Your last change couldn't be saved locally — it may not persist after reload.");
     },
@@ -3958,20 +3987,20 @@ function App({ householdName } = {}) {
         );
       }
       const nextTransactions = [...transactions, ...valid];
-      persist(nextAccounts, nextTransactions, categories, budgetGroups, plannedIncome, incomeWarningDismissed);
+      persist(nextAccounts, nextTransactions, categories, budgetGroups, plannedIncome, incomeWarningDismissed, hiddenBudgetMonths);
       setView("transactions");
       setToast(`Imported ${valid.length} transaction${valid.length === 1 ? "" : "s"} into ${accountMeta.name}.`);
     },
-    [accounts, transactions, categories, budgetGroups, plannedIncome, incomeWarningDismissed, persist]
+    [accounts, transactions, categories, budgetGroups, plannedIncome, incomeWarningDismissed, hiddenBudgetMonths, persist]
   );
 
   const handleDeleteAccount = useCallback(
     (accountId) => {
       const nextAccounts = accounts.filter((a) => a.id !== accountId);
       const nextTransactions = transactions.filter((t) => t.accountId !== accountId);
-      persist(nextAccounts, nextTransactions, categories, budgetGroups, plannedIncome, incomeWarningDismissed);
+      persist(nextAccounts, nextTransactions, categories, budgetGroups, plannedIncome, incomeWarningDismissed, hiddenBudgetMonths);
     },
-    [accounts, transactions, categories, budgetGroups, plannedIncome, incomeWarningDismissed, persist]
+    [accounts, transactions, categories, budgetGroups, plannedIncome, incomeWarningDismissed, hiddenBudgetMonths, persist]
   );
 
   const handleRenameAccount = useCallback(
@@ -3982,9 +4011,9 @@ function App({ householdName } = {}) {
       const nextTransactions = transactions.map((t) =>
         t.accountId === accountId ? { ...t, accountName: trimmed } : t
       );
-      persist(nextAccounts, nextTransactions, categories, budgetGroups, plannedIncome, incomeWarningDismissed);
+      persist(nextAccounts, nextTransactions, categories, budgetGroups, plannedIncome, incomeWarningDismissed, hiddenBudgetMonths);
     },
-    [accounts, transactions, categories, budgetGroups, plannedIncome, incomeWarningDismissed, persist]
+    [accounts, transactions, categories, budgetGroups, plannedIncome, incomeWarningDismissed, hiddenBudgetMonths, persist]
   );
 
   const handleUpdateAccountSettings = useCallback(
@@ -4011,25 +4040,25 @@ function App({ householdName } = {}) {
         }
         return { ...t, date: mapped.date, description: mapped.description, amountOut: mapped.amountOut, amountIn: mapped.amountIn };
       });
-      persist(nextAccounts, nextTransactions, categories, budgetGroups, plannedIncome, incomeWarningDismissed);
+      persist(nextAccounts, nextTransactions, categories, budgetGroups, plannedIncome, incomeWarningDismissed, hiddenBudgetMonths);
       setToast(
         skipped > 0
           ? `Updated account settings. ${skipped} transaction${skipped === 1 ? "" : "s"} couldn't be remapped and were left as-is.`
           : "Updated account settings and reapplied them to existing transactions."
       );
     },
-    [accounts, transactions, categories, budgetGroups, plannedIncome, incomeWarningDismissed, persist]
+    [accounts, transactions, categories, budgetGroups, plannedIncome, incomeWarningDismissed, hiddenBudgetMonths, persist]
   );
 
   const handleRestoreFromBackup = useCallback(
     (newAccounts, newCategories, newTransactions) => {
-      persist(newAccounts, newTransactions, newCategories, budgetGroups, plannedIncome, incomeWarningDismissed);
+      persist(newAccounts, newTransactions, newCategories, budgetGroups, plannedIncome, incomeWarningDismissed, hiddenBudgetMonths);
       setView("transactions");
       setToast(
         `Restored ${newTransactions.length} transaction${newTransactions.length === 1 ? "" : "s"} from backup.`
       );
     },
-    [budgetGroups, plannedIncome, incomeWarningDismissed, persist]
+    [budgetGroups, plannedIncome, incomeWarningDismissed, hiddenBudgetMonths, persist]
   );
 
   const handleRestoreBudget = useCallback(
@@ -4040,27 +4069,28 @@ function App({ householdName } = {}) {
         newCategories,
         newBudgetGroups,
         restoredPlannedIncome != null ? restoredPlannedIncome : plannedIncome,
-        incomeWarningDismissed
+        incomeWarningDismissed,
+        hiddenBudgetMonths
       );
       setToast("Applied budget setup from file.");
     },
-    [accounts, transactions, plannedIncome, incomeWarningDismissed, persist]
+    [accounts, transactions, plannedIncome, incomeWarningDismissed, hiddenBudgetMonths, persist]
   );
 
   const handleUpdateTransaction = useCallback(
     (id, updates) => {
       const nextTransactions = transactions.map((t) => (t.id === id ? { ...t, ...updates } : t));
-      persist(accounts, nextTransactions, categories, budgetGroups, plannedIncome, incomeWarningDismissed);
+      persist(accounts, nextTransactions, categories, budgetGroups, plannedIncome, incomeWarningDismissed, hiddenBudgetMonths);
     },
-    [accounts, transactions, categories, budgetGroups, plannedIncome, incomeWarningDismissed, persist]
+    [accounts, transactions, categories, budgetGroups, plannedIncome, incomeWarningDismissed, hiddenBudgetMonths, persist]
   );
 
   const handleDeleteTransaction = useCallback(
     (id) => {
       const nextTransactions = transactions.filter((t) => t.id !== id);
-      persist(accounts, nextTransactions, categories, budgetGroups, plannedIncome, incomeWarningDismissed);
+      persist(accounts, nextTransactions, categories, budgetGroups, plannedIncome, incomeWarningDismissed, hiddenBudgetMonths);
     },
-    [accounts, transactions, categories, budgetGroups, plannedIncome, incomeWarningDismissed, persist]
+    [accounts, transactions, categories, budgetGroups, plannedIncome, incomeWarningDismissed, hiddenBudgetMonths, persist]
   );
 
   const handleAddCategory = useCallback(
@@ -4079,25 +4109,25 @@ function App({ householdName } = {}) {
           createdAt: new Date().toISOString(),
         },
       ];
-      persist(accounts, transactions, nextCategories, budgetGroups, plannedIncome, incomeWarningDismissed);
+      persist(accounts, transactions, nextCategories, budgetGroups, plannedIncome, incomeWarningDismissed, hiddenBudgetMonths);
     },
-    [accounts, transactions, categories, budgetGroups, plannedIncome, incomeWarningDismissed, persist]
+    [accounts, transactions, categories, budgetGroups, plannedIncome, incomeWarningDismissed, hiddenBudgetMonths, persist]
   );
 
   const handleRenameCategory = useCallback(
     (categoryId, newName) => {
       const nextCategories = categories.map((c) => (c.id === categoryId ? { ...c, name: newName } : c));
-      persist(accounts, transactions, nextCategories, budgetGroups, plannedIncome, incomeWarningDismissed);
+      persist(accounts, transactions, nextCategories, budgetGroups, plannedIncome, incomeWarningDismissed, hiddenBudgetMonths);
     },
-    [accounts, transactions, categories, budgetGroups, plannedIncome, incomeWarningDismissed, persist]
+    [accounts, transactions, categories, budgetGroups, plannedIncome, incomeWarningDismissed, hiddenBudgetMonths, persist]
   );
 
   const handleToggleCategoryExcluded = useCallback(
     (categoryId, excluded) => {
       const nextCategories = categories.map((c) => (c.id === categoryId ? { ...c, excluded } : c));
-      persist(accounts, transactions, nextCategories, budgetGroups, plannedIncome, incomeWarningDismissed);
+      persist(accounts, transactions, nextCategories, budgetGroups, plannedIncome, incomeWarningDismissed, hiddenBudgetMonths);
     },
-    [accounts, transactions, categories, budgetGroups, plannedIncome, incomeWarningDismissed, persist]
+    [accounts, transactions, categories, budgetGroups, plannedIncome, incomeWarningDismissed, hiddenBudgetMonths, persist]
   );
 
   const handleSetCategoryBudget = useCallback(
@@ -4114,9 +4144,9 @@ function App({ householdName } = {}) {
             }
           : c
       );
-      persist(accounts, transactions, nextCategories, budgetGroups, plannedIncome, incomeWarningDismissed);
+      persist(accounts, transactions, nextCategories, budgetGroups, plannedIncome, incomeWarningDismissed, hiddenBudgetMonths);
     },
-    [accounts, transactions, categories, budgetGroups, plannedIncome, incomeWarningDismissed, persist]
+    [accounts, transactions, categories, budgetGroups, plannedIncome, incomeWarningDismissed, hiddenBudgetMonths, persist]
   );
 
   const handleMergeCategory = useCallback(
@@ -4128,10 +4158,10 @@ function App({ householdName } = {}) {
       const nextTransactions = transactions.map((t) =>
         t.categoryId === sourceCategoryId ? { ...t, categoryId: targetCategoryId } : t
       );
-      persist(accounts, nextTransactions, nextCategories, budgetGroups, plannedIncome, incomeWarningDismissed);
+      persist(accounts, nextTransactions, nextCategories, budgetGroups, plannedIncome, incomeWarningDismissed, hiddenBudgetMonths);
       setToast(`Merged "${source?.name || "category"}" into "${target?.name || "category"}".`);
     },
-    [accounts, transactions, categories, budgetGroups, plannedIncome, incomeWarningDismissed, persist]
+    [accounts, transactions, categories, budgetGroups, plannedIncome, incomeWarningDismissed, hiddenBudgetMonths, persist]
   );
 
   const handleAddBudgetGroup = useCallback(
@@ -4150,17 +4180,17 @@ function App({ householdName } = {}) {
           createdAt: new Date().toISOString(),
         },
       ];
-      persist(accounts, transactions, categories, nextGroups, plannedIncome, incomeWarningDismissed);
+      persist(accounts, transactions, categories, nextGroups, plannedIncome, incomeWarningDismissed, hiddenBudgetMonths);
     },
-    [accounts, transactions, categories, budgetGroups, plannedIncome, incomeWarningDismissed, persist]
+    [accounts, transactions, categories, budgetGroups, plannedIncome, incomeWarningDismissed, hiddenBudgetMonths, persist]
   );
 
   const handleRenameBudgetGroup = useCallback(
     (groupId, newName) => {
       const nextGroups = budgetGroups.map((g) => (g.id === groupId ? { ...g, name: newName } : g));
-      persist(accounts, transactions, categories, nextGroups, plannedIncome, incomeWarningDismissed);
+      persist(accounts, transactions, categories, nextGroups, plannedIncome, incomeWarningDismissed, hiddenBudgetMonths);
     },
-    [accounts, transactions, categories, budgetGroups, plannedIncome, incomeWarningDismissed, persist]
+    [accounts, transactions, categories, budgetGroups, plannedIncome, incomeWarningDismissed, hiddenBudgetMonths, persist]
   );
 
   const handleSetBudgetGroupBudget = useCallback(
@@ -4177,9 +4207,9 @@ function App({ householdName } = {}) {
             }
           : g
       );
-      persist(accounts, transactions, categories, nextGroups, plannedIncome, incomeWarningDismissed);
+      persist(accounts, transactions, categories, nextGroups, plannedIncome, incomeWarningDismissed, hiddenBudgetMonths);
     },
-    [accounts, transactions, categories, budgetGroups, plannedIncome, incomeWarningDismissed, persist]
+    [accounts, transactions, categories, budgetGroups, plannedIncome, incomeWarningDismissed, hiddenBudgetMonths, persist]
   );
 
   const handleSetAccumulateActual = useCallback(
@@ -4190,31 +4220,41 @@ function App({ householdName } = {}) {
         const nextGroups = budgetGroups.map((g) =>
           g.id === rawId ? { ...g, accumulateActuals: { ...(g.accumulateActuals || {}), [periodKey]: amount } } : g
         );
-        persist(accounts, transactions, categories, nextGroups, plannedIncome, incomeWarningDismissed);
+        persist(accounts, transactions, categories, nextGroups, plannedIncome, incomeWarningDismissed, hiddenBudgetMonths);
       } else {
         const nextCategories = categories.map((c) =>
           c.id === rawId ? { ...c, accumulateActuals: { ...(c.accumulateActuals || {}), [periodKey]: amount } } : c
         );
-        persist(accounts, transactions, nextCategories, budgetGroups, plannedIncome, incomeWarningDismissed);
+        persist(accounts, transactions, nextCategories, budgetGroups, plannedIncome, incomeWarningDismissed, hiddenBudgetMonths);
       }
     },
-    [accounts, transactions, categories, budgetGroups, plannedIncome, incomeWarningDismissed, persist]
+    [accounts, transactions, categories, budgetGroups, plannedIncome, incomeWarningDismissed, hiddenBudgetMonths, persist]
   );
 
   const handleSetPlannedIncome = useCallback(
     (amount) => {
       // A newly-set plan deserves a fresh evaluation rather than staying
       // silenced against the old one.
-      persist(accounts, transactions, categories, budgetGroups, amount, false);
+      persist(accounts, transactions, categories, budgetGroups, amount, false, hiddenBudgetMonths);
     },
-    [accounts, transactions, categories, budgetGroups, persist]
+    [accounts, transactions, categories, budgetGroups, hiddenBudgetMonths, persist]
   );
 
   const handleDismissIncomeWarning = useCallback(
     (dismissed) => {
-      persist(accounts, transactions, categories, budgetGroups, plannedIncome, dismissed);
+      persist(accounts, transactions, categories, budgetGroups, plannedIncome, dismissed, hiddenBudgetMonths);
     },
-    [accounts, transactions, categories, budgetGroups, plannedIncome, persist]
+    [accounts, transactions, categories, budgetGroups, plannedIncome, hiddenBudgetMonths, persist]
+  );
+
+  const handleToggleHiddenBudgetMonth = useCallback(
+    (monthKey) => {
+      const nextHidden = hiddenBudgetMonths.includes(monthKey)
+        ? hiddenBudgetMonths.filter((k) => k !== monthKey)
+        : [...hiddenBudgetMonths, monthKey];
+      persist(accounts, transactions, categories, budgetGroups, plannedIncome, incomeWarningDismissed, nextHidden);
+    },
+    [accounts, transactions, categories, budgetGroups, plannedIncome, incomeWarningDismissed, hiddenBudgetMonths, persist]
   );
 
   const handleAddCategoryToGroup = useCallback(
@@ -4229,9 +4269,9 @@ function App({ householdName } = {}) {
         const ids = g.categoryIds || [];
         return ids.includes(categoryId) ? { ...g, categoryIds: ids.filter((id) => id !== categoryId) } : g;
       });
-      persist(accounts, transactions, categories, nextGroups, plannedIncome, incomeWarningDismissed);
+      persist(accounts, transactions, categories, nextGroups, plannedIncome, incomeWarningDismissed, hiddenBudgetMonths);
     },
-    [accounts, transactions, categories, budgetGroups, plannedIncome, incomeWarningDismissed, persist]
+    [accounts, transactions, categories, budgetGroups, plannedIncome, incomeWarningDismissed, hiddenBudgetMonths, persist]
   );
 
   const handleRemoveCategoryFromGroup = useCallback(
@@ -4239,17 +4279,17 @@ function App({ householdName } = {}) {
       const nextGroups = budgetGroups.map((g) =>
         g.id === groupId ? { ...g, categoryIds: (g.categoryIds || []).filter((id) => id !== categoryId) } : g
       );
-      persist(accounts, transactions, categories, nextGroups, plannedIncome, incomeWarningDismissed);
+      persist(accounts, transactions, categories, nextGroups, plannedIncome, incomeWarningDismissed, hiddenBudgetMonths);
     },
-    [accounts, transactions, categories, budgetGroups, plannedIncome, incomeWarningDismissed, persist]
+    [accounts, transactions, categories, budgetGroups, plannedIncome, incomeWarningDismissed, hiddenBudgetMonths, persist]
   );
 
   const handleDeleteBudgetGroup = useCallback(
     (groupId) => {
       const nextGroups = budgetGroups.filter((g) => g.id !== groupId);
-      persist(accounts, transactions, categories, nextGroups, plannedIncome, incomeWarningDismissed);
+      persist(accounts, transactions, categories, nextGroups, plannedIncome, incomeWarningDismissed, hiddenBudgetMonths);
     },
-    [accounts, transactions, categories, budgetGroups, plannedIncome, incomeWarningDismissed, persist]
+    [accounts, transactions, categories, budgetGroups, plannedIncome, incomeWarningDismissed, hiddenBudgetMonths, persist]
   );
 
   const handleDeleteCategory = useCallback(
@@ -4258,9 +4298,9 @@ function App({ householdName } = {}) {
       const nextTransactions = transactions.map((t) =>
         t.categoryId === categoryId ? { ...t, categoryId: null } : t
       );
-      persist(accounts, nextTransactions, nextCategories, budgetGroups, plannedIncome, incomeWarningDismissed);
+      persist(accounts, nextTransactions, nextCategories, budgetGroups, plannedIncome, incomeWarningDismissed, hiddenBudgetMonths);
     },
-    [accounts, transactions, categories, budgetGroups, plannedIncome, incomeWarningDismissed, persist]
+    [accounts, transactions, categories, budgetGroups, plannedIncome, incomeWarningDismissed, hiddenBudgetMonths, persist]
   );
 
   if (!loaded) {
@@ -4317,15 +4357,6 @@ function App({ householdName } = {}) {
             </button>
 
             <div className="sidebar-section-divider" />
-            <div className="sidebar-nav-label">Data</div>
-            <button
-              className={"nav-btn" + (view === "backup" ? " active" : "")}
-              onClick={() => setView("backup")}
-            >
-              Backup
-            </button>
-
-            <div className="sidebar-section-divider" />
             <div className="sidebar-nav-label">Budgeting</div>
             <button
               className={"nav-btn" + (view === "planning" ? " active" : "")}
@@ -4344,6 +4375,15 @@ function App({ householdName } = {}) {
               onClick={() => setView("budget")}
             >
               Budget
+            </button>
+
+            <div className="sidebar-section-divider" />
+            <div className="sidebar-nav-label">Data</div>
+            <button
+              className={"nav-btn" + (view === "backup" ? " active" : "")}
+              onClick={() => setView("backup")}
+            >
+              Backup
             </button>
           </div>
           <div className="sidebar-stats">
@@ -4404,7 +4444,9 @@ function App({ householdName } = {}) {
               transactions={transactions}
               categories={categories}
               budgetGroups={budgetGroups}
+              hiddenBudgetMonths={hiddenBudgetMonths}
               onSetActual={handleSetAccumulateActual}
+              onToggleHiddenMonth={handleToggleHiddenBudgetMonth}
               onGoCategories={() => setView("categories")}
             />
           )}
