@@ -44,19 +44,27 @@ async function loadData() {
         categories: categories.map((c) => normalizeBudgetItem({ ...c, excluded: !!c.excluded })),
         budgetGroups: budgetGroups.map(normalizeBudgetItem),
         plannedIncome: parsed.plannedIncome != null ? parsed.plannedIncome : null,
+        incomeWarningDismissed: !!parsed.incomeWarningDismissed,
       };
     }
   } catch (e) {
     /* key doesn't exist yet on first run */
   }
-  return { accounts: [], transactions: [], categories: createDefaultCategories(), budgetGroups: [], plannedIncome: null };
+  return {
+    accounts: [],
+    transactions: [],
+    categories: createDefaultCategories(),
+    budgetGroups: [],
+    plannedIncome: null,
+    incomeWarningDismissed: false,
+  };
 }
 
-async function saveData(accounts, transactions, categories, budgetGroups, plannedIncome) {
+async function saveData(accounts, transactions, categories, budgetGroups, plannedIncome, incomeWarningDismissed) {
   try {
     const result = await window.storage.set(
       STORAGE_KEY,
-      JSON.stringify({ accounts, transactions, categories, budgetGroups, plannedIncome }),
+      JSON.stringify({ accounts, transactions, categories, budgetGroups, plannedIncome, incomeWarningDismissed }),
       false
     );
     return !!result;
@@ -865,9 +873,14 @@ const STYLES = `
   letter-spacing: 0.05em;
   color: var(--ink-muted);
   font-weight: 600;
-  padding: 14px 10px 4px;
+  padding: 6px 10px 4px;
 }
 .sidebar-nav-label:first-child { padding-top: 2px; }
+
+.sidebar-section-divider {
+  border-top: 1px solid var(--border);
+  margin: 12px 10px 4px;
+}
 
 .nav-btn {
   display: flex;
@@ -1215,6 +1228,7 @@ const STYLES = `
   .sidebar-nav { flex-direction: row; }
   .sidebar-nav .nav-btn { flex-shrink: 0; }
   .sidebar-nav-label { display: none; }
+  .sidebar-section-divider { display: none; }
   .sidebar-stats { display: none; }
   .main { padding: 18px 14px 50px; }
   .form-grid { grid-template-columns: 1fr; }
@@ -1884,38 +1898,15 @@ function AccountsView({ accounts, transactions, onDelete, onAddTransactions, onR
 /* Categories view                                                      */
 /* ------------------------------------------------------------------ */
 
-function CategoryCard({ category, categories, budgetGroups, txCount, onRename, onDelete, onToggleExcluded, onMerge, onSetBudget }) {
+function CategoryCard({ category, categories, txCount, onRename, onDelete, onToggleExcluded, onMerge }) {
   const [editing, setEditing] = useState(false);
   const [draftName, setDraftName] = useState(category.name);
   const [confirming, setConfirming] = useState(false);
   const [merging, setMerging] = useState(false);
   const [mergeTargetId, setMergeTargetId] = useState("");
   const [mergeConfirming, setMergeConfirming] = useState(false);
-  const [budgetAmountDraft, setBudgetAmountDraft] = useState(
-    category.budgetAmount != null ? String(category.budgetAmount) : ""
-  );
-  const [budgetPeriodDraft, setBudgetPeriodDraft] = useState(category.budgetPeriod || "monthly");
-  const [budgetTypeDraft, setBudgetTypeDraft] = useState(category.budgetType || "spend");
-  const [accumulateTargetDraft, setAccumulateTargetDraft] = useState(
-    category.accumulateTarget != null ? String(category.accumulateTarget) : ""
-  );
 
   const otherCategories = categories.filter((c) => c.id !== category.id);
-  const memberOfGroup = (budgetGroups || []).find((g) => (g.categoryIds || []).includes(category.id));
-
-  function handleSaveBudget() {
-    const trimmed = budgetAmountDraft.trim();
-    const amount = trimmed === "" ? null : parseMoney(trimmed);
-    const targetTrimmed = accumulateTargetDraft.trim();
-    const target = targetTrimmed === "" ? null : parseMoney(targetTrimmed);
-    onSetBudget(
-      category.id,
-      amount != null && amount > 0 ? amount : null,
-      budgetPeriodDraft,
-      budgetTypeDraft,
-      target != null && target > 0 ? target : null
-    );
-  }
 
   function startEdit() {
     setDraftName(category.name);
@@ -1982,51 +1973,6 @@ function CategoryCard({ category, categories, budgetGroups, txCount, onRename, o
           />
           Exclude from totals &amp; reports (e.g. transfers between your own accounts)
         </label>
-        {memberOfGroup ? (
-          <div className="budget-row">
-            <span className="budget-row-label" style={{ fontWeight: 400 }}>
-              Budgeted as part of the "{memberOfGroup.name}" group — manage it from Budget Groups.
-            </span>
-          </div>
-        ) : (
-          <>
-            <div className="budget-row">
-              <span className="budget-row-label">Budget:</span>
-              <input
-                type="text"
-                className="budget-amount-input"
-                placeholder="none"
-                value={budgetAmountDraft}
-                onChange={(e) => setBudgetAmountDraft(e.target.value)}
-              />
-              <select value={budgetPeriodDraft} onChange={(e) => setBudgetPeriodDraft(e.target.value)}>
-                <option value="weekly">per week</option>
-                <option value="monthly">per month</option>
-              </select>
-              <select value={budgetTypeDraft} onChange={(e) => setBudgetTypeDraft(e.target.value)}>
-                <option value="spend">Spend</option>
-                <option value="accumulate">Accumulate</option>
-              </select>
-              <button className="btn btn-ghost btn-sm" onClick={handleSaveBudget}>
-                Save
-              </button>
-            </div>
-            {budgetTypeDraft === "accumulate" && (
-              <div className="budget-row" style={{ marginTop: 4 }}>
-                <span className="budget-row-label" style={{ fontWeight: 400 }}>
-                  Target (optional):
-                </span>
-                <input
-                  type="text"
-                  className="budget-amount-input"
-                  placeholder="e.g. 3000"
-                  value={accumulateTargetDraft}
-                  onChange={(e) => setAccumulateTargetDraft(e.target.value)}
-                />
-              </div>
-            )}
-          </>
-        )}
       </div>
       <div className="row-actions">
         {merging ? (
@@ -2087,7 +2033,7 @@ function CategoryCard({ category, categories, budgetGroups, txCount, onRename, o
   );
 }
 
-function CategoriesView({ categories, transactions, budgetGroups, onAdd, onRename, onDelete, onToggleExcluded, onMerge, onSetBudget }) {
+function CategoriesView({ categories, transactions, onAdd, onRename, onDelete, onToggleExcluded, onMerge }) {
   const [newName, setNewName] = useState("");
 
   function handleAdd(e) {
@@ -2134,13 +2080,11 @@ function CategoriesView({ categories, transactions, budgetGroups, onAdd, onRenam
               key={cat.id}
               category={cat}
               categories={categories}
-              budgetGroups={budgetGroups}
               txCount={transactions.filter((t) => t.categoryId === cat.id).length}
               onRename={onRename}
               onDelete={onDelete}
               onToggleExcluded={onToggleExcluded}
               onMerge={onMerge}
-              onSetBudget={onSetBudget}
             />
           ))
         )}
@@ -3055,6 +2999,9 @@ function BudgetGroupCard({ group, allCategories, onRename, onSetBudget, onAddCat
   const [accumulateTargetDraft, setAccumulateTargetDraft] = useState(
     group.accumulateTarget != null ? String(group.accumulateTarget) : ""
   );
+  const [startDateDraft, setStartDateDraft] = useState(
+    group.createdAt ? group.createdAt.slice(0, 10) : new Date().toISOString().slice(0, 10)
+  );
   const [addCategoryId, setAddCategoryId] = useState("");
 
   const memberCategories = allCategories.filter((c) => (group.categoryIds || []).includes(c.id));
@@ -3081,7 +3028,8 @@ function BudgetGroupCard({ group, allCategories, onRename, onSetBudget, onAddCat
       amount != null && amount > 0 ? amount : null,
       budgetPeriodDraft,
       budgetTypeDraft,
-      target != null && target > 0 ? target : null
+      target != null && target > 0 ? target : null,
+      budgetTypeDraft === "accumulate" ? startDateDraft : null
     );
   }
 
@@ -3209,6 +3157,21 @@ function BudgetGroupCard({ group, allCategories, onRename, onSetBudget, onAddCat
           />
         </div>
       )}
+      {budgetTypeDraft === "accumulate" && (
+        <div className="budget-row" style={{ marginTop: 4 }}>
+          <span className="budget-row-label" style={{ fontWeight: 400 }}>
+            Track since:
+          </span>
+          <input
+            type="date"
+            value={startDateDraft}
+            onChange={(e) => setStartDateDraft(e.target.value)}
+          />
+          <span className="muted-cell" style={{ fontSize: 11.5 }}>
+            Backdate this to see how you've been doing over past periods, not just from today forward.
+          </span>
+        </div>
+      )}
     </div>
   );
 }
@@ -3282,7 +3245,110 @@ function BudgetGroupsView({ budgetGroups, categories, onAdd, onRename, onDelete,
 /* Planning view                                                        */
 /* ------------------------------------------------------------------ */
 
-function PlanningView({ transactions, categories, budgetGroups, plannedIncome, onSetPlannedIncome }) {
+function PlanningCategoryRow({ category, groupName, onSetBudget }) {
+  const [budgetAmountDraft, setBudgetAmountDraft] = useState(
+    category.budgetAmount != null ? String(category.budgetAmount) : ""
+  );
+  const [budgetPeriodDraft, setBudgetPeriodDraft] = useState(category.budgetPeriod || "monthly");
+  const [budgetTypeDraft, setBudgetTypeDraft] = useState(category.budgetType || "spend");
+  const [accumulateTargetDraft, setAccumulateTargetDraft] = useState(
+    category.accumulateTarget != null ? String(category.accumulateTarget) : ""
+  );
+  const [startDateDraft, setStartDateDraft] = useState(
+    category.createdAt ? category.createdAt.slice(0, 10) : new Date().toISOString().slice(0, 10)
+  );
+
+  function handleSave() {
+    const trimmed = budgetAmountDraft.trim();
+    const amount = trimmed === "" ? null : parseMoney(trimmed);
+    const targetTrimmed = accumulateTargetDraft.trim();
+    const target = targetTrimmed === "" ? null : parseMoney(targetTrimmed);
+    onSetBudget(
+      category.id,
+      amount != null && amount > 0 ? amount : null,
+      budgetPeriodDraft,
+      budgetTypeDraft,
+      target != null && target > 0 ? target : null,
+      budgetTypeDraft === "accumulate" ? startDateDraft : null
+    );
+  }
+
+  if (groupName) {
+    return (
+      <div className="account-card">
+        <div>
+          <div className="name">{category.name}</div>
+          <div className="meta">Budgeted as part of the "{groupName}" group — manage it from Budget Groups.</div>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="account-card">
+      <div>
+        <div className="name">{category.name}</div>
+        <div className="budget-row" style={{ marginTop: 6 }}>
+          <span className="budget-row-label">Budget:</span>
+          <input
+            type="text"
+            className="budget-amount-input"
+            placeholder="none"
+            value={budgetAmountDraft}
+            onChange={(e) => setBudgetAmountDraft(e.target.value)}
+          />
+          <select value={budgetPeriodDraft} onChange={(e) => setBudgetPeriodDraft(e.target.value)}>
+            <option value="weekly">per week</option>
+            <option value="monthly">per month</option>
+          </select>
+          <select value={budgetTypeDraft} onChange={(e) => setBudgetTypeDraft(e.target.value)}>
+            <option value="spend">Spend</option>
+            <option value="accumulate">Accumulate</option>
+          </select>
+          <button className="btn btn-ghost btn-sm" onClick={handleSave}>
+            Save
+          </button>
+        </div>
+        {budgetTypeDraft === "accumulate" && (
+          <div className="budget-row" style={{ marginTop: 4 }}>
+            <span className="budget-row-label" style={{ fontWeight: 400 }}>
+              Target (optional):
+            </span>
+            <input
+              type="text"
+              className="budget-amount-input"
+              placeholder="e.g. 3000"
+              value={accumulateTargetDraft}
+              onChange={(e) => setAccumulateTargetDraft(e.target.value)}
+            />
+          </div>
+        )}
+        {budgetTypeDraft === "accumulate" && (
+          <div className="budget-row" style={{ marginTop: 4 }}>
+            <span className="budget-row-label" style={{ fontWeight: 400 }}>
+              Track since:
+            </span>
+            <input type="date" value={startDateDraft} onChange={(e) => setStartDateDraft(e.target.value)} />
+            <span className="muted-cell" style={{ fontSize: 11.5 }}>
+              Backdate this to see how you've been doing over past periods, not just from today forward.
+            </span>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function PlanningView({
+  transactions,
+  categories,
+  budgetGroups,
+  plannedIncome,
+  incomeWarningDismissed,
+  onSetPlannedIncome,
+  onDismissIncomeWarning,
+  onSetCategoryBudget,
+}) {
   const [draft, setDraft] = useState(plannedIncome != null ? String(plannedIncome) : "");
   const [editing, setEditing] = useState(plannedIncome == null);
 
@@ -3290,6 +3356,12 @@ function PlanningView({ transactions, categories, budgetGroups, plannedIncome, o
   const budgeted = budgetItems.filter((b) => b.budgetAmount != null && b.budgetAmount > 0);
   const totalAssigned = budgeted.reduce((s, b) => s + monthlyEquivalent(b.budgetAmount, b.budgetPeriod), 0);
   const unassigned = (plannedIncome || 0) - totalAssigned;
+
+  const groupNameByCategoryId = useMemo(() => {
+    const map = {};
+    budgetGroups.forEach((g) => (g.categoryIds || []).forEach((id) => (map[id] = g.name)));
+    return map;
+  }, [budgetGroups]);
 
   const monthlyActualIncome = useMemo(() => {
     const excludedIds = new Set(categories.filter((c) => c.excluded).map((c) => c.id));
@@ -3303,9 +3375,22 @@ function PlanningView({ transactions, categories, budgetGroups, plannedIncome, o
     return byMonth;
   }, [transactions, categories]);
 
+  // The earliest month with ANY transaction data is often partial too —
+  // e.g. an account added mid-month — not just the current, still-in-
+  // progress month. Both get excluded so the average is only ever built
+  // from genuinely complete calendar months.
+  const earliestDataMonthKey = useMemo(() => {
+    let earliest = null;
+    transactions.forEach((t) => {
+      if (!t.date) return;
+      if (earliest === null || t.date < earliest) earliest = t.date;
+    });
+    return earliest ? getMonthStartISO(earliest) : null;
+  }, [transactions]);
+
   const currentMonthKey = getMonthStartISO(new Date().toISOString().slice(0, 10));
   const completeMonths = Object.keys(monthlyActualIncome)
-    .filter((k) => k < currentMonthKey)
+    .filter((k) => k < currentMonthKey && k !== earliestDataMonthKey)
     .sort();
   const recentMonths = completeMonths.slice(-6);
   const avgActualIncome =
@@ -3314,7 +3399,8 @@ function PlanningView({ transactions, categories, budgetGroups, plannedIncome, o
       : null;
   const incomeDriftPct =
     avgActualIncome != null && plannedIncome > 0 ? ((avgActualIncome - plannedIncome) / plannedIncome) * 100 : null;
-  const showIncomeDriftWarning = recentMonths.length >= 2 && incomeDriftPct != null && Math.abs(incomeDriftPct) >= 10;
+  const showIncomeDriftWarning =
+    !incomeWarningDismissed && recentMonths.length >= 2 && incomeDriftPct != null && Math.abs(incomeDriftPct) >= 10;
 
   function handleSave() {
     const amount = draft.trim() === "" ? null : parseMoney(draft.trim());
@@ -3394,13 +3480,54 @@ function PlanningView({ transactions, categories, budgetGroups, plannedIncome, o
 
           {showIncomeDriftWarning && (
             <div className="error-banner">
-              Your actual income has averaged {formatMoney(avgActualIncome)}/month over the last{" "}
-              {recentMonths.length} month{recentMonths.length === 1 ? "" : "s"} — {Math.abs(Math.round(incomeDriftPct))}%{" "}
-              {incomeDriftPct > 0 ? "above" : "below"} your planned {formatMoney(plannedIncome)}. Worth updating
-              your plan.
+              <div>
+                Your actual income has averaged {formatMoney(avgActualIncome)}/month over the last{" "}
+                {recentMonths.length} month{recentMonths.length === 1 ? "" : "s"} — {Math.abs(Math.round(incomeDriftPct))}%{" "}
+                {incomeDriftPct > 0 ? "above" : "below"} your planned {formatMoney(plannedIncome)}. Worth updating
+                your plan.
+              </div>
+              <button
+                className="btn btn-ghost btn-sm"
+                style={{ marginTop: 8 }}
+                onClick={() => onDismissIncomeWarning(true)}
+              >
+                Dismiss this warning
+              </button>
             </div>
           )}
 
+          {incomeWarningDismissed && recentMonths.length >= 2 && incomeDriftPct != null && Math.abs(incomeDriftPct) >= 10 && (
+            <div className="hint" style={{ marginBottom: 12 }}>
+              Income drift warning dismissed for now.{" "}
+              <button className="btn btn-ghost btn-sm" onClick={() => onDismissIncomeWarning(false)}>
+                Show it again
+              </button>
+            </div>
+          )}
+
+          <h3 style={{ marginTop: 6, marginBottom: 10, fontSize: 16 }}>Category budgets</h3>
+          <p className="hint" style={{ marginBottom: 12 }}>
+            Set a budget on any category here. Categories already rolled into a group show up for reference,
+            but are budgeted from Budget Groups instead.
+          </p>
+          {categories.length === 0 ? (
+            <div className="panel">
+              <div className="hint">No categories yet — add some from the Categories tab first.</div>
+            </div>
+          ) : (
+            <div className="panel">
+              {categories.map((c) => (
+                <PlanningCategoryRow
+                  key={c.id}
+                  category={c}
+                  groupName={groupNameByCategoryId[c.id]}
+                  onSetBudget={onSetCategoryBudget}
+                />
+              ))}
+            </div>
+          )}
+
+          <h3 style={{ marginTop: 22, marginBottom: 10, fontSize: 16 }}>Assigned so far</h3>
           {budgeted.length === 0 ? (
             <div className="panel">
               <div className="hint">No budgets assigned yet — set one from Categories or Budget Groups.</div>
@@ -3552,6 +3679,15 @@ function BackupView({ accounts, transactions, categories, budgetGroups, plannedI
       <div className="view-header">
         <h1>Backup</h1>
         <p>Download everything as one CSV file, or rebuild the app's data from a backup file.</p>
+      </div>
+
+      <div className="excluded-note" style={{ justifyContent: "flex-start", marginBottom: 16, marginTop: 0 }}>
+        <span>
+          <strong>Order matters if you're restoring both:</strong> apply the ledger backup first, then the
+          budget backup. Budget settings attach to categories by name — the ledger restore is what creates
+          those categories in the first place, so applying the budget file before it (or without it) may
+          leave some budgets with nothing to attach to.
+        </span>
       </div>
 
       <div className="panel">
@@ -3729,6 +3865,7 @@ function App({ householdName } = {}) {
   const [categories, setCategories] = useState([]);
   const [budgetGroups, setBudgetGroups] = useState([]);
   const [plannedIncome, setPlannedIncome] = useState(null);
+  const [incomeWarningDismissed, setIncomeWarningDismissed] = useState(false);
   const [view, setView] = useState("upload");
   const [saveError, setSaveError] = useState(null);
   const [toast, setToast] = useState(null);
@@ -3745,6 +3882,7 @@ function App({ householdName } = {}) {
       setCategories(data.categories || []);
       setBudgetGroups(data.budgetGroups || []);
       setPlannedIncome(data.plannedIncome != null ? data.plannedIncome : null);
+      setIncomeWarningDismissed(!!data.incomeWarningDismissed);
       setLoaded(true);
       if (nextAccounts.length > 0) setView("transactions");
     });
@@ -3759,15 +3897,26 @@ function App({ householdName } = {}) {
     return () => clearTimeout(timer);
   }, [toast]);
 
-  const persist = useCallback(async (nextAccounts, nextTransactions, nextCategories, nextBudgetGroups, nextPlannedIncome) => {
-    setAccounts(nextAccounts);
-    setTransactions(nextTransactions);
-    setCategories(nextCategories);
-    setBudgetGroups(nextBudgetGroups);
-    setPlannedIncome(nextPlannedIncome);
-    const ok = await saveData(nextAccounts, nextTransactions, nextCategories, nextBudgetGroups, nextPlannedIncome);
-    setSaveError(ok ? null : "Your last change couldn't be saved locally — it may not persist after reload.");
-  }, []);
+  const persist = useCallback(
+    async (nextAccounts, nextTransactions, nextCategories, nextBudgetGroups, nextPlannedIncome, nextIncomeWarningDismissed) => {
+      setAccounts(nextAccounts);
+      setTransactions(nextTransactions);
+      setCategories(nextCategories);
+      setBudgetGroups(nextBudgetGroups);
+      setPlannedIncome(nextPlannedIncome);
+      setIncomeWarningDismissed(nextIncomeWarningDismissed);
+      const ok = await saveData(
+        nextAccounts,
+        nextTransactions,
+        nextCategories,
+        nextBudgetGroups,
+        nextPlannedIncome,
+        nextIncomeWarningDismissed
+      );
+      setSaveError(ok ? null : "Your last change couldn't be saved locally — it may not persist after reload.");
+    },
+    []
+  );
 
   const duplicateInfo = useMemo(() => computeDuplicates(transactions), [transactions]);
 
@@ -3809,20 +3958,20 @@ function App({ householdName } = {}) {
         );
       }
       const nextTransactions = [...transactions, ...valid];
-      persist(nextAccounts, nextTransactions, categories, budgetGroups, plannedIncome);
+      persist(nextAccounts, nextTransactions, categories, budgetGroups, plannedIncome, incomeWarningDismissed);
       setView("transactions");
       setToast(`Imported ${valid.length} transaction${valid.length === 1 ? "" : "s"} into ${accountMeta.name}.`);
     },
-    [accounts, transactions, categories, budgetGroups, plannedIncome, persist]
+    [accounts, transactions, categories, budgetGroups, plannedIncome, incomeWarningDismissed, persist]
   );
 
   const handleDeleteAccount = useCallback(
     (accountId) => {
       const nextAccounts = accounts.filter((a) => a.id !== accountId);
       const nextTransactions = transactions.filter((t) => t.accountId !== accountId);
-      persist(nextAccounts, nextTransactions, categories, budgetGroups, plannedIncome);
+      persist(nextAccounts, nextTransactions, categories, budgetGroups, plannedIncome, incomeWarningDismissed);
     },
-    [accounts, transactions, categories, budgetGroups, plannedIncome, persist]
+    [accounts, transactions, categories, budgetGroups, plannedIncome, incomeWarningDismissed, persist]
   );
 
   const handleRenameAccount = useCallback(
@@ -3833,9 +3982,9 @@ function App({ householdName } = {}) {
       const nextTransactions = transactions.map((t) =>
         t.accountId === accountId ? { ...t, accountName: trimmed } : t
       );
-      persist(nextAccounts, nextTransactions, categories, budgetGroups, plannedIncome);
+      persist(nextAccounts, nextTransactions, categories, budgetGroups, plannedIncome, incomeWarningDismissed);
     },
-    [accounts, transactions, categories, budgetGroups, plannedIncome, persist]
+    [accounts, transactions, categories, budgetGroups, plannedIncome, incomeWarningDismissed, persist]
   );
 
   const handleUpdateAccountSettings = useCallback(
@@ -3862,25 +4011,25 @@ function App({ householdName } = {}) {
         }
         return { ...t, date: mapped.date, description: mapped.description, amountOut: mapped.amountOut, amountIn: mapped.amountIn };
       });
-      persist(nextAccounts, nextTransactions, categories, budgetGroups, plannedIncome);
+      persist(nextAccounts, nextTransactions, categories, budgetGroups, plannedIncome, incomeWarningDismissed);
       setToast(
         skipped > 0
           ? `Updated account settings. ${skipped} transaction${skipped === 1 ? "" : "s"} couldn't be remapped and were left as-is.`
           : "Updated account settings and reapplied them to existing transactions."
       );
     },
-    [accounts, transactions, categories, budgetGroups, plannedIncome, persist]
+    [accounts, transactions, categories, budgetGroups, plannedIncome, incomeWarningDismissed, persist]
   );
 
   const handleRestoreFromBackup = useCallback(
     (newAccounts, newCategories, newTransactions) => {
-      persist(newAccounts, newTransactions, newCategories, budgetGroups, plannedIncome);
+      persist(newAccounts, newTransactions, newCategories, budgetGroups, plannedIncome, incomeWarningDismissed);
       setView("transactions");
       setToast(
         `Restored ${newTransactions.length} transaction${newTransactions.length === 1 ? "" : "s"} from backup.`
       );
     },
-    [budgetGroups, plannedIncome, persist]
+    [budgetGroups, plannedIncome, incomeWarningDismissed, persist]
   );
 
   const handleRestoreBudget = useCallback(
@@ -3890,27 +4039,28 @@ function App({ householdName } = {}) {
         transactions,
         newCategories,
         newBudgetGroups,
-        restoredPlannedIncome != null ? restoredPlannedIncome : plannedIncome
+        restoredPlannedIncome != null ? restoredPlannedIncome : plannedIncome,
+        incomeWarningDismissed
       );
       setToast("Applied budget setup from file.");
     },
-    [accounts, transactions, plannedIncome, persist]
+    [accounts, transactions, plannedIncome, incomeWarningDismissed, persist]
   );
 
   const handleUpdateTransaction = useCallback(
     (id, updates) => {
       const nextTransactions = transactions.map((t) => (t.id === id ? { ...t, ...updates } : t));
-      persist(accounts, nextTransactions, categories, budgetGroups, plannedIncome);
+      persist(accounts, nextTransactions, categories, budgetGroups, plannedIncome, incomeWarningDismissed);
     },
-    [accounts, transactions, categories, budgetGroups, plannedIncome, persist]
+    [accounts, transactions, categories, budgetGroups, plannedIncome, incomeWarningDismissed, persist]
   );
 
   const handleDeleteTransaction = useCallback(
     (id) => {
       const nextTransactions = transactions.filter((t) => t.id !== id);
-      persist(accounts, nextTransactions, categories, budgetGroups, plannedIncome);
+      persist(accounts, nextTransactions, categories, budgetGroups, plannedIncome, incomeWarningDismissed);
     },
-    [accounts, transactions, categories, budgetGroups, plannedIncome, persist]
+    [accounts, transactions, categories, budgetGroups, plannedIncome, incomeWarningDismissed, persist]
   );
 
   const handleAddCategory = useCallback(
@@ -3929,29 +4079,29 @@ function App({ householdName } = {}) {
           createdAt: new Date().toISOString(),
         },
       ];
-      persist(accounts, transactions, nextCategories, budgetGroups, plannedIncome);
+      persist(accounts, transactions, nextCategories, budgetGroups, plannedIncome, incomeWarningDismissed);
     },
-    [accounts, transactions, categories, budgetGroups, plannedIncome, persist]
+    [accounts, transactions, categories, budgetGroups, plannedIncome, incomeWarningDismissed, persist]
   );
 
   const handleRenameCategory = useCallback(
     (categoryId, newName) => {
       const nextCategories = categories.map((c) => (c.id === categoryId ? { ...c, name: newName } : c));
-      persist(accounts, transactions, nextCategories, budgetGroups, plannedIncome);
+      persist(accounts, transactions, nextCategories, budgetGroups, plannedIncome, incomeWarningDismissed);
     },
-    [accounts, transactions, categories, budgetGroups, plannedIncome, persist]
+    [accounts, transactions, categories, budgetGroups, plannedIncome, incomeWarningDismissed, persist]
   );
 
   const handleToggleCategoryExcluded = useCallback(
     (categoryId, excluded) => {
       const nextCategories = categories.map((c) => (c.id === categoryId ? { ...c, excluded } : c));
-      persist(accounts, transactions, nextCategories, budgetGroups, plannedIncome);
+      persist(accounts, transactions, nextCategories, budgetGroups, plannedIncome, incomeWarningDismissed);
     },
-    [accounts, transactions, categories, budgetGroups, plannedIncome, persist]
+    [accounts, transactions, categories, budgetGroups, plannedIncome, incomeWarningDismissed, persist]
   );
 
   const handleSetCategoryBudget = useCallback(
-    (categoryId, budgetAmount, budgetPeriod, budgetType, accumulateTarget) => {
+    (categoryId, budgetAmount, budgetPeriod, budgetType, accumulateTarget, startDate) => {
       const nextCategories = categories.map((c) =>
         c.id === categoryId
           ? {
@@ -3960,13 +4110,13 @@ function App({ householdName } = {}) {
               budgetPeriod: budgetPeriod || "monthly",
               budgetType: budgetType === "accumulate" ? "accumulate" : "spend",
               accumulateTarget: accumulateTarget != null ? accumulateTarget : null,
-              createdAt: c.createdAt || new Date().toISOString(),
+              createdAt: startDate ? new Date(startDate + "T00:00:00.000Z").toISOString() : c.createdAt || new Date().toISOString(),
             }
           : c
       );
-      persist(accounts, transactions, nextCategories, budgetGroups, plannedIncome);
+      persist(accounts, transactions, nextCategories, budgetGroups, plannedIncome, incomeWarningDismissed);
     },
-    [accounts, transactions, categories, budgetGroups, plannedIncome, persist]
+    [accounts, transactions, categories, budgetGroups, plannedIncome, incomeWarningDismissed, persist]
   );
 
   const handleMergeCategory = useCallback(
@@ -3978,10 +4128,10 @@ function App({ householdName } = {}) {
       const nextTransactions = transactions.map((t) =>
         t.categoryId === sourceCategoryId ? { ...t, categoryId: targetCategoryId } : t
       );
-      persist(accounts, nextTransactions, nextCategories, budgetGroups, plannedIncome);
+      persist(accounts, nextTransactions, nextCategories, budgetGroups, plannedIncome, incomeWarningDismissed);
       setToast(`Merged "${source?.name || "category"}" into "${target?.name || "category"}".`);
     },
-    [accounts, transactions, categories, budgetGroups, plannedIncome, persist]
+    [accounts, transactions, categories, budgetGroups, plannedIncome, incomeWarningDismissed, persist]
   );
 
   const handleAddBudgetGroup = useCallback(
@@ -4000,21 +4150,21 @@ function App({ householdName } = {}) {
           createdAt: new Date().toISOString(),
         },
       ];
-      persist(accounts, transactions, categories, nextGroups, plannedIncome);
+      persist(accounts, transactions, categories, nextGroups, plannedIncome, incomeWarningDismissed);
     },
-    [accounts, transactions, categories, budgetGroups, plannedIncome, persist]
+    [accounts, transactions, categories, budgetGroups, plannedIncome, incomeWarningDismissed, persist]
   );
 
   const handleRenameBudgetGroup = useCallback(
     (groupId, newName) => {
       const nextGroups = budgetGroups.map((g) => (g.id === groupId ? { ...g, name: newName } : g));
-      persist(accounts, transactions, categories, nextGroups, plannedIncome);
+      persist(accounts, transactions, categories, nextGroups, plannedIncome, incomeWarningDismissed);
     },
-    [accounts, transactions, categories, budgetGroups, plannedIncome, persist]
+    [accounts, transactions, categories, budgetGroups, plannedIncome, incomeWarningDismissed, persist]
   );
 
   const handleSetBudgetGroupBudget = useCallback(
-    (groupId, budgetAmount, budgetPeriod, budgetType, accumulateTarget) => {
+    (groupId, budgetAmount, budgetPeriod, budgetType, accumulateTarget, startDate) => {
       const nextGroups = budgetGroups.map((g) =>
         g.id === groupId
           ? {
@@ -4023,13 +4173,13 @@ function App({ householdName } = {}) {
               budgetPeriod: budgetPeriod || "monthly",
               budgetType: budgetType === "accumulate" ? "accumulate" : "spend",
               accumulateTarget: accumulateTarget != null ? accumulateTarget : null,
-              createdAt: g.createdAt || new Date().toISOString(),
+              createdAt: startDate ? new Date(startDate + "T00:00:00.000Z").toISOString() : g.createdAt || new Date().toISOString(),
             }
           : g
       );
-      persist(accounts, transactions, categories, nextGroups, plannedIncome);
+      persist(accounts, transactions, categories, nextGroups, plannedIncome, incomeWarningDismissed);
     },
-    [accounts, transactions, categories, budgetGroups, plannedIncome, persist]
+    [accounts, transactions, categories, budgetGroups, plannedIncome, incomeWarningDismissed, persist]
   );
 
   const handleSetAccumulateActual = useCallback(
@@ -4040,22 +4190,31 @@ function App({ householdName } = {}) {
         const nextGroups = budgetGroups.map((g) =>
           g.id === rawId ? { ...g, accumulateActuals: { ...(g.accumulateActuals || {}), [periodKey]: amount } } : g
         );
-        persist(accounts, transactions, categories, nextGroups, plannedIncome);
+        persist(accounts, transactions, categories, nextGroups, plannedIncome, incomeWarningDismissed);
       } else {
         const nextCategories = categories.map((c) =>
           c.id === rawId ? { ...c, accumulateActuals: { ...(c.accumulateActuals || {}), [periodKey]: amount } } : c
         );
-        persist(accounts, transactions, nextCategories, budgetGroups, plannedIncome);
+        persist(accounts, transactions, nextCategories, budgetGroups, plannedIncome, incomeWarningDismissed);
       }
     },
-    [accounts, transactions, categories, budgetGroups, plannedIncome, persist]
+    [accounts, transactions, categories, budgetGroups, plannedIncome, incomeWarningDismissed, persist]
   );
 
   const handleSetPlannedIncome = useCallback(
     (amount) => {
-      persist(accounts, transactions, categories, budgetGroups, amount);
+      // A newly-set plan deserves a fresh evaluation rather than staying
+      // silenced against the old one.
+      persist(accounts, transactions, categories, budgetGroups, amount, false);
     },
     [accounts, transactions, categories, budgetGroups, persist]
+  );
+
+  const handleDismissIncomeWarning = useCallback(
+    (dismissed) => {
+      persist(accounts, transactions, categories, budgetGroups, plannedIncome, dismissed);
+    },
+    [accounts, transactions, categories, budgetGroups, plannedIncome, persist]
   );
 
   const handleAddCategoryToGroup = useCallback(
@@ -4070,9 +4229,9 @@ function App({ householdName } = {}) {
         const ids = g.categoryIds || [];
         return ids.includes(categoryId) ? { ...g, categoryIds: ids.filter((id) => id !== categoryId) } : g;
       });
-      persist(accounts, transactions, categories, nextGroups, plannedIncome);
+      persist(accounts, transactions, categories, nextGroups, plannedIncome, incomeWarningDismissed);
     },
-    [accounts, transactions, categories, budgetGroups, plannedIncome, persist]
+    [accounts, transactions, categories, budgetGroups, plannedIncome, incomeWarningDismissed, persist]
   );
 
   const handleRemoveCategoryFromGroup = useCallback(
@@ -4080,17 +4239,17 @@ function App({ householdName } = {}) {
       const nextGroups = budgetGroups.map((g) =>
         g.id === groupId ? { ...g, categoryIds: (g.categoryIds || []).filter((id) => id !== categoryId) } : g
       );
-      persist(accounts, transactions, categories, nextGroups, plannedIncome);
+      persist(accounts, transactions, categories, nextGroups, plannedIncome, incomeWarningDismissed);
     },
-    [accounts, transactions, categories, budgetGroups, plannedIncome, persist]
+    [accounts, transactions, categories, budgetGroups, plannedIncome, incomeWarningDismissed, persist]
   );
 
   const handleDeleteBudgetGroup = useCallback(
     (groupId) => {
       const nextGroups = budgetGroups.filter((g) => g.id !== groupId);
-      persist(accounts, transactions, categories, nextGroups, plannedIncome);
+      persist(accounts, transactions, categories, nextGroups, plannedIncome, incomeWarningDismissed);
     },
-    [accounts, transactions, categories, budgetGroups, plannedIncome, persist]
+    [accounts, transactions, categories, budgetGroups, plannedIncome, incomeWarningDismissed, persist]
   );
 
   const handleDeleteCategory = useCallback(
@@ -4099,9 +4258,9 @@ function App({ householdName } = {}) {
       const nextTransactions = transactions.map((t) =>
         t.categoryId === categoryId ? { ...t, categoryId: null } : t
       );
-      persist(accounts, nextTransactions, nextCategories, budgetGroups, plannedIncome);
+      persist(accounts, nextTransactions, nextCategories, budgetGroups, plannedIncome, incomeWarningDismissed);
     },
-    [accounts, transactions, categories, budgetGroups, plannedIncome, persist]
+    [accounts, transactions, categories, budgetGroups, plannedIncome, incomeWarningDismissed, persist]
   );
 
   if (!loaded) {
@@ -4151,18 +4310,22 @@ function App({ householdName } = {}) {
               Categories
             </button>
             <button
-              className={"nav-btn" + (view === "backup" ? " active" : "")}
-              onClick={() => setView("backup")}
-            >
-              Backup
-            </button>
-            <button
               className={"nav-btn" + (view === "upload" ? " active" : "")}
               onClick={() => goToUpload(null)}
             >
               Upload
             </button>
 
+            <div className="sidebar-section-divider" />
+            <div className="sidebar-nav-label">Data</div>
+            <button
+              className={"nav-btn" + (view === "backup" ? " active" : "")}
+              onClick={() => setView("backup")}
+            >
+              Backup
+            </button>
+
+            <div className="sidebar-section-divider" />
             <div className="sidebar-nav-label">Budgeting</div>
             <button
               className={"nav-btn" + (view === "planning" ? " active" : "")}
@@ -4171,16 +4334,16 @@ function App({ householdName } = {}) {
               Planning
             </button>
             <button
-              className={"nav-btn" + (view === "budget" ? " active" : "")}
-              onClick={() => setView("budget")}
-            >
-              Budget
-            </button>
-            <button
               className={"nav-btn" + (view === "budgetGroups" ? " active" : "")}
               onClick={() => setView("budgetGroups")}
             >
               Budget Groups
+            </button>
+            <button
+              className={"nav-btn" + (view === "budget" ? " active" : "")}
+              onClick={() => setView("budget")}
+            >
+              Budget
             </button>
           </div>
           <div className="sidebar-stats">
@@ -4230,7 +4393,10 @@ function App({ householdName } = {}) {
               categories={categories}
               budgetGroups={budgetGroups}
               plannedIncome={plannedIncome}
+              incomeWarningDismissed={incomeWarningDismissed}
               onSetPlannedIncome={handleSetPlannedIncome}
+              onDismissIncomeWarning={handleDismissIncomeWarning}
+              onSetCategoryBudget={handleSetCategoryBudget}
             />
           )}
           {view === "budget" && (
@@ -4269,13 +4435,11 @@ function App({ householdName } = {}) {
             <CategoriesView
               categories={categories}
               transactions={transactions}
-              budgetGroups={budgetGroups}
               onAdd={handleAddCategory}
               onRename={handleRenameCategory}
               onDelete={handleDeleteCategory}
               onToggleExcluded={handleToggleCategoryExcluded}
               onMerge={handleMergeCategory}
-              onSetBudget={handleSetCategoryBudget}
             />
           )}
           {view === "backup" && (
