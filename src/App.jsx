@@ -42,7 +42,7 @@ async function loadData() {
       return {
         accounts: parsed.accounts || [],
         transactions: parsed.transactions || [],
-        categories: categories.map((c) => normalizeBudgetItem({ ...c, excluded: !!c.excluded })),
+        categories: categories.map((c) => normalizeBudgetItem({ ...c, excluded: !!c.excluded, isIncome: !!c.isIncome })),
         budgetGroups: budgetGroups.map(normalizeBudgetItem),
         plannedIncome: parsed.plannedIncome != null ? parsed.plannedIncome : null,
         incomeWarningDismissed: !!parsed.incomeWarningDismissed,
@@ -400,7 +400,7 @@ function buildTransactions(rows, mapping, accountId, accountName) {
 /* Full backup: export everything to one CSV, and rebuild from one     */
 /* ------------------------------------------------------------------ */
 
-const BACKUP_COLUMNS = ["Account", "Date", "Description", "Money Out", "Money In", "Category", "Category Excluded"];
+const BACKUP_COLUMNS = ["Account", "Date", "Description", "Money Out", "Money In", "Category", "Category Excluded", "Category Income"];
 
 function exportBackupCSV(accounts, transactions, categories) {
   const categoryById = {};
@@ -420,6 +420,7 @@ function exportBackupCSV(accounts, transactions, categories) {
       "Money In": t.amountIn != null ? t.amountIn : "",
       Category: cat ? cat.name : "",
       "Category Excluded": cat ? (cat.excluded ? "Yes" : "No") : "",
+      "Category Income": cat ? (cat.isIncome ? "Yes" : "No") : "",
     };
   });
 
@@ -447,6 +448,9 @@ function buildFromBackupRows(rows) {
     const description = String(row["Description"] != null ? row["Description"] : "").trim();
     const categoryName = String(row["Category"] != null ? row["Category"] : "").trim();
     const categoryExcludedRaw = String(row["Category Excluded"] != null ? row["Category Excluded"] : "")
+      .trim()
+      .toLowerCase();
+    const categoryIncomeRaw = String(row["Category Income"] != null ? row["Category Income"] : "")
       .trim()
       .toLowerCase();
 
@@ -498,6 +502,7 @@ function buildFromBackupRows(rows) {
           id: uid(),
           name: categoryName,
           excluded: categoryExcludedRaw === "yes",
+          isIncome: categoryIncomeRaw === "yes",
         };
       }
       categoryId = categoriesByName[categoryName].id;
@@ -1923,7 +1928,7 @@ function AccountsView({ accounts, transactions, onDelete, onAddTransactions, onR
 /* Categories view                                                      */
 /* ------------------------------------------------------------------ */
 
-function CategoryCard({ category, categories, txCount, transactions, onRename, onDelete, onToggleExcluded, onMerge }) {
+function CategoryCard({ category, categories, txCount, transactions, onRename, onDelete, onToggleExcluded, onToggleIsIncome, onMerge }) {
   const [editing, setEditing] = useState(false);
   const [draftName, setDraftName] = useState(category.name);
   const [confirming, setConfirming] = useState(false);
@@ -1998,6 +2003,14 @@ function CategoryCard({ category, categories, txCount, transactions, onRename, o
           />
           Exclude from totals &amp; reports (e.g. transfers between your own accounts)
         </label>
+        <label className="radio-option" style={{ marginTop: 4, fontSize: 12.5, color: "var(--ink-muted)" }}>
+          <input
+            type="checkbox"
+            checked={!!category.isIncome}
+            onChange={(e) => onToggleIsIncome(category.id, e.target.checked)}
+          />
+          This is income (paycheck, etc.) — never counts as unassigned spending
+        </label>
       </div>
       <div className="row-actions">
         {merging ? (
@@ -2069,7 +2082,7 @@ function CategoryCard({ category, categories, txCount, transactions, onRename, o
   );
 }
 
-function CategoriesView({ categories, transactions, onAdd, onRename, onDelete, onToggleExcluded, onMerge }) {
+function CategoriesView({ categories, transactions, onAdd, onRename, onDelete, onToggleExcluded, onToggleIsIncome, onMerge }) {
   const [newName, setNewName] = useState("");
 
   function handleAdd(e) {
@@ -2121,6 +2134,7 @@ function CategoriesView({ categories, transactions, onAdd, onRename, onDelete, o
               onRename={onRename}
               onDelete={onDelete}
               onToggleExcluded={onToggleExcluded}
+              onToggleIsIncome={onToggleIsIncome}
               onMerge={onMerge}
             />
           ))
@@ -3098,6 +3112,9 @@ function BudgetPerformanceChart({ title, periods, budgeted, spendMap, periodLabe
 // no group at all, even though it looks "handled" at a glance.
 // Categories excluded from totals (e.g. Transfers) are never "unassigned"
 // spending — they're deliberately outside budget tracking altogether.
+// Neither is a category flagged as Income (paychecks etc.) — it isn't
+// expense spending at all, so it should never count as untracked
+// spending regardless of whether it has a budget.
 function getUnassignedCategoryIds(categories, budgetGroups) {
   const trackedByGroup = new Set();
   budgetGroups.forEach((g) => {
@@ -3108,6 +3125,7 @@ function getUnassignedCategoryIds(categories, budgetGroups) {
   const unassigned = new Set();
   categories.forEach((c) => {
     if (c.excluded) return;
+    if (c.isIncome) return;
     if (trackedByGroup.has(c.id)) return;
     if (c.budgetAmount != null && c.budgetAmount > 0) return;
     unassigned.add(c.id);
@@ -3775,12 +3793,13 @@ function PlanningView({
     () => getUnassignedCategoryIds(categories, budgetGroups),
     [categories, budgetGroups]
   );
+  const incomeCategories = categories.filter((c) => c.isIncome);
   const unassignedCategories = categories.filter((c) => unassignedIdSet.has(c.id));
   const budgetedCategories = categories.filter(
-    (c) => !unassignedIdSet.has(c.id) && !groupNameByCategoryId[c.id]
+    (c) => !c.isIncome && !unassignedIdSet.has(c.id) && !groupNameByCategoryId[c.id]
   );
   const groupedCategories = categories.filter(
-    (c) => !unassignedIdSet.has(c.id) && groupNameByCategoryId[c.id]
+    (c) => !c.isIncome && !unassignedIdSet.has(c.id) && groupNameByCategoryId[c.id]
   );
 
   const unassignedSpendThisMonth = useMemo(() => {
@@ -3798,10 +3817,17 @@ function PlanningView({
 
   const monthlyActualIncome = useMemo(() => {
     const excludedIds = new Set(categories.filter((c) => c.excluded).map((c) => c.id));
+    const incomeIds = new Set(categories.filter((c) => c.isIncome).map((c) => c.id));
+    // Once at least one category is flagged as Income, use only those —
+    // more precise than counting every stray refund as "income." Until
+    // then, fall back to the old broad behavior so nothing changes for
+    // anyone who hasn't used the new flag yet.
+    const restrictToIncomeFlag = incomeIds.size > 0;
     const byMonth = {};
     transactions.forEach((t) => {
       if (!t.date) return;
       if (t.categoryId && excludedIds.has(t.categoryId)) return;
+      if (restrictToIncomeFlag && !(t.categoryId && incomeIds.has(t.categoryId))) return;
       const mKey = getMonthStartISO(t.date);
       byMonth[mKey] = (byMonth[mKey] || 0) + (t.amountIn || 0);
     });
@@ -4012,6 +4038,25 @@ function PlanningView({
                         groupName={groupNameByCategoryId[c.id]}
                         onSetBudget={onSetCategoryBudget}
                       />
+                    ))}
+                  </div>
+                </>
+              )}
+
+              {incomeCategories.length > 0 && (
+                <>
+                  <h3 style={{ marginTop: 22, marginBottom: 10, fontSize: 16 }}>Income</h3>
+                  <p className="hint" style={{ marginBottom: 12 }}>
+                    Flagged as income, not spending — these are never counted as unassigned, and drive the
+                    "actual income" figure above. Toggle this from the Categories tab.
+                  </p>
+                  <div className="panel">
+                    {incomeCategories.map((c) => (
+                      <div key={c.id} className="account-card">
+                        <div>
+                          <div className="name">{c.name}</div>
+                        </div>
+                      </div>
                     ))}
                   </div>
                 </>
@@ -4537,6 +4582,7 @@ function App({ householdName } = {}) {
           id: uid(),
           name,
           excluded: false,
+          isIncome: false,
           budgetAmount: null,
           budgetPeriod: "monthly",
           budgetType: "spend",
@@ -4562,6 +4608,14 @@ function App({ householdName } = {}) {
   const handleToggleCategoryExcluded = useCallback(
     (categoryId, excluded) => {
       const nextCategories = categories.map((c) => (c.id === categoryId ? { ...c, excluded } : c));
+      persist(accounts, transactions, nextCategories, budgetGroups, plannedIncome, incomeWarningDismissed, hiddenBudgetMonths, excludeUnassignedFromBudget);
+    },
+    [accounts, transactions, categories, budgetGroups, plannedIncome, incomeWarningDismissed, hiddenBudgetMonths, excludeUnassignedFromBudget, persist]
+  );
+
+  const handleToggleCategoryIsIncome = useCallback(
+    (categoryId, isIncome) => {
+      const nextCategories = categories.map((c) => (c.id === categoryId ? { ...c, isIncome } : c));
       persist(accounts, transactions, nextCategories, budgetGroups, plannedIncome, incomeWarningDismissed, hiddenBudgetMonths, excludeUnassignedFromBudget);
     },
     [accounts, transactions, categories, budgetGroups, plannedIncome, incomeWarningDismissed, hiddenBudgetMonths, excludeUnassignedFromBudget, persist]
@@ -4951,6 +5005,7 @@ function App({ householdName } = {}) {
               onRename={handleRenameCategory}
               onDelete={handleDeleteCategory}
               onToggleExcluded={handleToggleCategoryExcluded}
+              onToggleIsIncome={handleToggleCategoryIsIncome}
               onMerge={handleMergeCategory}
             />
           )}
