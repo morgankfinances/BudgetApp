@@ -37,6 +37,7 @@ async function loadData() {
         budgetType: b.budgetType === "accumulate" ? "accumulate" : "spend",
         accumulateTarget: b.accumulateTarget != null ? b.accumulateTarget : null,
         accumulateActuals: b.accumulateActuals && typeof b.accumulateActuals === "object" ? b.accumulateActuals : {},
+        fundAdjustments: Array.isArray(b.fundAdjustments) ? b.fundAdjustments : [],
       });
       return {
         accounts: parsed.accounts || [],
@@ -46,6 +47,7 @@ async function loadData() {
         plannedIncome: parsed.plannedIncome != null ? parsed.plannedIncome : null,
         incomeWarningDismissed: !!parsed.incomeWarningDismissed,
         hiddenBudgetMonths: Array.isArray(parsed.hiddenBudgetMonths) ? parsed.hiddenBudgetMonths : [],
+        excludeUnassignedFromBudget: !!parsed.excludeUnassignedFromBudget,
       };
     }
   } catch (e) {
@@ -59,10 +61,20 @@ async function loadData() {
     plannedIncome: null,
     incomeWarningDismissed: false,
     hiddenBudgetMonths: [],
+    excludeUnassignedFromBudget: false,
   };
 }
 
-async function saveData(accounts, transactions, categories, budgetGroups, plannedIncome, incomeWarningDismissed, hiddenBudgetMonths) {
+async function saveData(
+  accounts,
+  transactions,
+  categories,
+  budgetGroups,
+  plannedIncome,
+  incomeWarningDismissed,
+  hiddenBudgetMonths,
+  excludeUnassignedFromBudget
+) {
   try {
     const result = await window.storage.set(
       STORAGE_KEY,
@@ -74,6 +86,7 @@ async function saveData(accounts, transactions, categories, budgetGroups, planne
         plannedIncome,
         incomeWarningDismissed,
         hiddenBudgetMonths,
+        excludeUnassignedFromBudget,
       }),
       false
     );
@@ -235,9 +248,11 @@ const CHART_PALETTE = ["#3B5BA0", "#3F7D5C", "#AC4A2C", "#8A5A15", "#6B5B95", "#
 
 function computeBudgetPeriodData(transactions, budgetItems, periodType) {
   const periodKeyFn = periodType === "weekly" ? getWeekStartISO : getMonthStartISO;
-  const budgeted = budgetItems.filter(
-    (b) => b.budgetAmount != null && b.budgetAmount > 0 && (b.budgetPeriod || "monthly") === periodType
-  );
+  const budgeted = budgetItems.filter((b) => {
+    if ((b.budgetPeriod || "monthly") !== periodType) return false;
+    if (b.isUnassignedPseudo) return true;
+    return b.budgetAmount != null && b.budgetAmount > 0;
+  });
   if (budgeted.length === 0) return null;
 
   const currentKey = periodKeyFn(new Date().toISOString().slice(0, 10));
@@ -1908,7 +1923,7 @@ function AccountsView({ accounts, transactions, onDelete, onAddTransactions, onR
 /* Categories view                                                      */
 /* ------------------------------------------------------------------ */
 
-function CategoryCard({ category, categories, txCount, onRename, onDelete, onToggleExcluded, onMerge }) {
+function CategoryCard({ category, categories, txCount, transactions, onRename, onDelete, onToggleExcluded, onMerge }) {
   const [editing, setEditing] = useState(false);
   const [draftName, setDraftName] = useState(category.name);
   const [confirming, setConfirming] = useState(false);
@@ -2021,6 +2036,17 @@ function CategoryCard({ category, categories, txCount, onRename, onDelete, onTog
         ) : confirming ? (
           <span className="confirm-inline">
             Delete this category?{txCount > 0 ? ` ${txCount} transaction${txCount === 1 ? "" : "s"} will become uncategorized.` : ""}
+            {category.budgetType === "accumulate" &&
+              (() => {
+                const balance = computeItemFundBalance(category, new Set([category.id]), transactions || []);
+                return Math.abs(balance) > 0.01 ? (
+                  <strong style={{ color: "var(--expense)" }}>
+                    {" "}
+                    This fund currently shows {formatMoney(balance)} — deleting it won't move that money
+                    anywhere, it'll just stop being tracked.
+                  </strong>
+                ) : null;
+              })()}
             <button className="btn btn-danger btn-sm" onClick={() => onDelete(category.id)}>
               Confirm
             </button>
@@ -2091,6 +2117,7 @@ function CategoriesView({ categories, transactions, onAdd, onRename, onDelete, o
               category={cat}
               categories={categories}
               txCount={transactions.filter((t) => t.categoryId === cat.id).length}
+              transactions={transactions}
               onRename={onRename}
               onDelete={onDelete}
               onToggleExcluded={onToggleExcluded}
@@ -2652,8 +2679,9 @@ function ReportsView({ transactions, accounts, categories, onGoCategories }) {
 /* Budget view                                                          */
 /* ------------------------------------------------------------------ */
 
-function BudgetProgressCard({ item, spent, cumulativeSaved, periodKey, onSetActual }) {
+function BudgetProgressCard({ item, spent, cumulativeSaved, periodKey, transactions, onSetActual, onAdjustFund }) {
   const budget = item.budgetAmount;
+  const isUnassigned = !!item.isUnassignedPseudo;
   const ratio = budget > 0 ? spent / budget : 0;
   const isAccumulate = item.budgetType === "accumulate";
   const barColor = isAccumulate
@@ -2682,7 +2710,32 @@ function BudgetProgressCard({ item, spent, cumulativeSaved, periodKey, onSetActu
     setEditing(false);
   }
 
-  const targetRatio = isAccumulate && item.accumulateTarget > 0 ? Math.min(cumulativeSaved / item.accumulateTarget, 1) : null;
+  if (isUnassigned) {
+    return (
+      <div className="budget-card" style={{ borderColor: spent > 0 ? "var(--expense)" : "var(--border)" }}>
+        <div className="budget-card-head">
+          <span className="budget-card-name">
+            {item.name}
+            <span className="budget-group-tag" style={{ borderColor: "var(--expense)", color: "var(--expense)" }}>
+              unassigned
+            </span>
+          </span>
+          <span className="budget-card-period">{item.budgetPeriod === "weekly" ? "this week" : "this month"}</span>
+        </div>
+        <div className="budget-card-figures">
+          <span className={spent > 0 ? "money-out" : ""} style={{ fontSize: 18, fontWeight: 700 }}>
+            {formatMoney(spent)}
+          </span>
+          <br />
+          <span className="muted-cell">
+            {spent > 0
+              ? "spent in categories with no budget — not covered by any plan"
+              : "nothing untracked this period"}
+          </span>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="budget-card">
@@ -2747,20 +2800,110 @@ function BudgetProgressCard({ item, spent, cumulativeSaved, periodKey, onSetActu
         )}
       </div>
       {isAccumulate && (
-        <div style={{ marginTop: 10, paddingTop: 10, borderTop: "1px dashed var(--border)" }}>
-          {item.accumulateTarget > 0 ? (
+        <FundBalanceSection item={item} cumulativeSaved={cumulativeSaved} transactions={transactions} onAdjustFund={onAdjustFund} />
+      )}
+    </div>
+  );
+}
+
+function FundBalanceSection({ item, cumulativeSaved, transactions, onAdjustFund }) {
+  const { balance, contributed, withdrawn, adjusted } = computeFundBalance(item, cumulativeSaved, transactions);
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState(balance.toFixed(2));
+  const isOverdrawn = balance < 0;
+  const target = item.accumulateTarget;
+  const targetRatio = target > 0 ? Math.max(0, Math.min(balance / target, 1)) : null;
+
+  function startEdit() {
+    setDraft(balance.toFixed(2));
+    setEditing(true);
+  }
+
+  function saveEdit() {
+    const newBalance = parseMoney(draft.trim());
+    if (newBalance != null && Math.abs(newBalance - balance) > 0.001) {
+      onAdjustFund(item.id, newBalance - balance);
+    }
+    setEditing(false);
+  }
+
+  return (
+    <div style={{ marginTop: 10, paddingTop: 10, borderTop: "1px dashed var(--border)" }}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline" }}>
+        <span className="muted-cell" style={{ fontSize: 11, textTransform: "uppercase", letterSpacing: "0.03em" }}>
+          Fund balance
+        </span>
+        {!editing && (
+          <button className="btn btn-ghost btn-sm" onClick={startEdit} style={{ padding: "1px 6px" }}>
+            Adjust
+          </button>
+        )}
+      </div>
+
+      {editing ? (
+        <div style={{ display: "flex", gap: 6, alignItems: "center", marginTop: 4 }}>
+          <input
+            type="text"
+            value={draft}
+            autoFocus
+            onChange={(e) => setDraft(e.target.value)}
+            style={{
+              width: 100,
+              fontFamily: "inherit",
+              fontSize: 15,
+              padding: "4px 6px",
+              border: "1px solid var(--border)",
+              borderRadius: 4,
+            }}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") saveEdit();
+              if (e.key === "Escape") setEditing(false);
+            }}
+          />
+          <button className="btn btn-primary btn-sm" onClick={saveEdit}>
+            Save
+          </button>
+          <button className="btn btn-ghost btn-sm" onClick={() => setEditing(false)}>
+            Cancel
+          </button>
+        </div>
+      ) : (
+        <div style={{ fontSize: 20, fontWeight: 700, color: isOverdrawn ? "var(--expense)" : "var(--income)" }}>
+          {isOverdrawn ? "\u2212" : ""}
+          {formatMoney(Math.abs(balance))}
+          {isOverdrawn && <span style={{ fontSize: 12, fontWeight: 600, marginLeft: 6 }}>overdrawn</span>}
+        </div>
+      )}
+
+      {!editing && (withdrawn !== 0 || adjusted !== 0) && (
+        <div className="muted-cell" style={{ fontSize: 11 }}>
+          {formatMoney(contributed)} contributed
+          {withdrawn > 0 && <> {"\u2212"} {formatMoney(withdrawn)} spent</>}
+          {withdrawn < 0 && <> + {formatMoney(Math.abs(withdrawn))} added</>}
+          {adjusted !== 0 && (
             <>
-              <div className="budget-bar-track" style={{ height: 6 }}>
-                <div className="budget-bar-fill" style={{ width: `${targetRatio * 100}%`, background: "var(--accent)" }} />
-              </div>
-              <div className="muted-cell" style={{ fontSize: 12 }}>
-                {formatMoney(cumulativeSaved)} saved of {formatMoney(item.accumulateTarget)} goal (
-                {Math.round(targetRatio * 100)}%)
-              </div>
+              {" "}
+              {adjusted > 0 ? "+" : "\u2212"} {formatMoney(Math.abs(adjusted))} adjusted
             </>
-          ) : (
-            <div className="muted-cell" style={{ fontSize: 12 }}>{formatMoney(cumulativeSaved)} saved so far — no target set</div>
           )}
+        </div>
+      )}
+
+      {target > 0 ? (
+        <>
+          <div className="budget-bar-track" style={{ height: 6, marginTop: 6 }}>
+            <div
+              className="budget-bar-fill"
+              style={{ width: `${(targetRatio || 0) * 100}%`, background: isOverdrawn ? "var(--expense)" : "var(--accent)" }}
+            />
+          </div>
+          <div className="muted-cell" style={{ fontSize: 12 }}>
+            {Math.round((targetRatio || 0) * 100)}% of {formatMoney(target)} goal
+          </div>
+        </>
+      ) : (
+        <div className="muted-cell" style={{ fontSize: 12, marginTop: 4 }}>
+          No target set
         </div>
       )}
     </div>
@@ -2775,6 +2918,56 @@ function BudgetProgressCard({ item, spent, cumulativeSaved, periodKey, onSetActu
 function budgetPerformance(item, actual) {
   const budget = item.budgetAmount || 0;
   return item.budgetType === "accumulate" ? actual - budget : budget - actual;
+}
+
+// The actual money currently sitting in an Accumulate fund: everything
+// contributed since it started (the same total already shown as
+// "cumulative saved"), less anything actually spent from it — a real
+// transaction tagged to the category, not the assumed per-period
+// contribution — plus any manual corrections the user has logged. This
+// is deliberately derived fresh from current data rather than an
+// incrementally-updated counter: if a withdrawal transaction later gets
+// recategorized away, it stops counting against this fund automatically,
+// with no special "give it back" logic needed.
+function computeFundBalance(item, contributionsTotal, transactions) {
+  let netWithdrawn = 0;
+  transactions.forEach((t) => {
+    if (t.categoryId && item.categoryIds && item.categoryIds.has(t.categoryId)) {
+      netWithdrawn += (t.amountOut || 0) - (t.amountIn || 0);
+    }
+  });
+  const adjusted = (item.fundAdjustments || []).reduce((s, a) => s + (a.amount || 0), 0);
+  return {
+    balance: contributionsTotal - netWithdrawn + adjusted,
+    contributed: contributionsTotal,
+    withdrawn: netWithdrawn,
+    adjusted,
+  };
+}
+
+// Same contribution math computeBudgetPeriodData uses for Accumulate
+// items, but for a single category or group in isolation — used where
+// pulling in the whole Budget pipeline would be overkill, like a delete
+// confirmation warning.
+function computeAccumulateContributionTotal(item) {
+  if (item.budgetType !== "accumulate" || !item.budgetAmount) return 0;
+  const periodType = item.budgetPeriod || "monthly";
+  const periodKeyFn = periodType === "weekly" ? getWeekStartISO : getMonthStartISO;
+  const currentKey = periodKeyFn(new Date().toISOString().slice(0, 10));
+  const startKey = item.createdAt ? periodKeyFn(item.createdAt.slice(0, 10)) : currentKey;
+  const periods = enumeratePeriodsBetween(startKey, currentKey, periodType);
+  Object.keys(item.accumulateActuals || {}).forEach((k) => {
+    if (!periods.includes(k)) periods.push(k);
+  });
+  return periods.reduce((sum, p) => {
+    const override = (item.accumulateActuals || {})[p];
+    return sum + (override != null ? override : item.budgetAmount);
+  }, 0);
+}
+
+function computeItemFundBalance(item, categoryIds, transactions) {
+  const contributionsTotal = computeAccumulateContributionTotal(item);
+  return computeFundBalance({ ...item, categoryIds }, contributionsTotal, transactions).balance;
 }
 
 function BudgetHistoryTable({ budgeted, periods, spendMap, periodLabelFn }) {
@@ -2795,10 +2988,17 @@ function BudgetHistoryTable({ budgeted, periods, spendMap, periodLabelFn }) {
               <td className="pivot-row-label">
                 {c.name}
                 {c.isGroup && <span className="budget-group-tag">group</span>}
-                <span className="muted-cell" style={{ fontWeight: 400 }}>
-                  {" "}
-                  / {formatMoney(c.budgetAmount)}
-                </span>
+                {c.isUnassignedPseudo ? (
+                  <span className="muted-cell" style={{ fontWeight: 400 }}>
+                    {" "}
+                    (no budget)
+                  </span>
+                ) : (
+                  <span className="muted-cell" style={{ fontWeight: 400 }}>
+                    {" "}
+                    / {formatMoney(c.budgetAmount)}
+                  </span>
+                )}
               </td>
               {periods.map((p) => {
                 const spent = spendMap[c.id]?.[p] || 0;
@@ -2891,6 +3091,30 @@ function BudgetPerformanceChart({ title, periods, budgeted, spendMap, periodLabe
   );
 }
 
+// A category's spending counts as genuinely tracked only if it (or the
+// group it belongs to) has an actual positive budget — matching exactly
+// what computeBudgetPeriodData will include. A category sitting in a
+// group that itself has no budget set is just as untracked as one with
+// no group at all, even though it looks "handled" at a glance.
+// Categories excluded from totals (e.g. Transfers) are never "unassigned"
+// spending — they're deliberately outside budget tracking altogether.
+function getUnassignedCategoryIds(categories, budgetGroups) {
+  const trackedByGroup = new Set();
+  budgetGroups.forEach((g) => {
+    if (g.budgetAmount != null && g.budgetAmount > 0) {
+      (g.categoryIds || []).forEach((id) => trackedByGroup.add(id));
+    }
+  });
+  const unassigned = new Set();
+  categories.forEach((c) => {
+    if (c.excluded) return;
+    if (trackedByGroup.has(c.id)) return;
+    if (c.budgetAmount != null && c.budgetAmount > 0) return;
+    unassigned.add(c.id);
+  });
+  return unassigned;
+}
+
 function buildBudgetItems(categories, budgetGroups) {
   const groupedCategoryIds = new Set();
   budgetGroups.forEach((g) => (g.categoryIds || []).forEach((id) => groupedCategoryIds.add(id)));
@@ -2926,16 +3150,59 @@ function buildBudgetItems(categories, budgetGroups) {
   return [...groupItems, ...categoryItems];
 }
 
-function BudgetView({ transactions, categories, budgetGroups, hiddenBudgetMonths, onSetActual, onToggleHiddenMonth, onGoCategories }) {
+function BudgetView({
+  transactions,
+  categories,
+  budgetGroups,
+  hiddenBudgetMonths,
+  excludeUnassignedFromBudget,
+  onSetActual,
+  onAdjustFund,
+  onToggleHiddenMonth,
+  onGoCategories,
+}) {
   const budgetItems = useMemo(() => buildBudgetItems(categories, budgetGroups), [categories, budgetGroups]);
+  const unassignedCategoryIds = useMemo(
+    () => getUnassignedCategoryIds(categories, budgetGroups),
+    [categories, budgetGroups]
+  );
+
+  function withUnassignedPseudo(items, periodType) {
+    if (excludeUnassignedFromBudget || unassignedCategoryIds.size === 0) return items;
+    return [
+      ...items,
+      {
+        id: "unassigned-expenses",
+        name: "Unassigned Expenses",
+        budgetAmount: 0,
+        budgetPeriod: periodType,
+        budgetType: "spend",
+        accumulateTarget: null,
+        accumulateActuals: {},
+        createdAt: null,
+        categoryIds: unassignedCategoryIds,
+        isGroup: false,
+        isUnassignedPseudo: true,
+      },
+    ];
+  }
+
+  const weeklyBudgetItems = useMemo(
+    () => withUnassignedPseudo(budgetItems, "weekly"),
+    [budgetItems, unassignedCategoryIds, excludeUnassignedFromBudget]
+  );
+  const monthlyBudgetItems = useMemo(
+    () => withUnassignedPseudo(budgetItems, "monthly"),
+    [budgetItems, unassignedCategoryIds, excludeUnassignedFromBudget]
+  );
 
   const weeklyData = useMemo(
-    () => computeBudgetPeriodData(transactions, budgetItems, "weekly"),
-    [transactions, budgetItems]
+    () => computeBudgetPeriodData(transactions, weeklyBudgetItems, "weekly"),
+    [transactions, weeklyBudgetItems]
   );
   const monthlyData = useMemo(
-    () => computeBudgetPeriodData(transactions, budgetItems, "monthly"),
-    [transactions, budgetItems]
+    () => computeBudgetPeriodData(transactions, monthlyBudgetItems, "monthly"),
+    [transactions, monthlyBudgetItems]
   );
 
   const hasBudgets = (weeklyData && weeklyData.budgeted.length > 0) || (monthlyData && monthlyData.budgeted.length > 0);
@@ -2997,7 +3264,9 @@ function BudgetView({ transactions, categories, budgetGroups, hiddenBudgetMonths
                 spent={weeklyData.spendMap[item.id]?.[weeklyData.currentKey] || 0}
                 cumulativeSaved={cumulativeFor(weeklyData, item.id)}
                 periodKey={weeklyData.currentKey}
+                transactions={transactions}
                 onSetActual={onSetActual}
+                onAdjustFund={onAdjustFund}
               />
             ))}
           </div>
@@ -3015,7 +3284,9 @@ function BudgetView({ transactions, categories, budgetGroups, hiddenBudgetMonths
                 spent={monthlyData.spendMap[item.id]?.[monthlyData.currentKey] || 0}
                 cumulativeSaved={cumulativeFor(monthlyData, item.id)}
                 periodKey={monthlyData.currentKey}
+                transactions={transactions}
                 onSetActual={onSetActual}
+                onAdjustFund={onAdjustFund}
               />
             ))}
           </div>
@@ -3110,7 +3381,7 @@ function BudgetView({ transactions, categories, budgetGroups, hiddenBudgetMonths
 /* Budget groups view                                                   */
 /* ------------------------------------------------------------------ */
 
-function BudgetGroupCard({ group, allCategories, onRename, onSetBudget, onAddCategory, onRemoveCategory, onDelete }) {
+function BudgetGroupCard({ group, allCategories, transactions, onRename, onSetBudget, onAddCategory, onRemoveCategory, onDelete }) {
   const [editing, setEditing] = useState(false);
   const [draftName, setDraftName] = useState(group.name);
   const [confirming, setConfirming] = useState(false);
@@ -3195,6 +3466,17 @@ function BudgetGroupCard({ group, allCategories, onRename, onSetBudget, onAddCat
         {confirming ? (
           <span className="confirm-inline">
             Delete this group? Its categories stay — they just go back to being ungrouped.
+            {group.budgetType === "accumulate" &&
+              (() => {
+                const balance = computeItemFundBalance(group, new Set(group.categoryIds || []), transactions || []);
+                return Math.abs(balance) > 0.01 ? (
+                  <strong style={{ color: "var(--expense)" }}>
+                    {" "}
+                    This fund currently shows {formatMoney(balance)} — deleting it won't move that money
+                    anywhere, it'll just stop being tracked.
+                  </strong>
+                ) : null;
+              })()}
             <button className="btn btn-danger btn-sm" onClick={() => onDelete(group.id)}>
               Confirm
             </button>
@@ -3299,7 +3581,7 @@ function BudgetGroupCard({ group, allCategories, onRename, onSetBudget, onAddCat
   );
 }
 
-function BudgetGroupsView({ budgetGroups, categories, onAdd, onRename, onDelete, onSetBudget, onAddCategory, onRemoveCategory }) {
+function BudgetGroupsView({ budgetGroups, categories, transactions, onAdd, onRename, onDelete, onSetBudget, onAddCategory, onRemoveCategory }) {
   const [newName, setNewName] = useState("");
 
   function handleAdd(e) {
@@ -3352,6 +3634,7 @@ function BudgetGroupsView({ budgetGroups, categories, onAdd, onRename, onDelete,
             key={g.id}
             group={g}
             allCategories={categories}
+            transactions={transactions}
             onRename={onRename}
             onSetBudget={onSetBudget}
             onAddCategory={onAddCategory}
@@ -3468,9 +3751,11 @@ function PlanningView({
   budgetGroups,
   plannedIncome,
   incomeWarningDismissed,
+  excludeUnassignedFromBudget,
   onSetPlannedIncome,
   onDismissIncomeWarning,
   onSetCategoryBudget,
+  onToggleExcludeUnassigned,
 }) {
   const [draft, setDraft] = useState(plannedIncome != null ? String(plannedIncome) : "");
   const [editing, setEditing] = useState(plannedIncome == null);
@@ -3486,13 +3771,17 @@ function PlanningView({
     return map;
   }, [budgetGroups]);
 
-  const unassignedCategories = categories.filter(
-    (c) => !groupNameByCategoryId[c.id] && !(c.budgetAmount != null && c.budgetAmount > 0)
+  const unassignedIdSet = useMemo(
+    () => getUnassignedCategoryIds(categories, budgetGroups),
+    [categories, budgetGroups]
   );
+  const unassignedCategories = categories.filter((c) => unassignedIdSet.has(c.id));
   const budgetedCategories = categories.filter(
-    (c) => !groupNameByCategoryId[c.id] && c.budgetAmount != null && c.budgetAmount > 0
+    (c) => !unassignedIdSet.has(c.id) && !groupNameByCategoryId[c.id]
   );
-  const groupedCategories = categories.filter((c) => groupNameByCategoryId[c.id]);
+  const groupedCategories = categories.filter(
+    (c) => !unassignedIdSet.has(c.id) && groupNameByCategoryId[c.id]
+  );
 
   const unassignedSpendThisMonth = useMemo(() => {
     const ids = new Set(unassignedCategories.map((c) => c.id));
@@ -3660,6 +3949,25 @@ function PlanningView({
               </>
             )}
           </p>
+
+          <div className="excluded-note" style={{ marginBottom: 16 }}>
+            <label className="radio-option" style={{ fontSize: 13 }}>
+              <input
+                type="checkbox"
+                checked={excludeUnassignedFromBudget}
+                onChange={(e) => onToggleExcludeUnassigned(e.target.checked)}
+              />
+              Exclude unassigned spending from the Budget tab
+            </label>
+          </div>
+          {excludeUnassignedFromBudget && (
+            <div className="error-banner" style={{ marginBottom: 16 }}>
+              With this on, real spending in these categories won't show up anywhere in your Budget totals or
+              charts — it's easy to lose track of money going out with nothing keeping an eye on it. Only turn
+              this off if you're confident you don't need the reminder.
+            </div>
+          )}
+
           {categories.length === 0 ? (
             <div className="panel">
               <div className="hint">No categories yet — add some from the Categories tab first.</div>
@@ -4006,6 +4314,7 @@ function App({ householdName } = {}) {
   const [plannedIncome, setPlannedIncome] = useState(null);
   const [incomeWarningDismissed, setIncomeWarningDismissed] = useState(false);
   const [hiddenBudgetMonths, setHiddenBudgetMonths] = useState([]);
+  const [excludeUnassignedFromBudget, setExcludeUnassignedFromBudget] = useState(false);
   const [view, setView] = useState("upload");
   const [saveError, setSaveError] = useState(null);
   const [toast, setToast] = useState(null);
@@ -4024,6 +4333,7 @@ function App({ householdName } = {}) {
       setPlannedIncome(data.plannedIncome != null ? data.plannedIncome : null);
       setIncomeWarningDismissed(!!data.incomeWarningDismissed);
       setHiddenBudgetMonths(data.hiddenBudgetMonths || []);
+      setExcludeUnassignedFromBudget(!!data.excludeUnassignedFromBudget);
       setLoaded(true);
       if (nextAccounts.length > 0) setView("transactions");
     });
@@ -4046,7 +4356,8 @@ function App({ householdName } = {}) {
       nextBudgetGroups,
       nextPlannedIncome,
       nextIncomeWarningDismissed,
-      nextHiddenBudgetMonths
+      nextHiddenBudgetMonths,
+      nextExcludeUnassignedFromBudget
     ) => {
       setAccounts(nextAccounts);
       setTransactions(nextTransactions);
@@ -4055,6 +4366,7 @@ function App({ householdName } = {}) {
       setPlannedIncome(nextPlannedIncome);
       setIncomeWarningDismissed(nextIncomeWarningDismissed);
       setHiddenBudgetMonths(nextHiddenBudgetMonths);
+      setExcludeUnassignedFromBudget(nextExcludeUnassignedFromBudget);
       const ok = await saveData(
         nextAccounts,
         nextTransactions,
@@ -4062,7 +4374,8 @@ function App({ householdName } = {}) {
         nextBudgetGroups,
         nextPlannedIncome,
         nextIncomeWarningDismissed,
-        nextHiddenBudgetMonths
+        nextHiddenBudgetMonths,
+        nextExcludeUnassignedFromBudget
       );
       setSaveError(ok ? null : "Your last change couldn't be saved locally — it may not persist after reload.");
     },
@@ -4109,20 +4422,20 @@ function App({ householdName } = {}) {
         );
       }
       const nextTransactions = [...transactions, ...valid];
-      persist(nextAccounts, nextTransactions, categories, budgetGroups, plannedIncome, incomeWarningDismissed, hiddenBudgetMonths);
+      persist(nextAccounts, nextTransactions, categories, budgetGroups, plannedIncome, incomeWarningDismissed, hiddenBudgetMonths, excludeUnassignedFromBudget);
       setView("transactions");
       setToast(`Imported ${valid.length} transaction${valid.length === 1 ? "" : "s"} into ${accountMeta.name}.`);
     },
-    [accounts, transactions, categories, budgetGroups, plannedIncome, incomeWarningDismissed, hiddenBudgetMonths, persist]
+    [accounts, transactions, categories, budgetGroups, plannedIncome, incomeWarningDismissed, hiddenBudgetMonths, excludeUnassignedFromBudget, persist]
   );
 
   const handleDeleteAccount = useCallback(
     (accountId) => {
       const nextAccounts = accounts.filter((a) => a.id !== accountId);
       const nextTransactions = transactions.filter((t) => t.accountId !== accountId);
-      persist(nextAccounts, nextTransactions, categories, budgetGroups, plannedIncome, incomeWarningDismissed, hiddenBudgetMonths);
+      persist(nextAccounts, nextTransactions, categories, budgetGroups, plannedIncome, incomeWarningDismissed, hiddenBudgetMonths, excludeUnassignedFromBudget);
     },
-    [accounts, transactions, categories, budgetGroups, plannedIncome, incomeWarningDismissed, hiddenBudgetMonths, persist]
+    [accounts, transactions, categories, budgetGroups, plannedIncome, incomeWarningDismissed, hiddenBudgetMonths, excludeUnassignedFromBudget, persist]
   );
 
   const handleRenameAccount = useCallback(
@@ -4133,9 +4446,9 @@ function App({ householdName } = {}) {
       const nextTransactions = transactions.map((t) =>
         t.accountId === accountId ? { ...t, accountName: trimmed } : t
       );
-      persist(nextAccounts, nextTransactions, categories, budgetGroups, plannedIncome, incomeWarningDismissed, hiddenBudgetMonths);
+      persist(nextAccounts, nextTransactions, categories, budgetGroups, plannedIncome, incomeWarningDismissed, hiddenBudgetMonths, excludeUnassignedFromBudget);
     },
-    [accounts, transactions, categories, budgetGroups, plannedIncome, incomeWarningDismissed, hiddenBudgetMonths, persist]
+    [accounts, transactions, categories, budgetGroups, plannedIncome, incomeWarningDismissed, hiddenBudgetMonths, excludeUnassignedFromBudget, persist]
   );
 
   const handleUpdateAccountSettings = useCallback(
@@ -4162,25 +4475,25 @@ function App({ householdName } = {}) {
         }
         return { ...t, date: mapped.date, description: mapped.description, amountOut: mapped.amountOut, amountIn: mapped.amountIn };
       });
-      persist(nextAccounts, nextTransactions, categories, budgetGroups, plannedIncome, incomeWarningDismissed, hiddenBudgetMonths);
+      persist(nextAccounts, nextTransactions, categories, budgetGroups, plannedIncome, incomeWarningDismissed, hiddenBudgetMonths, excludeUnassignedFromBudget);
       setToast(
         skipped > 0
           ? `Updated account settings. ${skipped} transaction${skipped === 1 ? "" : "s"} couldn't be remapped and were left as-is.`
           : "Updated account settings and reapplied them to existing transactions."
       );
     },
-    [accounts, transactions, categories, budgetGroups, plannedIncome, incomeWarningDismissed, hiddenBudgetMonths, persist]
+    [accounts, transactions, categories, budgetGroups, plannedIncome, incomeWarningDismissed, hiddenBudgetMonths, excludeUnassignedFromBudget, persist]
   );
 
   const handleRestoreFromBackup = useCallback(
     (newAccounts, newCategories, newTransactions) => {
-      persist(newAccounts, newTransactions, newCategories, budgetGroups, plannedIncome, incomeWarningDismissed, hiddenBudgetMonths);
+      persist(newAccounts, newTransactions, newCategories, budgetGroups, plannedIncome, incomeWarningDismissed, hiddenBudgetMonths, excludeUnassignedFromBudget);
       setView("transactions");
       setToast(
         `Restored ${newTransactions.length} transaction${newTransactions.length === 1 ? "" : "s"} from backup.`
       );
     },
-    [budgetGroups, plannedIncome, incomeWarningDismissed, hiddenBudgetMonths, persist]
+    [budgetGroups, plannedIncome, incomeWarningDismissed, hiddenBudgetMonths, excludeUnassignedFromBudget, persist]
   );
 
   const handleRestoreBudget = useCallback(
@@ -4192,27 +4505,28 @@ function App({ householdName } = {}) {
         newBudgetGroups,
         restoredPlannedIncome != null ? restoredPlannedIncome : plannedIncome,
         incomeWarningDismissed,
-        hiddenBudgetMonths
+        hiddenBudgetMonths,
+        excludeUnassignedFromBudget
       );
       setToast("Applied budget setup from file.");
     },
-    [accounts, transactions, plannedIncome, incomeWarningDismissed, hiddenBudgetMonths, persist]
+    [accounts, transactions, plannedIncome, incomeWarningDismissed, hiddenBudgetMonths, excludeUnassignedFromBudget, persist]
   );
 
   const handleUpdateTransaction = useCallback(
     (id, updates) => {
       const nextTransactions = transactions.map((t) => (t.id === id ? { ...t, ...updates } : t));
-      persist(accounts, nextTransactions, categories, budgetGroups, plannedIncome, incomeWarningDismissed, hiddenBudgetMonths);
+      persist(accounts, nextTransactions, categories, budgetGroups, plannedIncome, incomeWarningDismissed, hiddenBudgetMonths, excludeUnassignedFromBudget);
     },
-    [accounts, transactions, categories, budgetGroups, plannedIncome, incomeWarningDismissed, hiddenBudgetMonths, persist]
+    [accounts, transactions, categories, budgetGroups, plannedIncome, incomeWarningDismissed, hiddenBudgetMonths, excludeUnassignedFromBudget, persist]
   );
 
   const handleDeleteTransaction = useCallback(
     (id) => {
       const nextTransactions = transactions.filter((t) => t.id !== id);
-      persist(accounts, nextTransactions, categories, budgetGroups, plannedIncome, incomeWarningDismissed, hiddenBudgetMonths);
+      persist(accounts, nextTransactions, categories, budgetGroups, plannedIncome, incomeWarningDismissed, hiddenBudgetMonths, excludeUnassignedFromBudget);
     },
-    [accounts, transactions, categories, budgetGroups, plannedIncome, incomeWarningDismissed, hiddenBudgetMonths, persist]
+    [accounts, transactions, categories, budgetGroups, plannedIncome, incomeWarningDismissed, hiddenBudgetMonths, excludeUnassignedFromBudget, persist]
   );
 
   const handleAddCategory = useCallback(
@@ -4228,28 +4542,29 @@ function App({ householdName } = {}) {
           budgetType: "spend",
           accumulateTarget: null,
           accumulateActuals: {},
+          fundAdjustments: [],
           createdAt: new Date().toISOString(),
         },
       ];
-      persist(accounts, transactions, nextCategories, budgetGroups, plannedIncome, incomeWarningDismissed, hiddenBudgetMonths);
+      persist(accounts, transactions, nextCategories, budgetGroups, plannedIncome, incomeWarningDismissed, hiddenBudgetMonths, excludeUnassignedFromBudget);
     },
-    [accounts, transactions, categories, budgetGroups, plannedIncome, incomeWarningDismissed, hiddenBudgetMonths, persist]
+    [accounts, transactions, categories, budgetGroups, plannedIncome, incomeWarningDismissed, hiddenBudgetMonths, excludeUnassignedFromBudget, persist]
   );
 
   const handleRenameCategory = useCallback(
     (categoryId, newName) => {
       const nextCategories = categories.map((c) => (c.id === categoryId ? { ...c, name: newName } : c));
-      persist(accounts, transactions, nextCategories, budgetGroups, plannedIncome, incomeWarningDismissed, hiddenBudgetMonths);
+      persist(accounts, transactions, nextCategories, budgetGroups, plannedIncome, incomeWarningDismissed, hiddenBudgetMonths, excludeUnassignedFromBudget);
     },
-    [accounts, transactions, categories, budgetGroups, plannedIncome, incomeWarningDismissed, hiddenBudgetMonths, persist]
+    [accounts, transactions, categories, budgetGroups, plannedIncome, incomeWarningDismissed, hiddenBudgetMonths, excludeUnassignedFromBudget, persist]
   );
 
   const handleToggleCategoryExcluded = useCallback(
     (categoryId, excluded) => {
       const nextCategories = categories.map((c) => (c.id === categoryId ? { ...c, excluded } : c));
-      persist(accounts, transactions, nextCategories, budgetGroups, plannedIncome, incomeWarningDismissed, hiddenBudgetMonths);
+      persist(accounts, transactions, nextCategories, budgetGroups, plannedIncome, incomeWarningDismissed, hiddenBudgetMonths, excludeUnassignedFromBudget);
     },
-    [accounts, transactions, categories, budgetGroups, plannedIncome, incomeWarningDismissed, hiddenBudgetMonths, persist]
+    [accounts, transactions, categories, budgetGroups, plannedIncome, incomeWarningDismissed, hiddenBudgetMonths, excludeUnassignedFromBudget, persist]
   );
 
   const handleSetCategoryBudget = useCallback(
@@ -4266,9 +4581,9 @@ function App({ householdName } = {}) {
             }
           : c
       );
-      persist(accounts, transactions, nextCategories, budgetGroups, plannedIncome, incomeWarningDismissed, hiddenBudgetMonths);
+      persist(accounts, transactions, nextCategories, budgetGroups, plannedIncome, incomeWarningDismissed, hiddenBudgetMonths, excludeUnassignedFromBudget);
     },
-    [accounts, transactions, categories, budgetGroups, plannedIncome, incomeWarningDismissed, hiddenBudgetMonths, persist]
+    [accounts, transactions, categories, budgetGroups, plannedIncome, incomeWarningDismissed, hiddenBudgetMonths, excludeUnassignedFromBudget, persist]
   );
 
   const handleMergeCategory = useCallback(
@@ -4280,10 +4595,10 @@ function App({ householdName } = {}) {
       const nextTransactions = transactions.map((t) =>
         t.categoryId === sourceCategoryId ? { ...t, categoryId: targetCategoryId } : t
       );
-      persist(accounts, nextTransactions, nextCategories, budgetGroups, plannedIncome, incomeWarningDismissed, hiddenBudgetMonths);
+      persist(accounts, nextTransactions, nextCategories, budgetGroups, plannedIncome, incomeWarningDismissed, hiddenBudgetMonths, excludeUnassignedFromBudget);
       setToast(`Merged "${source?.name || "category"}" into "${target?.name || "category"}".`);
     },
-    [accounts, transactions, categories, budgetGroups, plannedIncome, incomeWarningDismissed, hiddenBudgetMonths, persist]
+    [accounts, transactions, categories, budgetGroups, plannedIncome, incomeWarningDismissed, hiddenBudgetMonths, excludeUnassignedFromBudget, persist]
   );
 
   const handleAddBudgetGroup = useCallback(
@@ -4298,21 +4613,22 @@ function App({ householdName } = {}) {
           budgetType: "spend",
           accumulateTarget: null,
           accumulateActuals: {},
+          fundAdjustments: [],
           categoryIds: [],
           createdAt: new Date().toISOString(),
         },
       ];
-      persist(accounts, transactions, categories, nextGroups, plannedIncome, incomeWarningDismissed, hiddenBudgetMonths);
+      persist(accounts, transactions, categories, nextGroups, plannedIncome, incomeWarningDismissed, hiddenBudgetMonths, excludeUnassignedFromBudget);
     },
-    [accounts, transactions, categories, budgetGroups, plannedIncome, incomeWarningDismissed, hiddenBudgetMonths, persist]
+    [accounts, transactions, categories, budgetGroups, plannedIncome, incomeWarningDismissed, hiddenBudgetMonths, excludeUnassignedFromBudget, persist]
   );
 
   const handleRenameBudgetGroup = useCallback(
     (groupId, newName) => {
       const nextGroups = budgetGroups.map((g) => (g.id === groupId ? { ...g, name: newName } : g));
-      persist(accounts, transactions, categories, nextGroups, plannedIncome, incomeWarningDismissed, hiddenBudgetMonths);
+      persist(accounts, transactions, categories, nextGroups, plannedIncome, incomeWarningDismissed, hiddenBudgetMonths, excludeUnassignedFromBudget);
     },
-    [accounts, transactions, categories, budgetGroups, plannedIncome, incomeWarningDismissed, hiddenBudgetMonths, persist]
+    [accounts, transactions, categories, budgetGroups, plannedIncome, incomeWarningDismissed, hiddenBudgetMonths, excludeUnassignedFromBudget, persist]
   );
 
   const handleSetBudgetGroupBudget = useCallback(
@@ -4329,9 +4645,9 @@ function App({ householdName } = {}) {
             }
           : g
       );
-      persist(accounts, transactions, categories, nextGroups, plannedIncome, incomeWarningDismissed, hiddenBudgetMonths);
+      persist(accounts, transactions, categories, nextGroups, plannedIncome, incomeWarningDismissed, hiddenBudgetMonths, excludeUnassignedFromBudget);
     },
-    [accounts, transactions, categories, budgetGroups, plannedIncome, incomeWarningDismissed, hiddenBudgetMonths, persist]
+    [accounts, transactions, categories, budgetGroups, plannedIncome, incomeWarningDismissed, hiddenBudgetMonths, excludeUnassignedFromBudget, persist]
   );
 
   const handleSetAccumulateActual = useCallback(
@@ -4342,31 +4658,51 @@ function App({ householdName } = {}) {
         const nextGroups = budgetGroups.map((g) =>
           g.id === rawId ? { ...g, accumulateActuals: { ...(g.accumulateActuals || {}), [periodKey]: amount } } : g
         );
-        persist(accounts, transactions, categories, nextGroups, plannedIncome, incomeWarningDismissed, hiddenBudgetMonths);
+        persist(accounts, transactions, categories, nextGroups, plannedIncome, incomeWarningDismissed, hiddenBudgetMonths, excludeUnassignedFromBudget);
       } else {
         const nextCategories = categories.map((c) =>
           c.id === rawId ? { ...c, accumulateActuals: { ...(c.accumulateActuals || {}), [periodKey]: amount } } : c
         );
-        persist(accounts, transactions, nextCategories, budgetGroups, plannedIncome, incomeWarningDismissed, hiddenBudgetMonths);
+        persist(accounts, transactions, nextCategories, budgetGroups, plannedIncome, incomeWarningDismissed, hiddenBudgetMonths, excludeUnassignedFromBudget);
       }
     },
-    [accounts, transactions, categories, budgetGroups, plannedIncome, incomeWarningDismissed, hiddenBudgetMonths, persist]
+    [accounts, transactions, categories, budgetGroups, plannedIncome, incomeWarningDismissed, hiddenBudgetMonths, excludeUnassignedFromBudget, persist]
+  );
+
+  const handleAdjustFundBalance = useCallback(
+    (prefixedId, delta) => {
+      const isGroup = prefixedId.startsWith("group:");
+      const rawId = prefixedId.slice(prefixedId.indexOf(":") + 1);
+      const entry = { date: new Date().toISOString(), amount: delta };
+      if (isGroup) {
+        const nextGroups = budgetGroups.map((g) =>
+          g.id === rawId ? { ...g, fundAdjustments: [...(g.fundAdjustments || []), entry] } : g
+        );
+        persist(accounts, transactions, categories, nextGroups, plannedIncome, incomeWarningDismissed, hiddenBudgetMonths, excludeUnassignedFromBudget);
+      } else {
+        const nextCategories = categories.map((c) =>
+          c.id === rawId ? { ...c, fundAdjustments: [...(c.fundAdjustments || []), entry] } : c
+        );
+        persist(accounts, transactions, nextCategories, budgetGroups, plannedIncome, incomeWarningDismissed, hiddenBudgetMonths, excludeUnassignedFromBudget);
+      }
+    },
+    [accounts, transactions, categories, budgetGroups, plannedIncome, incomeWarningDismissed, hiddenBudgetMonths, excludeUnassignedFromBudget, persist]
   );
 
   const handleSetPlannedIncome = useCallback(
     (amount) => {
       // A newly-set plan deserves a fresh evaluation rather than staying
       // silenced against the old one.
-      persist(accounts, transactions, categories, budgetGroups, amount, false, hiddenBudgetMonths);
+      persist(accounts, transactions, categories, budgetGroups, amount, false, hiddenBudgetMonths, excludeUnassignedFromBudget);
     },
-    [accounts, transactions, categories, budgetGroups, hiddenBudgetMonths, persist]
+    [accounts, transactions, categories, budgetGroups, hiddenBudgetMonths, excludeUnassignedFromBudget, persist]
   );
 
   const handleDismissIncomeWarning = useCallback(
     (dismissed) => {
-      persist(accounts, transactions, categories, budgetGroups, plannedIncome, dismissed, hiddenBudgetMonths);
+      persist(accounts, transactions, categories, budgetGroups, plannedIncome, dismissed, hiddenBudgetMonths, excludeUnassignedFromBudget);
     },
-    [accounts, transactions, categories, budgetGroups, plannedIncome, hiddenBudgetMonths, persist]
+    [accounts, transactions, categories, budgetGroups, plannedIncome, hiddenBudgetMonths, excludeUnassignedFromBudget, persist]
   );
 
   const handleToggleHiddenBudgetMonth = useCallback(
@@ -4374,7 +4710,14 @@ function App({ householdName } = {}) {
       const nextHidden = hiddenBudgetMonths.includes(monthKey)
         ? hiddenBudgetMonths.filter((k) => k !== monthKey)
         : [...hiddenBudgetMonths, monthKey];
-      persist(accounts, transactions, categories, budgetGroups, plannedIncome, incomeWarningDismissed, nextHidden);
+      persist(accounts, transactions, categories, budgetGroups, plannedIncome, incomeWarningDismissed, nextHidden, excludeUnassignedFromBudget);
+    },
+    [accounts, transactions, categories, budgetGroups, plannedIncome, incomeWarningDismissed, hiddenBudgetMonths, excludeUnassignedFromBudget, persist]
+  );
+
+  const handleToggleExcludeUnassigned = useCallback(
+    (exclude) => {
+      persist(accounts, transactions, categories, budgetGroups, plannedIncome, incomeWarningDismissed, hiddenBudgetMonths, exclude);
     },
     [accounts, transactions, categories, budgetGroups, plannedIncome, incomeWarningDismissed, hiddenBudgetMonths, persist]
   );
@@ -4391,9 +4734,9 @@ function App({ householdName } = {}) {
         const ids = g.categoryIds || [];
         return ids.includes(categoryId) ? { ...g, categoryIds: ids.filter((id) => id !== categoryId) } : g;
       });
-      persist(accounts, transactions, categories, nextGroups, plannedIncome, incomeWarningDismissed, hiddenBudgetMonths);
+      persist(accounts, transactions, categories, nextGroups, plannedIncome, incomeWarningDismissed, hiddenBudgetMonths, excludeUnassignedFromBudget);
     },
-    [accounts, transactions, categories, budgetGroups, plannedIncome, incomeWarningDismissed, hiddenBudgetMonths, persist]
+    [accounts, transactions, categories, budgetGroups, plannedIncome, incomeWarningDismissed, hiddenBudgetMonths, excludeUnassignedFromBudget, persist]
   );
 
   const handleRemoveCategoryFromGroup = useCallback(
@@ -4401,17 +4744,17 @@ function App({ householdName } = {}) {
       const nextGroups = budgetGroups.map((g) =>
         g.id === groupId ? { ...g, categoryIds: (g.categoryIds || []).filter((id) => id !== categoryId) } : g
       );
-      persist(accounts, transactions, categories, nextGroups, plannedIncome, incomeWarningDismissed, hiddenBudgetMonths);
+      persist(accounts, transactions, categories, nextGroups, plannedIncome, incomeWarningDismissed, hiddenBudgetMonths, excludeUnassignedFromBudget);
     },
-    [accounts, transactions, categories, budgetGroups, plannedIncome, incomeWarningDismissed, hiddenBudgetMonths, persist]
+    [accounts, transactions, categories, budgetGroups, plannedIncome, incomeWarningDismissed, hiddenBudgetMonths, excludeUnassignedFromBudget, persist]
   );
 
   const handleDeleteBudgetGroup = useCallback(
     (groupId) => {
       const nextGroups = budgetGroups.filter((g) => g.id !== groupId);
-      persist(accounts, transactions, categories, nextGroups, plannedIncome, incomeWarningDismissed, hiddenBudgetMonths);
+      persist(accounts, transactions, categories, nextGroups, plannedIncome, incomeWarningDismissed, hiddenBudgetMonths, excludeUnassignedFromBudget);
     },
-    [accounts, transactions, categories, budgetGroups, plannedIncome, incomeWarningDismissed, hiddenBudgetMonths, persist]
+    [accounts, transactions, categories, budgetGroups, plannedIncome, incomeWarningDismissed, hiddenBudgetMonths, excludeUnassignedFromBudget, persist]
   );
 
   const handleDeleteCategory = useCallback(
@@ -4420,9 +4763,9 @@ function App({ householdName } = {}) {
       const nextTransactions = transactions.map((t) =>
         t.categoryId === categoryId ? { ...t, categoryId: null } : t
       );
-      persist(accounts, nextTransactions, nextCategories, budgetGroups, plannedIncome, incomeWarningDismissed, hiddenBudgetMonths);
+      persist(accounts, nextTransactions, nextCategories, budgetGroups, plannedIncome, incomeWarningDismissed, hiddenBudgetMonths, excludeUnassignedFromBudget);
     },
-    [accounts, transactions, categories, budgetGroups, plannedIncome, incomeWarningDismissed, hiddenBudgetMonths, persist]
+    [accounts, transactions, categories, budgetGroups, plannedIncome, incomeWarningDismissed, hiddenBudgetMonths, excludeUnassignedFromBudget, persist]
   );
 
   if (!loaded) {
@@ -4556,9 +4899,11 @@ function App({ householdName } = {}) {
               budgetGroups={budgetGroups}
               plannedIncome={plannedIncome}
               incomeWarningDismissed={incomeWarningDismissed}
+              excludeUnassignedFromBudget={excludeUnassignedFromBudget}
               onSetPlannedIncome={handleSetPlannedIncome}
               onDismissIncomeWarning={handleDismissIncomeWarning}
               onSetCategoryBudget={handleSetCategoryBudget}
+              onToggleExcludeUnassigned={handleToggleExcludeUnassigned}
             />
           )}
           {view === "budget" && (
@@ -4567,7 +4912,9 @@ function App({ householdName } = {}) {
               categories={categories}
               budgetGroups={budgetGroups}
               hiddenBudgetMonths={hiddenBudgetMonths}
+              excludeUnassignedFromBudget={excludeUnassignedFromBudget}
               onSetActual={handleSetAccumulateActual}
+              onAdjustFund={handleAdjustFundBalance}
               onToggleHiddenMonth={handleToggleHiddenBudgetMonth}
               onGoCategories={() => setView("categories")}
             />
@@ -4576,6 +4923,7 @@ function App({ householdName } = {}) {
             <BudgetGroupsView
               budgetGroups={budgetGroups}
               categories={categories}
+              transactions={transactions}
               onAdd={handleAddBudgetGroup}
               onRename={handleRenameBudgetGroup}
               onDelete={handleDeleteBudgetGroup}
