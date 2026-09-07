@@ -1256,6 +1256,7 @@ const STYLES = `
   --chart-5: #6B5B95;
   --chart-6: #2E8B8B;
   --chart-7: #9C4F6E;
+  --chart-other: #8C8C86;
   --radius: 6px;
 }
 
@@ -1284,6 +1285,7 @@ const STYLES = `
   --chart-5: #6857A0;
   --chart-6: #2593A0;
   --chart-7: #A84B78;
+  --chart-other: #8890A0;
 }
 
 :root[data-theme="dark-midnight"] {
@@ -1311,6 +1313,7 @@ const STYLES = `
   --chart-5: #A99AE0;
   --chart-6: #5FC4C4;
   --chart-7: #E08FB0;
+  --chart-other: #7C879C;
 }
 
 :root[data-theme="dark-charcoal"] {
@@ -1338,6 +1341,7 @@ const STYLES = `
   --chart-5: #ADA0E8;
   --chart-6: #5FC4C4;
   --chart-7: #E08FB0;
+  --chart-other: #8C8D93;
 }
 
 .ledger-root {
@@ -3063,6 +3067,7 @@ function TransactionsView({ transactions, accounts, categories, duplicateInfo, o
 function ReportsTooltip({ active, payload, label }) {
   if (!active || !payload || payload.length === 0) return null;
   const total = payload.reduce((s, p) => s + (p.value || 0), 0);
+  const sorted = [...payload].sort((a, b) => Math.abs(b.value || 0) - Math.abs(a.value || 0));
   return (
     <div
       style={{
@@ -3077,7 +3082,7 @@ function ReportsTooltip({ active, payload, label }) {
       }}
     >
       <div style={{ fontWeight: 700, marginBottom: 4 }}>{label}</div>
-      {payload.map((p) => (
+      {sorted.map((p) => (
         <div key={p.dataKey} style={{ display: "flex", justifyContent: "space-between", gap: 14, color: p.color }}>
           <span>{p.name}</span>
           <span>{formatMoney(p.value)}</span>
@@ -3102,14 +3107,65 @@ function ReportsTooltip({ active, payload, label }) {
   );
 }
 
-function ReportsDonutGrid({ periods, periodLabelFn, chartCategories, periodTotals }) {
+function ReportsDonutTooltip({ active, payload }) {
+  if (!active || !payload || payload.length === 0) return null;
+  const p = payload[0];
+  const signed = p.payload && p.payload.signed != null ? p.payload.signed : p.value;
+  return (
+    <div
+      style={{
+        fontSize: 12,
+        fontFamily: "'Work Sans', sans-serif",
+        border: "1px solid var(--border)",
+        borderRadius: 6,
+        background: "var(--panel)",
+        boxShadow: "0 4px 14px rgba(0,0,0,0.12)",
+        padding: "6px 10px",
+      }}
+    >
+      <div style={{ fontWeight: 600 }}>{p.name}</div>
+      <div style={{ color: signed >= 0 ? "var(--income)" : "var(--expense)" }}>{formatMoney(signed)}</div>
+    </div>
+  );
+}
+
+function ReportsDonutGrid({ periods, periodLabelFn, rows, categoryColor, periodTotals }) {
+  // Each donut ranks and truncates independently, using that period's
+  // OWN values — not a globally-fixed top 6 — so "Other" always
+  // reflects what was actually small that period, and a category that's
+  // usually small but spiked once still gets its own wedge on the
+  // period it mattered.
+  const periodData = periods.map((p, i) => {
+    const active = rows
+      .map((r) => ({ name: r.label, value: r.cells[i] }))
+      .filter((d) => d.value !== 0)
+      .sort((a, b) => Math.abs(b.value) - Math.abs(a.value));
+    const top = active.slice(0, 6);
+    const rest = active.slice(6);
+    const wedges = top.map((d) => ({ name: d.name, value: Math.abs(d.value), signed: d.value, isOther: false }));
+    if (rest.length > 0) {
+      const otherSum = rest.reduce((s, d) => s + d.value, 0);
+      if (otherSum !== 0) wedges.push({ name: "Other", value: Math.abs(otherSum), signed: otherSum, isOther: true });
+    }
+    return wedges;
+  });
+
+  // Legend reflects every category that actually appeared as its own
+  // wedge in at least one period — not a fixed 6, since what's shown
+  // individually now varies period to period.
+  const legendNames = [];
+  periodData.forEach((wedges) =>
+    wedges.forEach((w) => {
+      if (!w.isOther && !legendNames.includes(w.name)) legendNames.push(w.name);
+    })
+  );
+  const hasOther = periodData.some((wedges) => wedges.some((w) => w.isOther));
+
   return (
     <div className="panel chart-card">
       <div style={{ display: "flex", flexWrap: "wrap", gap: 22, justifyContent: periods.length <= 3 ? "center" : "flex-start" }}>
         {periods.map((p, i) => {
-          const data = chartCategories
-            .map((c) => ({ name: c.label, value: Math.abs(c.cells[i]) }))
-            .filter((d) => d.value > 0);
+          const data = periodData[i];
           const net = periodTotals[i];
           return (
             <div key={p} style={{ textAlign: "center", width: 148 }}>
@@ -3137,25 +3193,17 @@ function ReportsDonutGrid({ periods, periodLabelFn, chartCategories, periodTotal
                         innerRadius="58%"
                         outerRadius="92%"
                         paddingAngle={data.length > 1 ? 2 : 0}
-                        stroke="none"
                       >
-                        {data.map((d, di) => {
-                          const colorIdx = chartCategories.findIndex((c) => c.label === d.name);
-                          return <Cell key={di} fill={CHART_PALETTE[colorIdx % CHART_PALETTE.length]} />;
-                        })}
+                        {data.map((d, di) => (
+                          <Cell
+                            key={di}
+                            fill={d.isOther ? "var(--chart-other)" : categoryColor[d.name] || "var(--chart-other)"}
+                            stroke={d.signed >= 0 ? "var(--income)" : "var(--expense)"}
+                            strokeWidth={2}
+                          />
+                        ))}
                       </Pie>
-                      <Tooltip
-                        formatter={(value) => formatMoney(value)}
-                        wrapperStyle={{ zIndex: 100 }}
-                        contentStyle={{
-                          fontSize: 12,
-                          fontFamily: "'Work Sans', sans-serif",
-                          border: "1px solid var(--border)",
-                          borderRadius: 6,
-                          background: "var(--panel)",
-                          boxShadow: "0 4px 14px rgba(0,0,0,0.12)",
-                        }}
-                      />
+                      <Tooltip content={<ReportsDonutTooltip />} wrapperStyle={{ zIndex: 100 }} />
                     </PieChart>
                   </ResponsiveContainer>
                 )}
@@ -3188,31 +3236,50 @@ function ReportsDonutGrid({ periods, periodLabelFn, chartCategories, periodTotal
           );
         })}
       </div>
+      <p className="muted-cell" style={{ fontSize: 11.5, textAlign: "center", marginTop: 16 }}>
+        Each donut shows that period's own biggest movers — a category shown alone in one period may be folded
+        into "Other" in another, or vice versa, depending on how big it was that period. A colored ring around a
+        wedge means money in that period; a plain edge means money out.
+      </p>
       <div
         style={{
           display: "flex",
           flexWrap: "wrap",
           gap: 14,
           justifyContent: "center",
-          marginTop: 18,
+          marginTop: 12,
           paddingTop: 14,
           borderTop: "1px solid var(--border)",
         }}
       >
-        {chartCategories.map((c, i) => (
-          <div key={c.key} style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12 }}>
+        {legendNames.map((name) => (
+          <div key={name} style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12 }}>
             <span
               style={{
                 width: 10,
                 height: 10,
                 borderRadius: 2,
-                background: CHART_PALETTE[i % CHART_PALETTE.length],
+                background: categoryColor[name] || "var(--chart-other)",
                 display: "inline-block",
               }}
             />
-            {c.label}
+            {name}
           </div>
         ))}
+        {hasOther && (
+          <div style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12 }}>
+            <span
+              style={{
+                width: 10,
+                height: 10,
+                borderRadius: 2,
+                background: "var(--chart-other)",
+                display: "inline-block",
+              }}
+            />
+            Other
+          </div>
+        )}
       </div>
     </div>
   );
@@ -3283,16 +3350,42 @@ function ReportsView({ transactions, accounts, categories, onGoCategories }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [transactions, categories, filterAccount, periodKeyFn]);
 
+  // Ranked by each category's PEAK value in any single period, not its
+  // total across the whole range — a category that's only large once
+  // (a one-off repair bill) still earns its own slot during that period,
+  // and a category that's reliably large every period (rent) still
+  // shows correctly as $0 on a period it truly was $0, instead of a
+  // fixed slot going to waste while something that was actually big
+  // that period gets buried in "Other".
+  const rankedCategories = useMemo(() => {
+    return [...rows].sort((a, b) => {
+      const maxA = Math.max(0, ...a.cells.map((v) => Math.abs(v)));
+      const maxB = Math.max(0, ...b.cells.map((v) => Math.abs(v)));
+      return maxB - maxA;
+    });
+  }, [rows]);
+
+  // A stable name -> color assignment across the FULL ranked list (not
+  // just the top 6 shown on the bar chart), so a category keeps the
+  // same color everywhere it appears, including in a donut period where
+  // it's shown individually even though it isn't in the shared top 6.
+  const categoryColor = useMemo(() => {
+    const map = {};
+    rankedCategories.forEach((r, i) => {
+      map[r.label] = CHART_PALETTE[i % CHART_PALETTE.length];
+    });
+    return map;
+  }, [rankedCategories]);
+
   const chartCategories = useMemo(() => {
-    const sorted = [...rows].sort((a, b) => Math.abs(b.total) - Math.abs(a.total));
-    const top = sorted.slice(0, 6);
-    const rest = sorted.slice(6);
+    const top = rankedCategories.slice(0, 6);
+    const rest = rankedCategories.slice(6);
     if (rest.length > 0) {
       const otherCells = periods.map((_, i) => rest.reduce((s, r) => s + r.cells[i], 0));
       top.push({ key: "other", label: "Other", cells: otherCells, total: otherCells.reduce((s, v) => s + v, 0) });
     }
     return top;
-  }, [rows, periods]);
+  }, [rankedCategories, periods]);
 
   const chartData = periods.map((p, i) => {
     const entry = { period: periodLabelFn(p) };
@@ -3432,7 +3525,8 @@ function ReportsView({ transactions, accounts, categories, onGoCategories }) {
         <ReportsDonutGrid
           periods={periods}
           periodLabelFn={periodLabelFn}
-          chartCategories={chartCategories}
+          rows={rows}
+          categoryColor={categoryColor}
           periodTotals={periodTotals}
         />
       ) : (
@@ -3445,8 +3539,13 @@ function ReportsView({ transactions, accounts, categories, onGoCategories }) {
                 <YAxis tick={{ fontSize: 11, fill: "var(--ink-muted)" }} tickFormatter={(v) => formatMoney(v)} width={72} />
                 <Tooltip content={<ReportsTooltip />} wrapperStyle={{ zIndex: 100 }} />
                 <Legend wrapperStyle={{ fontSize: 12, zIndex: 1 }} />
-                {chartCategories.map((c, i) => (
-                  <Bar key={c.key} dataKey={c.label} stackId="a" fill={CHART_PALETTE[i % CHART_PALETTE.length]} />
+                {chartCategories.map((c) => (
+                  <Bar
+                    key={c.key}
+                    dataKey={c.label}
+                    stackId="a"
+                    fill={c.key === "other" ? "var(--chart-other)" : categoryColor[c.label]}
+                  />
                 ))}
               </BarChart>
             </ResponsiveContainer>
