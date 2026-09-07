@@ -467,6 +467,147 @@ function monthlyEquivalent(amount, period) {
   return period === "weekly" ? amount * WEEKS_PER_MONTH : amount;
 }
 
+/* ------------------------------------------------------------------ */
+/* Custom report periods                                                */
+/*                                                                      */
+/* A pay schedule isn't always weekly/monthly — biweekly and semi-      */
+/* monthly (e.g. 1st & 15th, or any two custom days) are common enough  */
+/* to support directly in Reports. This is a personal viewing           */
+/* preference, not shared financial data, so it lives in this browser's */
+/* localStorage rather than the synced household blob.                 */
+/* ------------------------------------------------------------------ */
+
+const REPORT_CONFIG_KEY = "ledger-report-period-config-v1";
+
+function defaultReportPeriodConfig() {
+  return {
+    mode: "monthly", // "weekly" | "monthly" | "interval" | "semimonthly"
+    intervalDays: 14,
+    anchorDate: new Date().toISOString().slice(0, 10),
+    semiMonthlyDay1: 1,
+    semiMonthlyDay2: 15,
+  };
+}
+
+function loadReportPeriodConfig() {
+  try {
+    const raw = window.localStorage.getItem(REPORT_CONFIG_KEY);
+    if (!raw) return defaultReportPeriodConfig();
+    const parsed = JSON.parse(raw);
+    return { ...defaultReportPeriodConfig(), ...parsed };
+  } catch (e) {
+    return defaultReportPeriodConfig();
+  }
+}
+
+function saveReportPeriodConfig(config) {
+  try {
+    window.localStorage.setItem(REPORT_CONFIG_KEY, JSON.stringify(config));
+  } catch (e) {
+    /* private browsing or storage disabled — the preference just won't persist */
+  }
+}
+
+function addDaysISO(dateISO, days) {
+  const [y, m, d] = dateISO.split("-").map(Number);
+  const dt = new Date(Date.UTC(y, m - 1, d));
+  dt.setUTCDate(dt.getUTCDate() + days);
+  return dt.toISOString().slice(0, 10);
+}
+
+function daysInMonth(year, month1based) {
+  return new Date(Date.UTC(year, month1based, 0)).getUTCDate();
+}
+
+// Buckets a date into an N-day period counted from an anchor date —
+// covers biweekly (14) and any other "every N days" cadence, extending
+// correctly to dates before the anchor as well as after it.
+function getIntervalPeriodStartISO(dateISO, anchorISO, intervalDays) {
+  const [ay, am, ad] = anchorISO.split("-").map(Number);
+  const anchorMs = Date.UTC(ay, am - 1, ad);
+  const [y, m, d] = dateISO.split("-").map(Number);
+  const dateMs = Date.UTC(y, m - 1, d);
+  const dayMs = 24 * 60 * 60 * 1000;
+  const diffDays = Math.round((dateMs - anchorMs) / dayMs);
+  const periodIndex = Math.floor(diffDays / intervalDays);
+  const periodStartMs = anchorMs + periodIndex * intervalDays * dayMs;
+  return new Date(periodStartMs).toISOString().slice(0, 10);
+}
+
+function formatIntervalLabel(startISO, intervalDays) {
+  const endISO = addDaysISO(startISO, intervalDays - 1);
+  const [ys, ms, ds] = startISO.split("-").map(Number);
+  const [ye, me, de] = endISO.split("-").map(Number);
+  const startDt = new Date(Date.UTC(ys, ms - 1, ds));
+  const endDt = new Date(Date.UTC(ye, me - 1, de));
+  const startStr = startDt.toLocaleDateString("en-US", { month: "short", day: "numeric", timeZone: "UTC" });
+  const endStr =
+    ys === ye && ms === me
+      ? endDt.toLocaleDateString("en-US", { day: "numeric", timeZone: "UTC" })
+      : endDt.toLocaleDateString("en-US", { month: "short", day: "numeric", timeZone: "UTC" });
+  return `${startStr}\u2013${endStr}`;
+}
+
+// Buckets a date into one of two custom sub-periods each month (e.g.
+// 1st & 15th, or any other pair of cutoff days), clamping a cutoff
+// beyond a short month (like the 31st in February) to that month's
+// actual last day.
+function getSemiMonthlyPeriodStartISO(dateISO, day1, day2) {
+  const [y, m, d] = dateISO.split("-").map(Number);
+  const dim = daysInMonth(y, m);
+  const cd1 = Math.min(day1, dim);
+  const cd2 = Math.min(day2, dim);
+  if (d < cd1) {
+    let py = y, pm = m - 1;
+    if (pm === 0) {
+      pm = 12;
+      py = y - 1;
+    }
+    const pcd2 = Math.min(day2, daysInMonth(py, pm));
+    return `${py}-${String(pm).padStart(2, "0")}-${String(pcd2).padStart(2, "0")}`;
+  }
+  if (d < cd2) {
+    return `${y}-${String(m).padStart(2, "0")}-${String(cd1).padStart(2, "0")}`;
+  }
+  return `${y}-${String(m).padStart(2, "0")}-${String(cd2).padStart(2, "0")}`;
+}
+
+function formatSemiMonthlyLabel(periodStartISO, day1, day2) {
+  const [y, m, d] = periodStartISO.split("-").map(Number);
+  const dim = daysInMonth(y, m);
+  const cd1 = Math.min(day1, dim);
+  const cd2 = Math.min(day2, dim);
+  const endDay = d === cd1 ? cd2 - 1 : dim;
+  const startDt = new Date(Date.UTC(y, m - 1, d));
+  const endDt = new Date(Date.UTC(y, m - 1, Math.max(endDay, d)));
+  const startStr = startDt.toLocaleDateString("en-US", { month: "short", day: "numeric", timeZone: "UTC" });
+  const endStr = endDt.toLocaleDateString("en-US", { day: "numeric", timeZone: "UTC" });
+  return `${startStr}\u2013${endStr}`;
+}
+
+function periodFnsForConfig(config) {
+  if (config.mode === "weekly") {
+    return { keyFn: getWeekStartISO, labelFn: formatWeekLabel };
+  }
+  if (config.mode === "interval") {
+    const anchor = config.anchorDate || defaultReportPeriodConfig().anchorDate;
+    const days = config.intervalDays && config.intervalDays > 0 ? config.intervalDays : 14;
+    return {
+      keyFn: (dateISO) => getIntervalPeriodStartISO(dateISO, anchor, days),
+      labelFn: (startISO) => formatIntervalLabel(startISO, days),
+    };
+  }
+  if (config.mode === "semimonthly") {
+    const d1 = Math.min(config.semiMonthlyDay1 || 1, config.semiMonthlyDay2 || 15);
+    const d2 = Math.max(config.semiMonthlyDay1 || 1, config.semiMonthlyDay2 || 15);
+    return {
+      keyFn: (dateISO) => getSemiMonthlyPeriodStartISO(dateISO, d1, d2),
+      labelFn: (startISO) => formatSemiMonthlyLabel(startISO, d1, d2),
+    };
+  }
+  return { keyFn: getMonthStartISO, labelFn: formatMonthLabel };
+}
+
 function addPeriod(dateISO, periodType) {
   const [y, m, d] = dateISO.split("-").map(Number);
   const dt = new Date(Date.UTC(y, m - 1, d));
@@ -2753,11 +2894,21 @@ function TransactionsView({ transactions, accounts, categories, duplicateInfo, o
 /* ------------------------------------------------------------------ */
 
 function ReportsView({ transactions, accounts, categories, onGoCategories }) {
-  const [mode, setMode] = useState("monthly");
+  const [periodConfig, setPeriodConfig] = useState(loadReportPeriodConfig);
   const [filterAccount, setFilterAccount] = useState("all");
 
-  const periodKeyFn = mode === "weekly" ? getWeekStartISO : getMonthStartISO;
-  const periodLabelFn = mode === "weekly" ? formatWeekLabel : formatMonthLabel;
+  function updateConfig(patch) {
+    setPeriodConfig((prev) => {
+      const next = { ...prev, ...patch };
+      saveReportPeriodConfig(next);
+      return next;
+    });
+  }
+
+  const { keyFn: periodKeyFn, labelFn: periodLabelFn } = useMemo(
+    () => periodFnsForConfig(periodConfig),
+    [periodConfig]
+  );
 
   const trackedCategories = categories.filter((c) => !c.excluded);
   const excludedCategories = categories.filter((c) => c.excluded);
@@ -2805,7 +2956,7 @@ function ReportsView({ transactions, accounts, categories, onGoCategories }) {
 
     return { periods, rows, periodTotals, grandTotal, totalIn: sumIn, totalOut: sumOut };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [transactions, categories, filterAccount, mode]);
+  }, [transactions, categories, filterAccount, periodKeyFn]);
 
   const chartCategories = useMemo(() => {
     const sorted = [...rows].sort((a, b) => Math.abs(b.total) - Math.abs(a.total));
@@ -2839,16 +2990,34 @@ function ReportsView({ transactions, accounts, categories, onGoCategories }) {
     <div>
       <div className="view-header">
         <h1>Reports</h1>
-        <p>Category totals rolled up by week or month, like a pivot table of your spending.</p>
+        <p>Category totals rolled up on whatever schedule actually matches your pay or budgeting rhythm.</p>
       </div>
 
       <div className="filter-bar">
         <div className="toggle-group">
-          <button className={"toggle-btn" + (mode === "weekly" ? " active" : "")} onClick={() => setMode("weekly")}>
+          <button
+            className={"toggle-btn" + (periodConfig.mode === "weekly" ? " active" : "")}
+            onClick={() => updateConfig({ mode: "weekly" })}
+          >
             Weekly
           </button>
-          <button className={"toggle-btn" + (mode === "monthly" ? " active" : "")} onClick={() => setMode("monthly")}>
+          <button
+            className={"toggle-btn" + (periodConfig.mode === "monthly" ? " active" : "")}
+            onClick={() => updateConfig({ mode: "monthly" })}
+          >
             Monthly
+          </button>
+          <button
+            className={"toggle-btn" + (periodConfig.mode === "interval" ? " active" : "")}
+            onClick={() => updateConfig({ mode: "interval" })}
+          >
+            Every N days
+          </button>
+          <button
+            className={"toggle-btn" + (periodConfig.mode === "semimonthly" ? " active" : "")}
+            onClick={() => updateConfig({ mode: "semimonthly" })}
+          >
+            Twice a month
           </button>
         </div>
         <select value={filterAccount} onChange={(e) => setFilterAccount(e.target.value)}>
@@ -2860,6 +3029,59 @@ function ReportsView({ transactions, accounts, categories, onGoCategories }) {
           ))}
         </select>
       </div>
+
+      {periodConfig.mode === "interval" && (
+        <div className="excluded-note" style={{ justifyContent: "flex-start", gap: 16, marginTop: -8 }}>
+          <label className="radio-option" style={{ fontSize: 13 }}>
+            Every
+            <input
+              type="number"
+              min="1"
+              max="90"
+              value={periodConfig.intervalDays}
+              onChange={(e) => updateConfig({ intervalDays: Math.max(1, parseInt(e.target.value, 10) || 1) })}
+              style={{ width: 56 }}
+            />
+            days, starting from
+            <input
+              type="date"
+              value={periodConfig.anchorDate}
+              onChange={(e) => updateConfig({ anchorDate: e.target.value })}
+            />
+          </label>
+          <span className="muted-cell" style={{ fontSize: 12 }}>
+            Use a date you know was a payday — 14 days covers a biweekly schedule.
+          </span>
+        </div>
+      )}
+
+      {periodConfig.mode === "semimonthly" && (
+        <div className="excluded-note" style={{ justifyContent: "flex-start", gap: 16, marginTop: -8 }}>
+          <label className="radio-option" style={{ fontSize: 13 }}>
+            Split each month on the
+            <input
+              type="number"
+              min="1"
+              max="31"
+              value={periodConfig.semiMonthlyDay1}
+              onChange={(e) => updateConfig({ semiMonthlyDay1: Math.min(31, Math.max(1, parseInt(e.target.value, 10) || 1)) })}
+              style={{ width: 48 }}
+            />
+            and
+            <input
+              type="number"
+              min="1"
+              max="31"
+              value={periodConfig.semiMonthlyDay2}
+              onChange={(e) => updateConfig({ semiMonthlyDay2: Math.min(31, Math.max(1, parseInt(e.target.value, 10) || 1)) })}
+              style={{ width: 48 }}
+            />
+          </label>
+          <span className="muted-cell" style={{ fontSize: 12 }}>
+            A day beyond a short month (like the 31st in February) uses that month's last day instead.
+          </span>
+        </div>
+      )}
 
       <div className="summary-row">
         <StatBlock value={formatMoney(totalIn)} label="Tracked money in" />
