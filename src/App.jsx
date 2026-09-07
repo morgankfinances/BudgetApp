@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useMemo, useCallback, useRef } from "react";
 import Papa from "papaparse";
 import * as XLSX from "xlsx";
-import { BarChart, Bar, Cell, ReferenceLine, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from "recharts";
+import { BarChart, Bar, PieChart, Pie, Cell, ReferenceLine, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from "recharts";
 
 /* ------------------------------------------------------------------ */
 /* Storage                                                             */
@@ -486,6 +486,7 @@ function defaultReportPeriodConfig() {
     anchorDate: new Date().toISOString().slice(0, 10),
     semiMonthlyDay1: 1,
     semiMonthlyDay2: 15,
+    chartType: "bar", // "bar" | "donut"
   };
 }
 
@@ -632,7 +633,15 @@ function enumeratePeriodsBetween(startKey, endKey, periodType) {
   return periods;
 }
 
-const CHART_PALETTE = ["#3B5BA0", "#3F7D5C", "#AC4A2C", "#8A5A15", "#6B5B95", "#2E8B8B", "#9C4F6E"];
+const CHART_PALETTE = [
+  "var(--chart-1)",
+  "var(--chart-2)",
+  "var(--chart-3)",
+  "var(--chart-4)",
+  "var(--chart-5)",
+  "var(--chart-6)",
+  "var(--chart-7)",
+];
 
 function computeBudgetPeriodData(transactions, budgetItems, periodType) {
   const periodKeyFn = periodType === "weekly" ? getWeekStartISO : getMonthStartISO;
@@ -1214,7 +1223,15 @@ const STYLES = `
   width: 100%;
 }
 
-.ledger-root {
+/* Theme variables live on :root (the <html> element), not scoped to
+   .ledger-root — HouseholdGate.jsx renders its own UI (the floating
+   Settings button, panel, and pre-household screens) as a DOM sibling
+   of .ledger-root, not a descendant, so anything scoped to .ledger-root
+   wouldn't be visible there. :root is visible everywhere. HouseholdGate
+   owns the actual theme state and sets data-theme on <html> directly;
+   this file only needs to read the resulting variables. */
+
+:root {
   --bg: #F5F6F1;
   --panel: #FFFFFF;
   --ink: #1E241F;
@@ -1222,13 +1239,108 @@ const STYLES = `
   --border: #DAD9CC;
   --accent: #3B5BA0;
   --accent-hover: #2E4880;
+  --accent-tint: #EBEEF7;
   --income: #3F7D5C;
   --expense: #AC4A2C;
   --warn-bg: #FBF1DA;
   --warn-border: #E3B558;
   --warn-ink: #8A5A15;
   --danger: #A6392B;
+  --danger-tint-bg: #FBEAE6;
+  --danger-tint-border: #E3A190;
+  --subtle-bg: #F2F1E9;
+  --chart-1: #3B5BA0;
+  --chart-2: #3F7D5C;
+  --chart-3: #AC4A2C;
+  --chart-4: #8A5A15;
+  --chart-5: #6B5B95;
+  --chart-6: #2E8B8B;
+  --chart-7: #9C4F6E;
   --radius: 6px;
+}
+
+:root[data-theme="light-slate"] {
+  --bg: #F3F5F8;
+  --panel: #FFFFFF;
+  --ink: #1C2430;
+  --ink-muted: #5B6675;
+  --border: #D6DCE3;
+  --accent: #2B6CB0;
+  --accent-hover: #1E5490;
+  --accent-tint: #E7EFF8;
+  --income: #2F8F6F;
+  --expense: #C1502F;
+  --warn-bg: #FCF3D9;
+  --warn-border: #DDAE3E;
+  --warn-ink: #7A5A0D;
+  --danger: #B0402E;
+  --danger-tint-bg: #FBEAE6;
+  --danger-tint-border: #E0AA98;
+  --subtle-bg: #EDF0F4;
+  --chart-1: #2B6CB0;
+  --chart-2: #2F8F6F;
+  --chart-3: #C1502F;
+  --chart-4: #9C7A1E;
+  --chart-5: #6857A0;
+  --chart-6: #2593A0;
+  --chart-7: #A84B78;
+}
+
+:root[data-theme="dark-midnight"] {
+  --bg: #10131B;
+  --panel: #1B2030;
+  --ink: #E7E9F1;
+  --ink-muted: #9BA3B5;
+  --border: #2C3346;
+  --accent: #7B9EE0;
+  --accent-hover: #9AB6EA;
+  --accent-tint: #232A42;
+  --income: #6FCB9A;
+  --expense: #E2896A;
+  --warn-bg: #3B301A;
+  --warn-border: #C99A3E;
+  --warn-ink: #EAC581;
+  --danger: #E2685A;
+  --danger-tint-bg: #3A2420;
+  --danger-tint-border: #7A4038;
+  --subtle-bg: #242A3D;
+  --chart-1: #7B9EE0;
+  --chart-2: #6FCB9A;
+  --chart-3: #E2896A;
+  --chart-4: #D9A94E;
+  --chart-5: #A99AE0;
+  --chart-6: #5FC4C4;
+  --chart-7: #E08FB0;
+}
+
+:root[data-theme="dark-charcoal"] {
+  --bg: #17181C;
+  --panel: #212227;
+  --ink: #EDEDEE;
+  --ink-muted: #9D9EA3;
+  --border: #35363C;
+  --accent: #86A6E8;
+  --accent-hover: #A3C0F0;
+  --accent-tint: #262A38;
+  --income: #6FCB9A;
+  --expense: #E2896A;
+  --warn-bg: #332C1A;
+  --warn-border: #C4993F;
+  --warn-ink: #E7C381;
+  --danger: #E2685A;
+  --danger-tint-bg: #362522;
+  --danger-tint-border: #7A4038;
+  --subtle-bg: #2A2B31;
+  --chart-1: #86A6E8;
+  --chart-2: #6FCB9A;
+  --chart-3: #E2896A;
+  --chart-4: #D9A94E;
+  --chart-5: #ADA0E8;
+  --chart-6: #5FC4C4;
+  --chart-7: #E08FB0;
+}
+
+.ledger-root {
   font-family: 'Work Sans', -apple-system, sans-serif;
   color: var(--ink);
   background: var(--bg);
@@ -1316,8 +1428,8 @@ const STYLES = `
   transition: background 0.12s ease, color 0.12s ease;
 }
 
-.nav-btn:hover { background: #F0EFE8; color: var(--ink); }
-.nav-btn.active { background: #EBEEF7; color: var(--accent); font-weight: 600; }
+.nav-btn:hover { background: var(--subtle-bg); color: var(--ink); }
+.nav-btn.active { background: var(--accent-tint); color: var(--accent); font-weight: 600; }
 
 .sidebar-stats {
   margin-top: auto;
@@ -1437,7 +1549,7 @@ const STYLES = `
   text-align: center;
   color: var(--ink-muted);
   font-size: 14px;
-  background: #FBFBF8;
+  background: var(--subtle-bg);
 }
 .dropzone strong { color: var(--ink); }
 
@@ -1448,8 +1560,8 @@ const STYLES = `
 .file-input-label input { display: none; }
 
 .error-banner {
-  background: #FBEAE6;
-  border: 1px solid #E3A190;
+  background: var(--danger-tint-bg);
+  border: 1px solid var(--danger-tint-border);
   color: var(--danger);
   padding: 10px 14px;
   border-radius: var(--radius);
@@ -1458,7 +1570,7 @@ const STYLES = `
 }
 
 .sync-banner {
-  background: #EBEEF7;
+  background: var(--accent-tint);
   border: 1px solid var(--accent);
   color: var(--accent-hover);
   padding: 10px 14px;
@@ -1480,7 +1592,7 @@ const STYLES = `
   white-space: nowrap;
   text-align: left;
 }
-.preview-table th { background: #FAFAF6; color: var(--ink-muted); font-weight: 600; }
+.preview-table th { background: var(--subtle-bg); color: var(--ink-muted); font-weight: 600; }
 
 .summary-row { display: flex; gap: 22px; flex-wrap: wrap; margin-bottom: 18px; }
 .summary-stat .num { font-family: 'Fraunces', serif; font-size: 22px; font-weight: 500; }
@@ -1545,6 +1657,8 @@ const STYLES = `
 .chart-wrap { width: 100%; height: 280px; margin-top: 6px; }
 
 .pivot-table { border-collapse: collapse; font-size: 13px; white-space: nowrap; width: 100%; }
+
+.dual-scroll-top { overflow-x: auto; overflow-y: hidden; height: 16px; border-bottom: 1px solid var(--border); }
 .pivot-table th, .pivot-table td { padding: 8px 14px; text-align: right; border-bottom: 1px solid var(--border); }
 .pivot-table th:first-child, .pivot-table td:first-child {
   text-align: left; position: sticky; left: 0; background: var(--panel); z-index: 1;
@@ -1553,7 +1667,7 @@ const STYLES = `
   font-size: 11px; text-transform: uppercase; letter-spacing: 0.04em;
   color: var(--ink-muted); font-weight: 600; border-bottom: 2px solid var(--border);
 }
-.pivot-table tfoot td { border-top: 2px solid var(--border); border-bottom: none; background: #FAFAF6; font-weight: 700; }
+.pivot-table tfoot td { border-top: 2px solid var(--border); border-bottom: none; background: var(--subtle-bg); font-weight: 700; }
 .pivot-table tbody tr:last-child td { border-bottom: none; }
 .pivot-row-label { font-weight: 500; }
 .pivot-total-col { font-weight: 600; }
@@ -1561,7 +1675,7 @@ const STYLES = `
 .excluded-note {
   display: flex; align-items: center; justify-content: space-between; gap: 12px;
   font-size: 12.5px; color: var(--ink-muted); margin-top: 12px; padding: 10px 14px;
-  border: 1px solid var(--border); border-radius: var(--radius); background: #FAFAF6;
+  border: 1px solid var(--border); border-radius: var(--radius); background: var(--subtle-bg);
 }
 
 .budget-card-grid { display: flex; flex-wrap: wrap; gap: 14px; margin-bottom: 22px; }
@@ -1572,7 +1686,7 @@ const STYLES = `
 .budget-card-head { display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 8px; gap: 8px; }
 .budget-card-name { font-weight: 600; font-size: 14px; }
 .budget-card-period { font-size: 10.5px; color: var(--ink-muted); text-transform: uppercase; letter-spacing: 0.04em; white-space: nowrap; }
-.budget-bar-track { height: 8px; border-radius: 999px; background: #EEECE2; overflow: hidden; margin-bottom: 8px; }
+.budget-bar-track { height: 8px; border-radius: 999px; background: var(--subtle-bg); overflow: hidden; margin-bottom: 8px; }
 .budget-bar-fill { height: 100%; border-radius: 999px; transition: width 0.2s ease; }
 .budget-card-figures { font-size: 13px; }
 .budget-card-figures .muted-cell { font-size: 12.5px; }
@@ -1585,7 +1699,7 @@ const STYLES = `
 
 .group-chip {
   display: inline-flex; align-items: center; gap: 6px; font-size: 12.5px;
-  padding: 4px 6px 4px 10px; border-radius: 999px; background: #EEF0EC; border: 1px solid var(--border);
+  padding: 4px 6px 4px 10px; border-radius: 999px; background: var(--subtle-bg); border: 1px solid var(--border);
 }
 .group-chip-remove {
   border: none; background: none; cursor: pointer; color: var(--ink-muted); font-size: 14px; line-height: 1; padding: 2px;
@@ -1601,7 +1715,7 @@ const STYLES = `
 .dup-cell { display: flex; flex-direction: column; align-items: flex-start; gap: 3px; }
 .dup-cell .btn-ghost { padding: 0; font-size: 11px; color: var(--ink-muted); }
 
-.dup-detail-row td { background: #FBF8EF; padding: 10px 14px; }
+.dup-detail-row td { background: var(--subtle-bg); padding: 10px 14px; }
 .dup-detail-title { font-size: 12px; font-weight: 600; color: var(--warn-ink); margin-bottom: 6px; }
 .dup-detail-item { font-size: 12.5px; color: var(--ink-muted); padding: 3px 0; }
 
@@ -1709,6 +1823,59 @@ function StatBlock({ value, label }) {
     <div className="summary-stat">
       <div className="num">{value}</div>
       <div className="label">{label}</div>
+    </div>
+  );
+}
+
+// Wraps a wide table with a scrollbar at both the top and the bottom of
+// the panel, kept in sync — so a long table doesn't force scrolling all
+// the way down just to find the way to scroll sideways.
+function DualScrollPanel({ children }) {
+  const topRef = useRef(null);
+  const bottomRef = useRef(null);
+  const [scrollWidth, setScrollWidth] = useState(0);
+  const syncSource = useRef(null);
+
+  useEffect(() => {
+    const el = bottomRef.current;
+    if (!el) return;
+    const update = () => setScrollWidth(el.scrollWidth);
+    update();
+    // Observe the actual table (the scrollable content), not the
+    // container — the container's own box size doesn't change just
+    // because a column was added to what's inside it.
+    const target = el.firstElementChild || el;
+    const observer = new ResizeObserver(update);
+    observer.observe(target);
+    return () => observer.disconnect();
+  }, []);
+
+  function handleTopScroll() {
+    if (syncSource.current === "bottom") {
+      syncSource.current = null;
+      return;
+    }
+    syncSource.current = "top";
+    if (bottomRef.current && topRef.current) bottomRef.current.scrollLeft = topRef.current.scrollLeft;
+  }
+
+  function handleBottomScroll() {
+    if (syncSource.current === "top") {
+      syncSource.current = null;
+      return;
+    }
+    syncSource.current = "bottom";
+    if (topRef.current && bottomRef.current) topRef.current.scrollLeft = bottomRef.current.scrollLeft;
+  }
+
+  return (
+    <div className="panel" style={{ padding: 0 }}>
+      <div ref={topRef} onScroll={handleTopScroll} className="dual-scroll-top">
+        <div style={{ width: scrollWidth, height: 1 }} />
+      </div>
+      <div ref={bottomRef} onScroll={handleBottomScroll} style={{ overflowX: "auto" }}>
+        {children}
+      </div>
     </div>
   );
 }
@@ -2893,6 +3060,164 @@ function TransactionsView({ transactions, accounts, categories, duplicateInfo, o
 /* Reports view                                                         */
 /* ------------------------------------------------------------------ */
 
+function ReportsTooltip({ active, payload, label }) {
+  if (!active || !payload || payload.length === 0) return null;
+  const total = payload.reduce((s, p) => s + (p.value || 0), 0);
+  return (
+    <div
+      style={{
+        fontSize: 12.5,
+        fontFamily: "'Work Sans', sans-serif",
+        border: "1px solid var(--border)",
+        borderRadius: 6,
+        background: "var(--panel)",
+        boxShadow: "0 4px 14px rgba(0,0,0,0.12)",
+        padding: "8px 10px",
+        minWidth: 160,
+      }}
+    >
+      <div style={{ fontWeight: 700, marginBottom: 4 }}>{label}</div>
+      {payload.map((p) => (
+        <div key={p.dataKey} style={{ display: "flex", justifyContent: "space-between", gap: 14, color: p.color }}>
+          <span>{p.name}</span>
+          <span>{formatMoney(p.value)}</span>
+        </div>
+      ))}
+      <div
+        style={{
+          display: "flex",
+          justifyContent: "space-between",
+          gap: 14,
+          marginTop: 4,
+          paddingTop: 4,
+          borderTop: "1px solid var(--border)",
+          fontWeight: 700,
+          color: total >= 0 ? "var(--income)" : "var(--expense)",
+        }}
+      >
+        <span>Net</span>
+        <span>{formatMoney(total)}</span>
+      </div>
+    </div>
+  );
+}
+
+function ReportsDonutGrid({ periods, periodLabelFn, chartCategories, periodTotals }) {
+  return (
+    <div className="panel chart-card">
+      <div style={{ display: "flex", flexWrap: "wrap", gap: 22, justifyContent: periods.length <= 3 ? "center" : "flex-start" }}>
+        {periods.map((p, i) => {
+          const data = chartCategories
+            .map((c) => ({ name: c.label, value: Math.abs(c.cells[i]) }))
+            .filter((d) => d.value > 0);
+          const net = periodTotals[i];
+          return (
+            <div key={p} style={{ textAlign: "center", width: 148 }}>
+              <div style={{ position: "relative", height: 148 }}>
+                {data.length === 0 ? (
+                  <div
+                    style={{
+                      height: "100%",
+                      display: "flex",
+                      alignItems: "center",
+                      justifyContent: "center",
+                      color: "var(--ink-muted)",
+                      fontSize: 12,
+                    }}
+                  >
+                    No activity
+                  </div>
+                ) : (
+                  <ResponsiveContainer>
+                    <PieChart>
+                      <Pie
+                        data={data}
+                        dataKey="value"
+                        nameKey="name"
+                        innerRadius="58%"
+                        outerRadius="92%"
+                        paddingAngle={data.length > 1 ? 2 : 0}
+                        stroke="none"
+                      >
+                        {data.map((d, di) => {
+                          const colorIdx = chartCategories.findIndex((c) => c.label === d.name);
+                          return <Cell key={di} fill={CHART_PALETTE[colorIdx % CHART_PALETTE.length]} />;
+                        })}
+                      </Pie>
+                      <Tooltip
+                        formatter={(value) => formatMoney(value)}
+                        wrapperStyle={{ zIndex: 100 }}
+                        contentStyle={{
+                          fontSize: 12,
+                          fontFamily: "'Work Sans', sans-serif",
+                          border: "1px solid var(--border)",
+                          borderRadius: 6,
+                          background: "var(--panel)",
+                          boxShadow: "0 4px 14px rgba(0,0,0,0.12)",
+                        }}
+                      />
+                    </PieChart>
+                  </ResponsiveContainer>
+                )}
+                {data.length > 0 && (
+                  <div
+                    style={{
+                      position: "absolute",
+                      top: "50%",
+                      left: "50%",
+                      transform: "translate(-50%, -50%)",
+                      pointerEvents: "none",
+                    }}
+                  >
+                    <div
+                      style={{
+                        fontSize: 13,
+                        fontWeight: 700,
+                        color: net >= 0 ? "var(--income)" : "var(--expense)",
+                      }}
+                    >
+                      {formatMoney(net)}
+                    </div>
+                  </div>
+                )}
+              </div>
+              <div className="muted-cell" style={{ fontSize: 12, marginTop: 2 }}>
+                {periodLabelFn(p)}
+              </div>
+            </div>
+          );
+        })}
+      </div>
+      <div
+        style={{
+          display: "flex",
+          flexWrap: "wrap",
+          gap: 14,
+          justifyContent: "center",
+          marginTop: 18,
+          paddingTop: 14,
+          borderTop: "1px solid var(--border)",
+        }}
+      >
+        {chartCategories.map((c, i) => (
+          <div key={c.key} style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12 }}>
+            <span
+              style={{
+                width: 10,
+                height: 10,
+                borderRadius: 2,
+                background: CHART_PALETTE[i % CHART_PALETTE.length],
+                display: "inline-block",
+              }}
+            />
+            {c.label}
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 function ReportsView({ transactions, accounts, categories, onGoCategories }) {
   const [periodConfig, setPeriodConfig] = useState(loadReportPeriodConfig);
   const [filterAccount, setFilterAccount] = useState("all");
@@ -3020,6 +3345,20 @@ function ReportsView({ transactions, accounts, categories, onGoCategories }) {
             Twice a month
           </button>
         </div>
+        <div className="toggle-group">
+          <button
+            className={"toggle-btn" + (periodConfig.chartType !== "donut" ? " active" : "")}
+            onClick={() => updateConfig({ chartType: "bar" })}
+          >
+            Bar chart
+          </button>
+          <button
+            className={"toggle-btn" + (periodConfig.chartType === "donut" ? " active" : "")}
+            onClick={() => updateConfig({ chartType: "donut" })}
+          >
+            Donut chart
+          </button>
+        </div>
         <select value={filterAccount} onChange={(e) => setFilterAccount(e.target.value)}>
           <option value="all">All accounts</option>
           {accounts.map((a) => (
@@ -3089,35 +3428,33 @@ function ReportsView({ transactions, accounts, categories, onGoCategories }) {
         <StatBlock value={formatMoney(grandTotal)} label="Tracked net" />
       </div>
 
-      <div className="panel chart-card">
-        <div className="chart-wrap">
-          <ResponsiveContainer>
-            <BarChart data={chartData} margin={{ top: 10, right: 10, left: 0, bottom: 0 }}>
-              <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" />
-              <XAxis dataKey="period" tick={{ fontSize: 11, fill: "var(--ink-muted)" }} />
-              <YAxis tick={{ fontSize: 11, fill: "var(--ink-muted)" }} tickFormatter={(v) => formatMoney(v)} width={72} />
-              <Tooltip
-                formatter={(value) => formatMoney(value)}
-                wrapperStyle={{ zIndex: 100 }}
-                contentStyle={{
-                  fontSize: 12.5,
-                  fontFamily: "'Work Sans', sans-serif",
-                  border: "1px solid var(--border)",
-                  borderRadius: 6,
-                  background: "#fff",
-                  boxShadow: "0 4px 14px rgba(0,0,0,0.12)",
-                }}
-              />
-              <Legend wrapperStyle={{ fontSize: 12, zIndex: 1 }} />
-              {chartCategories.map((c, i) => (
-                <Bar key={c.key} dataKey={c.label} stackId="a" fill={CHART_PALETTE[i % CHART_PALETTE.length]} />
-              ))}
-            </BarChart>
-          </ResponsiveContainer>
+      {periodConfig.chartType === "donut" ? (
+        <ReportsDonutGrid
+          periods={periods}
+          periodLabelFn={periodLabelFn}
+          chartCategories={chartCategories}
+          periodTotals={periodTotals}
+        />
+      ) : (
+        <div className="panel chart-card">
+          <div className="chart-wrap">
+            <ResponsiveContainer>
+              <BarChart data={chartData} margin={{ top: 10, right: 10, left: 0, bottom: 0 }}>
+                <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" />
+                <XAxis dataKey="period" tick={{ fontSize: 11, fill: "var(--ink-muted)" }} />
+                <YAxis tick={{ fontSize: 11, fill: "var(--ink-muted)" }} tickFormatter={(v) => formatMoney(v)} width={72} />
+                <Tooltip content={<ReportsTooltip />} wrapperStyle={{ zIndex: 100 }} />
+                <Legend wrapperStyle={{ fontSize: 12, zIndex: 1 }} />
+                {chartCategories.map((c, i) => (
+                  <Bar key={c.key} dataKey={c.label} stackId="a" fill={CHART_PALETTE[i % CHART_PALETTE.length]} />
+                ))}
+              </BarChart>
+            </ResponsiveContainer>
+          </div>
         </div>
-      </div>
+      )}
 
-      <div className="panel" style={{ padding: 0, overflowX: "auto" }}>
+      <DualScrollPanel>
         <table className="pivot-table">
           <thead>
             <tr>
@@ -3157,7 +3494,7 @@ function ReportsView({ transactions, accounts, categories, onGoCategories }) {
             </tr>
           </tfoot>
         </table>
-      </div>
+      </DualScrollPanel>
 
       {excludedCategories.length > 0 && (
         <div className="excluded-note">
@@ -3573,7 +3910,7 @@ function BudgetPerformanceChart({ title, periods, budgeted, spendMap, periodLabe
                 fontFamily: "'Work Sans', sans-serif",
                 border: "1px solid var(--border)",
                 borderRadius: 6,
-                background: "#fff",
+                background: "var(--panel)",
                 boxShadow: "0 4px 14px rgba(0,0,0,0.12)",
               }}
             />
@@ -3812,8 +4149,8 @@ function BudgetView({
                     className="btn btn-sm"
                     style={
                       hidden
-                        ? { border: "1px solid var(--expense)", color: "var(--expense)", background: "#fff" }
-                        : { border: "1px solid var(--border)", color: "var(--ink)", background: "#fff" }
+                        ? { border: "1px solid var(--expense)", color: "var(--expense)", background: "var(--panel)" }
+                        : { border: "1px solid var(--border)", color: "var(--ink)", background: "var(--panel)" }
                     }
                     onClick={() => onToggleHiddenMonth(m)}
                   >

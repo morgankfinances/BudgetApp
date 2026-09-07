@@ -4,13 +4,138 @@
 //   - "pending": a join request is out, waiting on an existing member
 //   - "denied": the last request was turned down
 //   - "ready": an actual member -> renders the app, plus a floating
-//     "Household" button (badged with pending-request count) that opens a
+//     "Settings" button (badged with pending-request count) that opens a
 //     panel to view members, remove someone, view/regenerate the invite
-//     code, and approve/deny anyone waiting to join.
+//     code, approve/deny anyone waiting to join, and pick an appearance
+//     theme.
+//
+// Also owns the app's theme (light/dark + variants). The picker lives in
+// the Settings panel below, but the CSS variables and the data-theme
+// attribute are applied globally via document.documentElement, not
+// scoped to App's own DOM: this file's UI (the floating button, the
+// panel, and the pre-household screens) renders as a DOM *sibling* of
+// App's .ledger-root, not a descendant, so anything scoped to
+// .ledger-root wouldn't be visible here — and the pre-household screens
+// render before App ever mounts at all, so nothing App injects can be
+// relied on yet either. Applying theme globally sidesteps both problems.
 
 import React, { useState, useEffect } from "react";
 import { supabase } from "./supabaseClient.js";
 import { resetHouseholdCache } from "./storageAdapter.js";
+
+/* ------------------------------------------------------------------ */
+/* Theme                                                                */
+/*                                                                      */
+/* A personal, per-device display preference, so it lives in           */
+/* localStorage rather than synced household data. IMPORTANT: the      */
+/* variable values below must be kept in sync by hand with the matching */
+/* :root[data-theme] blocks in ledger-app.jsx's STYLES constant — they  */
+/* have to be duplicated here since this file's own UI needs them       */
+/* before App has necessarily mounted.                                  */
+/* ------------------------------------------------------------------ */
+
+const THEME_KEY = "ledger-theme-v1";
+
+const THEMES = [
+  { id: "light-sage", label: "Light — Sage" },
+  { id: "light-slate", label: "Light — Slate" },
+  { id: "dark-midnight", label: "Dark — Midnight" },
+  { id: "dark-charcoal", label: "Dark — Charcoal" },
+];
+
+function loadTheme() {
+  try {
+    const raw = window.localStorage.getItem(THEME_KEY);
+    if (raw && THEMES.some((t) => t.id === raw)) return raw;
+  } catch (e) {
+    /* ignore */
+  }
+  return "light-sage";
+}
+
+function saveTheme(themeId) {
+  try {
+    window.localStorage.setItem(THEME_KEY, themeId);
+  } catch (e) {
+    /* private browsing or storage disabled — the preference just won't persist */
+  }
+}
+
+const THEME_VARS_CSS = `
+:root {
+  --bg: #F5F6F1;
+  --panel: #FFFFFF;
+  --ink: #1E241F;
+  --ink-muted: #62685E;
+  --border: #DAD9CC;
+  --accent: #3B5BA0;
+  --accent-hover: #2E4880;
+  --accent-tint: #EBEEF7;
+  --income: #3F7D5C;
+  --expense: #AC4A2C;
+  --warn-bg: #FBF1DA;
+  --warn-border: #E3B558;
+  --warn-ink: #8A5A15;
+  --danger: #A6392B;
+  --danger-tint-bg: #FBEAE6;
+  --danger-tint-border: #E3A190;
+  --subtle-bg: #F2F1E9;
+  --radius: 6px;
+}
+:root[data-theme="light-slate"] {
+  --bg: #F3F5F8; --panel: #FFFFFF; --ink: #1C2430; --ink-muted: #5B6675;
+  --border: #D6DCE3; --accent: #2B6CB0; --accent-hover: #1E5490; --accent-tint: #E7EFF8;
+  --income: #2F8F6F; --expense: #C1502F; --warn-bg: #FCF3D9; --warn-border: #DDAE3E;
+  --warn-ink: #7A5A0D; --danger: #B0402E; --danger-tint-bg: #FBEAE6; --danger-tint-border: #E0AA98;
+  --subtle-bg: #EDF0F4;
+}
+:root[data-theme="dark-midnight"] {
+  --bg: #10131B; --panel: #1B2030; --ink: #E7E9F1; --ink-muted: #9BA3B5;
+  --border: #2C3346; --accent: #7B9EE0; --accent-hover: #9AB6EA; --accent-tint: #232A42;
+  --income: #6FCB9A; --expense: #E2896A; --warn-bg: #3B301A; --warn-border: #C99A3E;
+  --warn-ink: #EAC581; --danger: #E2685A; --danger-tint-bg: #3A2420; --danger-tint-border: #7A4038;
+  --subtle-bg: #242A3D;
+}
+:root[data-theme="dark-charcoal"] {
+  --bg: #17181C; --panel: #212227; --ink: #EDEDEE; --ink-muted: #9D9EA3;
+  --border: #35363C; --accent: #86A6E8; --accent-hover: #A3C0F0; --accent-tint: #262A38;
+  --income: #6FCB9A; --expense: #E2896A; --warn-bg: #332C1A; --warn-border: #C4993F;
+  --warn-ink: #E7C381; --danger: #E2685A; --danger-tint-bg: #362522; --danger-tint-border: #7A4038;
+  --subtle-bg: #2A2B31;
+}
+.theme-picker-grid { display: flex; flex-direction: column; gap: 3px; }
+.theme-swatch-btn {
+  display: flex; align-items: center; gap: 8px;
+  padding: 6px 8px; border-radius: 6px; border: 1px solid transparent;
+  background: none; font-family: sans-serif; font-size: 13px; color: var(--ink);
+  cursor: pointer; text-align: left; width: 100%;
+}
+.theme-swatch-btn:hover { background: var(--subtle-bg); }
+.theme-swatch-btn.active { border-color: var(--accent); background: var(--accent-tint); color: var(--accent); font-weight: 600; }
+.theme-swatch { width: 18px; height: 18px; border-radius: 5px; border: 1px solid var(--border); flex-shrink: 0; }
+.theme-swatch-light-sage { background: linear-gradient(135deg, #F5F6F1 50%, #3B5BA0 50%); }
+.theme-swatch-light-slate { background: linear-gradient(135deg, #F3F5F8 50%, #2B6CB0 50%); }
+.theme-swatch-dark-midnight { background: linear-gradient(135deg, #10131B 50%, #7B9EE0 50%); }
+.theme-swatch-dark-charcoal { background: linear-gradient(135deg, #17181C 50%, #86A6E8 50%); }
+`;
+
+function ThemePicker({ theme, onChange }) {
+  return (
+    <div className="theme-picker-grid">
+      {THEMES.map((t) => (
+        <button
+          key={t.id}
+          type="button"
+          className={"theme-swatch-btn" + (theme === t.id ? " active" : "")}
+          onClick={() => onChange(t.id)}
+        >
+          <span className={"theme-swatch theme-swatch-" + t.id} />
+          {t.label}
+        </button>
+      ))}
+    </div>
+  );
+}
 
 const boxStyle = {
   display: "flex",
@@ -18,6 +143,8 @@ const boxStyle = {
   alignItems: "center",
   justifyContent: "center",
   fontFamily: "sans-serif",
+  background: "var(--bg)",
+  color: "var(--ink)",
 };
 
 const inputStyle = {
@@ -26,14 +153,27 @@ const inputStyle = {
   marginBottom: 8,
   boxSizing: "border-box",
   fontSize: 14,
+  background: "var(--panel)",
+  color: "var(--ink)",
+  border: "1px solid var(--border)",
+  borderRadius: 5,
 };
 
-const buttonStyle = { width: "100%", padding: 10, fontSize: 14 };
+const buttonStyle = {
+  width: "100%",
+  padding: 10,
+  fontSize: 14,
+  background: "var(--panel)",
+  color: "var(--ink)",
+  border: "1px solid var(--border)",
+  borderRadius: 5,
+  cursor: "pointer",
+};
 
 const overlayStyle = {
   position: "fixed",
   inset: 0,
-  background: "rgba(0,0,0,0.35)",
+  background: "rgba(0,0,0,0.45)",
   display: "flex",
   alignItems: "center",
   justifyContent: "center",
@@ -45,10 +185,11 @@ const cardStyle = {
   width: "min(380px, 92vw)",
   maxHeight: "85vh",
   overflowY: "auto",
-  background: "#fff",
+  background: "var(--panel)",
+  color: "var(--ink)",
   borderRadius: 8,
   padding: 24,
-  boxShadow: "0 10px 30px rgba(0,0,0,0.2)",
+  boxShadow: "0 10px 30px rgba(0,0,0,0.35)",
   boxSizing: "border-box",
 };
 
@@ -56,7 +197,7 @@ const sectionLabelStyle = {
   fontSize: 11.5,
   textTransform: "uppercase",
   letterSpacing: 0.5,
-  color: "#888",
+  color: "var(--ink-muted)",
   margin: "18px 0 8px",
   fontWeight: 600,
 };
@@ -66,7 +207,7 @@ const rowStyle = {
   alignItems: "center",
   justifyContent: "space-between",
   padding: "8px 0",
-  borderBottom: "1px solid #eee",
+  borderBottom: "1px solid var(--border)",
   fontSize: 13.5,
   gap: 8,
 };
@@ -75,9 +216,10 @@ const smallBtnStyle = {
   padding: "5px 10px",
   fontSize: 12,
   cursor: "pointer",
-  border: "1px solid #ccc",
+  border: "1px solid var(--border)",
   borderRadius: 5,
-  background: "#fff",
+  background: "var(--panel)",
+  color: "var(--ink)",
 };
 
 function formatExpiry(expiresAt) {
@@ -151,14 +293,14 @@ function HistorySection() {
         </button>
       ) : (
         <>
-          <p style={{ fontSize: 12.5, color: "#888", marginBottom: 8 }}>
-            Every past version of your data, kept for 7 days. Restoring replaces everything currently in the
+          <p style={{ fontSize: 12.5, color: "var(--ink-muted)", marginBottom: 8 }}>
+            Every past version of your data, kept for 1 hour. Restoring replaces everything currently in the
             app with that older version — it's not a way to bring back just one item.
           </p>
           {loading ? (
-            <p style={{ fontSize: 13, color: "#666" }}>Loading…</p>
+            <p style={{ fontSize: 13, color: "var(--ink-muted)" }}>Loading…</p>
           ) : entries.length === 0 ? (
-            <p style={{ fontSize: 13, color: "#666" }}>No earlier versions yet.</p>
+            <p style={{ fontSize: 13, color: "var(--ink-muted)" }}>No earlier versions yet.</p>
           ) : (
             entries.map((entry) => (
               <div style={rowStyle} key={entry.id}>
@@ -166,7 +308,7 @@ function HistorySection() {
                 {confirmingId === entry.id ? (
                   <span style={{ display: "flex", gap: 6 }}>
                     <button
-                      style={{ ...smallBtnStyle, borderColor: "#b3261e", color: "#b3261e" }}
+                      style={{ ...smallBtnStyle, borderColor: "var(--danger)", color: "var(--danger)" }}
                       onClick={() => handleRestore(entry.id)}
                       disabled={restoring}
                     >
@@ -184,7 +326,7 @@ function HistorySection() {
               </div>
             ))
           )}
-          {error && <p style={{ color: "#b3261e", fontSize: 13 }}>{error}</p>}
+          {error && <p style={{ color: "var(--danger)", fontSize: 13 }}>{error}</p>}
         </>
       )}
     </>
@@ -205,7 +347,7 @@ function MemberRow({ member, currentUserId, onRemove }) {
         (confirming ? (
           <span style={{ display: "flex", gap: 6 }}>
             <button
-              style={{ ...smallBtnStyle, borderColor: "#b3261e", color: "#b3261e" }}
+              style={{ ...smallBtnStyle, borderColor: "var(--danger)", color: "var(--danger)" }}
               onClick={() => onRemove(member.user_id)}
             >
               Confirm
@@ -229,13 +371,13 @@ function RequestRow({ request, onApprove, onDeny }) {
       <span>{request.requester_email || "Unknown"}</span>
       <span style={{ display: "flex", gap: 6 }}>
         <button
-          style={{ ...smallBtnStyle, borderColor: "#3f7d5c", color: "#3f7d5c" }}
+          style={{ ...smallBtnStyle, borderColor: "var(--income)", color: "var(--income)" }}
           onClick={() => onApprove(request.id)}
         >
           Approve
         </button>
         <button
-          style={{ ...smallBtnStyle, borderColor: "#b3261e", color: "#b3261e" }}
+          style={{ ...smallBtnStyle, borderColor: "var(--danger)", color: "var(--danger)" }}
           onClick={() => onDeny(request.id)}
         >
           Deny
@@ -245,7 +387,7 @@ function RequestRow({ request, onApprove, onDeny }) {
   );
 }
 
-function HouseholdPanel({ onClose, onDataChanged }) {
+function HouseholdPanel({ onClose, onDataChanged, theme, onThemeChange }) {
   const [household, setHousehold] = useState(null);
   const [members, setMembers] = useState([]);
   const [requests, setRequests] = useState([]);
@@ -448,7 +590,7 @@ function HouseholdPanel({ onClose, onDataChanged }) {
         <h2 style={{ marginTop: 0, marginBottom: 4, fontSize: 18 }}>Settings</h2>
 
         {loading ? (
-          <p style={{ fontSize: 14, color: "#666" }}>Loading…</p>
+          <p style={{ fontSize: 14, color: "var(--ink-muted)" }}>Loading…</p>
         ) : household ? (
           <>
             {editingName ? (
@@ -458,7 +600,15 @@ function HouseholdPanel({ onClose, onDataChanged }) {
                   value={nameDraft}
                   autoFocus
                   onChange={(e) => setNameDraft(e.target.value)}
-                  style={{ flex: 1, fontSize: 14, padding: "5px 8px", border: "1px solid #ccc", borderRadius: 5 }}
+                  style={{
+                    flex: 1,
+                    fontSize: 14,
+                    padding: "5px 8px",
+                    border: "1px solid var(--border)",
+                    borderRadius: 5,
+                    background: "var(--panel)",
+                    color: "var(--ink)",
+                  }}
                   onKeyDown={(e) => {
                     if (e.key === "Enter") handleSaveName();
                     if (e.key === "Escape") setEditingName(false);
@@ -472,7 +622,16 @@ function HouseholdPanel({ onClose, onDataChanged }) {
                 </button>
               </div>
             ) : (
-              <p style={{ fontSize: 14, color: "#555", marginBottom: 4, display: "flex", alignItems: "center", gap: 8 }}>
+              <p
+                style={{
+                  fontSize: 14,
+                  color: "var(--ink-muted)",
+                  marginBottom: 4,
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 8,
+                }}
+              >
                 {household.name}
                 <button style={smallBtnStyle} onClick={startEditName}>
                   Rename
@@ -502,34 +661,38 @@ function HouseholdPanel({ onClose, onDataChanged }) {
                 letterSpacing: 3,
                 padding: 12,
                 textAlign: "center",
-                border: "1px solid #ccc",
+                border: "1px solid var(--border)",
                 borderRadius: 6,
                 marginBottom: 8,
                 fontFamily: "monospace",
+                background: "var(--bg)",
+                color: "var(--ink)",
               }}
             >
               {household.invite_code}
             </div>
             {expiry && (
-              <p style={{ fontSize: 12.5, color: expiry.expired ? "#b3261e" : "#888", marginBottom: 14 }}>
+              <p
+                style={{
+                  fontSize: 12.5,
+                  color: expiry.expired ? "var(--danger)" : "var(--ink-muted)",
+                  marginBottom: 14,
+                }}
+              >
                 {expiry.text}
               </p>
             )}
-            <p style={{ fontSize: 12.5, color: "#888", marginBottom: 14 }}>
+            <p style={{ fontSize: 12.5, color: "var(--ink-muted)", marginBottom: 14 }}>
               Anyone who enters this code will show up above under "Waiting to join" until you approve them —
               they won't see any data until then.
             </p>
             <button style={{ ...buttonStyle, marginBottom: 8 }} onClick={handleCopy}>
               {copied ? "Copied!" : "Copy code"}
             </button>
-            <button
-              style={{ ...buttonStyle, marginBottom: 8 }}
-              onClick={handleRegenerate}
-              disabled={regenerating}
-            >
+            <button style={{ ...buttonStyle, marginBottom: 8 }} onClick={handleRegenerate} disabled={regenerating}>
               {regenerating ? "Generating…" : "Generate a new code"}
             </button>
-            {error && <p style={{ color: "#b3261e", fontSize: 13 }}>{error}</p>}
+            {error && <p style={{ color: "var(--danger)", fontSize: 13 }}>{error}</p>}
 
             <HistorySection />
 
@@ -540,7 +703,7 @@ function HouseholdPanel({ onClose, onDataChanged }) {
               </button>
             ) : switchSent ? (
               <div style={{ marginBottom: 8 }}>
-                <p style={{ fontSize: 12.5, color: "#3f7d5c", marginBottom: 8 }}>
+                <p style={{ fontSize: 12.5, color: "var(--income)", marginBottom: 8 }}>
                   Request sent. You'll keep using {household.name} normally until someone in the other household
                   approves it.
                 </p>
@@ -550,7 +713,7 @@ function HouseholdPanel({ onClose, onDataChanged }) {
               </div>
             ) : switchConfirming ? (
               <div style={{ marginBottom: 8 }}>
-                <p style={{ fontSize: 12.5, color: "#b3261e", marginBottom: 8 }}>
+                <p style={{ fontSize: 12.5, color: "var(--danger)", marginBottom: 8 }}>
                   If this is accepted, your current data in <strong>{household.name}</strong> will be merged into
                   the household for this code, and you'll leave {household.name} — it won't be usable from here
                   afterward. Any of your accounts or categories with names that collide will be renamed so
@@ -559,7 +722,7 @@ function HouseholdPanel({ onClose, onDataChanged }) {
                 </p>
                 <div style={{ display: "flex", gap: 8 }}>
                   <button
-                    style={{ ...buttonStyle, border: "1px solid #b3261e", color: "#b3261e" }}
+                    style={{ ...buttonStyle, border: "1px solid var(--danger)", color: "var(--danger)" }}
                     onClick={handleSendSwitchRequest}
                     disabled={switchBusy}
                   >
@@ -582,17 +745,15 @@ function HouseholdPanel({ onClose, onDataChanged }) {
                     fontSize: 14,
                     padding: "8px 10px",
                     marginBottom: 8,
-                    border: "1px solid #ccc",
+                    border: "1px solid var(--border)",
                     borderRadius: 5,
                     boxSizing: "border-box",
+                    background: "var(--panel)",
+                    color: "var(--ink)",
                   }}
                 />
                 <div style={{ display: "flex", gap: 8 }}>
-                  <button
-                    style={buttonStyle}
-                    onClick={() => setSwitchConfirming(true)}
-                    disabled={!switchCode.trim()}
-                  >
+                  <button style={buttonStyle} onClick={() => setSwitchConfirming(true)} disabled={!switchCode.trim()}>
                     Continue
                   </button>
                   <button style={buttonStyle} onClick={resetSwitchForm}>
@@ -601,21 +762,24 @@ function HouseholdPanel({ onClose, onDataChanged }) {
                 </div>
               </div>
             )}
-            {switchError && <p style={{ color: "#b3261e", fontSize: 13 }}>{switchError}</p>}
+            {switchError && <p style={{ color: "var(--danger)", fontSize: 13 }}>{switchError}</p>}
           </>
         ) : (
-          <p style={{ color: "#b3261e", fontSize: 13 }}>{error}</p>
+          <p style={{ color: "var(--danger)", fontSize: 13 }}>{error}</p>
         )}
+
+        <div style={sectionLabelStyle}>Appearance</div>
+        <ThemePicker theme={theme} onChange={onThemeChange} />
 
         <div style={sectionLabelStyle}>Account</div>
         {leaveConfirming ? (
           <div style={{ marginBottom: 8 }}>
-            <p style={{ fontSize: 12.5, color: "#b3261e", marginBottom: 8 }}>
+            <p style={{ fontSize: 12.5, color: "var(--danger)", marginBottom: 8 }}>
               You'll get a personal copy of the current data, and lose access to this household going forward.
             </p>
             <div style={{ display: "flex", gap: 8 }}>
               <button
-                style={{ ...buttonStyle, borderColor: "#b3261e", color: "#b3261e", border: "1px solid #b3261e" }}
+                style={{ ...buttonStyle, border: "1px solid var(--danger)", color: "var(--danger)" }}
                 onClick={handleLeave}
               >
                 Confirm leave
@@ -634,22 +798,22 @@ function HouseholdPanel({ onClose, onDataChanged }) {
           Sign out
         </button>
 
-        <div style={{ ...sectionLabelStyle, color: "#b3261e" }}>Danger zone</div>
+        <div style={{ ...sectionLabelStyle, color: "var(--danger)" }}>Danger zone</div>
         {members.length > 1 ? (
-          <p style={{ fontSize: 12.5, color: "#888", marginBottom: 8 }}>
+          <p style={{ fontSize: 12.5, color: "var(--ink-muted)", marginBottom: 8 }}>
             This household has other members, so its data isn't only yours to delete. Use "Leave this household"
             above if you want to disconnect — that keeps everyone's data intact, including your own copy.
           </p>
         ) : deleteConfirming ? (
           <div style={{ marginBottom: 8 }}>
-            <p style={{ fontSize: 12.5, color: "#b3261e", marginBottom: 8 }}>
+            <p style={{ fontSize: 12.5, color: "var(--danger)", marginBottom: 8 }}>
               This permanently deletes every account, transaction, and category in this household right now.
               Unlike leaving, nothing is kept anywhere — not a copy, not even in Data History. This cannot be
               undone.
             </p>
             <div style={{ display: "flex", gap: 8 }}>
               <button
-                style={{ ...buttonStyle, border: "1px solid #b3261e", color: "#b3261e" }}
+                style={{ ...buttonStyle, border: "1px solid var(--danger)", color: "var(--danger)" }}
                 onClick={handleDeleteEverything}
                 disabled={deleting}
               >
@@ -662,17 +826,14 @@ function HouseholdPanel({ onClose, onDataChanged }) {
           </div>
         ) : (
           <button
-            style={{ ...buttonStyle, marginBottom: 8, border: "1px solid #b3261e", color: "#b3261e" }}
+            style={{ ...buttonStyle, marginBottom: 8, border: "1px solid var(--danger)", color: "var(--danger)" }}
             onClick={() => setDeleteConfirming(true)}
           >
             Delete all my data
           </button>
         )}
 
-        <button
-          style={{ ...buttonStyle, marginTop: 8, background: "none", border: "1px solid #ddd" }}
-          onClick={onClose}
-        >
+        <button style={{ ...buttonStyle, marginTop: 8, background: "none" }} onClick={onClose}>
           Close
         </button>
       </div>
@@ -690,6 +851,29 @@ export default function HouseholdGate({ children }) {
   const [busy, setBusy] = useState(false);
   const [panelOpen, setPanelOpen] = useState(false);
   const [pendingCount, setPendingCount] = useState(0);
+  const [theme, setTheme] = useState(loadTheme);
+
+  // Injects the theme CSS variables into <head> once, regardless of
+  // which status branch is currently rendering below — a plain <style>
+  // tag in JSX would need repeating in every early return.
+  useEffect(() => {
+    let styleEl = document.getElementById("ledger-theme-vars");
+    if (!styleEl) {
+      styleEl = document.createElement("style");
+      styleEl.id = "ledger-theme-vars";
+      document.head.appendChild(styleEl);
+    }
+    styleEl.textContent = THEME_VARS_CSS;
+  }, []);
+
+  useEffect(() => {
+    document.documentElement.setAttribute("data-theme", theme);
+  }, [theme]);
+
+  function handleThemeChange(themeId) {
+    setTheme(themeId);
+    saveTheme(themeId);
+  }
 
   async function refreshPendingCount(householdId) {
     if (!householdId) {
@@ -808,7 +992,7 @@ export default function HouseholdGate({ children }) {
   }
 
   if (status === "checking") {
-    return <div style={{ ...boxStyle, color: "#666" }}>Loading…</div>;
+    return <div style={boxStyle}>Loading…</div>;
   }
 
   if (status === "pending") {
@@ -816,14 +1000,11 @@ export default function HouseholdGate({ children }) {
       <div style={boxStyle}>
         <div style={{ width: "min(360px, 92vw)", textAlign: "center", boxSizing: "border-box" }}>
           <h2 style={{ marginBottom: 4 }}>Waiting for approval</h2>
-          <p style={{ fontSize: 14, color: "#555" }}>
+          <p style={{ fontSize: 14, color: "var(--ink-muted)" }}>
             Your request to join has been sent. Someone already in the household needs to approve you before
             you can see anything — this page will update automatically once they do.
           </p>
-          <button
-            style={{ ...buttonStyle, marginTop: 12, background: "none", border: "1px solid #ddd" }}
-            onClick={() => supabase.auth.signOut()}
-          >
+          <button style={{ ...buttonStyle, marginTop: 12, background: "none" }} onClick={() => supabase.auth.signOut()}>
             Sign out
           </button>
         </div>
@@ -836,16 +1017,13 @@ export default function HouseholdGate({ children }) {
       <div style={boxStyle}>
         <div style={{ width: "min(360px, 92vw)", textAlign: "center", boxSizing: "border-box" }}>
           <h2 style={{ marginBottom: 4 }}>Request not approved</h2>
-          <p style={{ fontSize: 14, color: "#555", marginBottom: 16 }}>
+          <p style={{ fontSize: 14, color: "var(--ink-muted)", marginBottom: 16 }}>
             Your request to join wasn't approved. Double check the code with whoever sent it, or try again.
           </p>
           <button style={buttonStyle} onClick={() => setStatus("none")}>
             Try a different code
           </button>
-          <button
-            style={{ ...buttonStyle, marginTop: 8, background: "none", border: "1px solid #ddd" }}
-            onClick={() => supabase.auth.signOut()}
-          >
+          <button style={{ ...buttonStyle, marginTop: 8, background: "none" }} onClick={() => supabase.auth.signOut()}>
             Sign out
           </button>
         </div>
@@ -859,7 +1037,7 @@ export default function HouseholdGate({ children }) {
         <div style={boxStyle}>
           <div style={{ width: "min(360px, 92vw)", boxSizing: "border-box" }}>
             <h2 style={{ marginBottom: 4 }}>Household created</h2>
-            <p style={{ fontSize: 14, color: "#444" }}>
+            <p style={{ fontSize: 14, color: "var(--ink)" }}>
               Share this code with whoever you want to join. When they enter it, you'll see a request waiting
               for your approval in the Household panel — nothing is shared until you approve it.
             </p>
@@ -870,10 +1048,11 @@ export default function HouseholdGate({ children }) {
                 letterSpacing: 3,
                 padding: 14,
                 textAlign: "center",
-                border: "1px solid #ccc",
+                border: "1px solid var(--border)",
                 borderRadius: 6,
                 margin: "14px 0",
                 fontFamily: "monospace",
+                background: "var(--panel)",
               }}
             >
               {createdCode}
@@ -890,7 +1069,7 @@ export default function HouseholdGate({ children }) {
       <div style={boxStyle}>
         <div style={{ width: "min(360px, 92vw)", boxSizing: "border-box" }}>
           <h2 style={{ marginBottom: 4 }}>Set up your household</h2>
-          <p style={{ fontSize: 14, color: "#555" }}>
+          <p style={{ fontSize: 14, color: "var(--ink-muted)" }}>
             Create a new household, or request to join one with an invite code someone shared with you.
           </p>
 
@@ -907,7 +1086,7 @@ export default function HouseholdGate({ children }) {
             </button>
           </form>
 
-          <div style={{ textAlign: "center", margin: "16px 0", color: "#999", fontSize: 12 }}>— or —</div>
+          <div style={{ textAlign: "center", margin: "16px 0", color: "var(--ink-muted)", fontSize: 12 }}>— or —</div>
 
           <form onSubmit={handleRequestJoin}>
             <input
@@ -923,12 +1102,9 @@ export default function HouseholdGate({ children }) {
             </button>
           </form>
 
-          {error && <p style={{ color: "#b3261e", fontSize: 13 }}>{error}</p>}
+          {error && <p style={{ color: "var(--danger)", fontSize: 13 }}>{error}</p>}
 
-          <button
-            style={{ ...buttonStyle, marginTop: 8, background: "none", border: "1px solid #ddd" }}
-            onClick={() => supabase.auth.signOut()}
-          >
+          <button style={{ ...buttonStyle, marginTop: 8, background: "none" }} onClick={() => supabase.auth.signOut()}>
             Sign out
           </button>
         </div>
@@ -948,11 +1124,12 @@ export default function HouseholdGate({ children }) {
           padding: "8px 14px",
           fontSize: 12.5,
           fontFamily: "sans-serif",
-          background: "#fff",
-          border: "1px solid #ccc",
+          background: "var(--panel)",
+          color: "var(--ink)",
+          border: "1px solid var(--border)",
           borderRadius: 6,
           cursor: "pointer",
-          boxShadow: "0 2px 8px rgba(0,0,0,0.12)",
+          boxShadow: "0 2px 8px rgba(0,0,0,0.2)",
           zIndex: 50,
         }}
       >
@@ -961,7 +1138,12 @@ export default function HouseholdGate({ children }) {
           <span
             style={{
               marginLeft: 6,
-              background: "#b3261e",
+              // Deliberately a fixed color, not var(--danger) — this is a
+              // small solid alert badge, and a couple of the dark themes'
+              // --danger values are light enough that white text on them
+              // would lose contrast. A fixed, always-dark red keeps the
+              // badge legible regardless of theme.
+              background: "#C0392B",
               color: "#fff",
               borderRadius: 999,
               padding: "1px 6px",
@@ -973,7 +1155,12 @@ export default function HouseholdGate({ children }) {
         )}
       </button>
       {panelOpen && (
-        <HouseholdPanel onClose={() => setPanelOpen(false)} onDataChanged={checkMembership} />
+        <HouseholdPanel
+          onClose={() => setPanelOpen(false)}
+          onDataChanged={checkMembership}
+          theme={theme}
+          onThemeChange={handleThemeChange}
+        />
       )}
     </>
   );
