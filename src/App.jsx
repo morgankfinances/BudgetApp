@@ -9,6 +9,237 @@ import { BarChart, Bar, Cell, ReferenceLine, XAxis, YAxis, CartesianGrid, Toolti
 
 const STORAGE_KEY = "ledger-data-v1";
 
+/* ------------------------------------------------------------------ */
+/* Concurrent-edit merge                                                */
+/*                                                                      */
+/* Two people can have this open at once. Rather than whoever saves    */
+/* last silently overwriting the other's work, every save re-checks    */
+/* the current remote data against the snapshot this client last saw   */
+/* and, if it changed, does a 3-way merge (base / local / remote)      */
+/* instead of a blind overwrite. Additions never collide (ids are      */
+/* random), edits to different fields of the same item both survive,   */
+/* and only a genuine same-field conflict falls back to "whichever     */
+/* save wins the race" — and even then, only that one field is lost,   */
+/* not the whole item or the whole save.                               */
+/* ------------------------------------------------------------------ */
+
+function deepEqual(a, b) {
+  if (a === b) return true;
+  if (a == null || b == null) return a === b;
+  if (typeof a !== typeof b) return false;
+  if (typeof a !== "object") return a === b;
+  if (Array.isArray(a) !== Array.isArray(b)) return false;
+  const aKeys = Object.keys(a);
+  const bKeys = Object.keys(b);
+  if (aKeys.length !== bKeys.length) return false;
+  return aKeys.every((k) => deepEqual(a[k], b[k]));
+}
+
+function indexById(arr) {
+  const map = {};
+  (arr || []).forEach((item) => {
+    if (item && item.id != null) map[item.id] = item;
+  });
+  return map;
+}
+
+// A field that only ever grows or gets overwritten key-by-key
+// (accumulateActuals: { periodKey: amount }). Respects an explicit
+// removal by either side, though in practice this field only grows.
+function mergeDict(base, local, remote) {
+  base = base || {};
+  local = local || {};
+  remote = remote || {};
+  const allKeys = new Set([...Object.keys(base), ...Object.keys(local), ...Object.keys(remote)]);
+  const result = {};
+  const conflicts = [];
+  allKeys.forEach((k) => {
+    const b = base[k], l = local[k], r = remote[k];
+    if (deepEqual(l, r)) {
+      if (l !== undefined) result[k] = l;
+      return;
+    }
+    if (deepEqual(b, r)) {
+      if (l !== undefined) result[k] = l;
+      return;
+    }
+    if (deepEqual(b, l)) {
+      if (r !== undefined) result[k] = r;
+      return;
+    }
+    if (l !== undefined) result[k] = l;
+    conflicts.push(k);
+  });
+  return { result, conflicts };
+}
+
+// A plain array of primitives treated as a set (categoryIds,
+// hiddenBudgetMonths): independent adds union, independent removes
+// both apply.
+function mergeSet(base, local, remote) {
+  const b = new Set(base || []);
+  const l = new Set(local || []);
+  const r = new Set(remote || []);
+  const localAdded = [...l].filter((x) => !b.has(x));
+  const localRemoved = [...b].filter((x) => !l.has(x));
+  const remoteAdded = [...r].filter((x) => !b.has(x));
+  const remoteRemoved = [...b].filter((x) => !r.has(x));
+  const result = new Set(b);
+  localAdded.forEach((x) => result.add(x));
+  remoteAdded.forEach((x) => result.add(x));
+  localRemoved.forEach((x) => result.delete(x));
+  remoteRemoved.forEach((x) => result.delete(x));
+  return [...result];
+}
+
+// An append-only log (fundAdjustments: [{date, amount}]). Take base,
+// then append whatever each side added beyond it.
+function mergeAppendLog(base, local, remote) {
+  base = base || [];
+  local = local || [];
+  remote = remote || [];
+  const basePrefixMatches = (arr) => arr.length >= base.length && base.every((e, i) => deepEqual(e, arr[i]));
+  if (basePrefixMatches(local) && basePrefixMatches(remote)) {
+    const localNew = local.slice(base.length);
+    const remoteNew = remote.slice(base.length);
+    return [...base, ...localNew, ...remoteNew].sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0));
+  }
+  const seen = [];
+  [...base, ...local, ...remote].forEach((entry) => {
+    if (!seen.some((e) => deepEqual(e, entry))) seen.push(entry);
+  });
+  return seen.sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0));
+}
+
+const MERGE_SET_FIELDS = new Set(["categoryIds", "hiddenBudgetMonths"]);
+const MERGE_DICT_FIELDS = new Set(["accumulateActuals"]);
+const MERGE_LOG_FIELDS = new Set(["fundAdjustments"]);
+
+function mergeItemFields(base, local, remote, conflictPath, conflicts) {
+  const allFields = new Set([...Object.keys(base || {}), ...Object.keys(local || {}), ...Object.keys(remote || {})]);
+  const result = { ...(base || {}) };
+  allFields.forEach((f) => {
+    const b = (base || {})[f], l = (local || {})[f], r = (remote || {})[f];
+    if (MERGE_SET_FIELDS.has(f)) {
+      result[f] = mergeSet(b, l, r);
+      return;
+    }
+    if (MERGE_DICT_FIELDS.has(f)) {
+      const { result: merged, conflicts: dictConflicts } = mergeDict(b, l, r);
+      result[f] = merged;
+      dictConflicts.forEach((k) => conflicts.push(`${conflictPath}.${f}.${k}`));
+      return;
+    }
+    if (MERGE_LOG_FIELDS.has(f)) {
+      result[f] = mergeAppendLog(b, l, r);
+      return;
+    }
+    if (deepEqual(l, r)) {
+      result[f] = l;
+      return;
+    }
+    if (deepEqual(b, r)) {
+      result[f] = l;
+      return;
+    }
+    if (deepEqual(b, l)) {
+      result[f] = r;
+      return;
+    }
+    result[f] = l;
+    conflicts.push(`${conflictPath}.${f}`);
+  });
+  return result;
+}
+
+// An array of objects keyed by id (accounts, transactions, categories,
+// budgetGroups).
+function mergeCollection(collectionName, base, local, remote, conflicts) {
+  const baseById = indexById(base);
+  const localById = indexById(local);
+  const remoteById = indexById(remote);
+  const allIds = new Set([...Object.keys(baseById), ...Object.keys(localById), ...Object.keys(remoteById)]);
+  const result = [];
+
+  allIds.forEach((id) => {
+    const b = baseById[id], l = localById[id], r = remoteById[id];
+    if (!b) {
+      if (l && r) {
+        result.push(deepEqual(l, r) ? l : l);
+        if (!deepEqual(l, r)) conflicts.push(`${collectionName}:${id}:both-added-differently`);
+      } else if (l) {
+        result.push(l);
+      } else if (r) {
+        result.push(r);
+      }
+      return;
+    }
+    const lDeleted = !l;
+    const rDeleted = !r;
+    if (lDeleted && rDeleted) return;
+    if (lDeleted && !rDeleted) {
+      if (deepEqual(b, r)) return;
+      conflicts.push(`${collectionName}:${id}:deleted-locally-but-edited-remotely`);
+      return;
+    }
+    if (rDeleted && !lDeleted) {
+      if (deepEqual(b, l)) return;
+      conflicts.push(`${collectionName}:${id}:edited-locally-but-deleted-remotely`);
+      result.push(l);
+      return;
+    }
+    if (deepEqual(l, r)) {
+      result.push(l);
+      return;
+    }
+    if (deepEqual(b, r)) {
+      result.push(l);
+      return;
+    }
+    if (deepEqual(b, l)) {
+      result.push(r);
+      return;
+    }
+    result.push(mergeItemFields(b, l, r, `${collectionName}:${id}`, conflicts));
+  });
+
+  return result;
+}
+
+const MERGE_COLLECTIONS = ["accounts", "transactions", "categories", "budgetGroups"];
+const MERGE_SCALARS = ["plannedIncome", "incomeWarningDismissed", "excludeUnassignedFromBudget"];
+
+function mergeLedgerData(base, local, remote) {
+  const conflicts = [];
+  const merged = {};
+
+  MERGE_COLLECTIONS.forEach((key) => {
+    merged[key] = mergeCollection(key, base[key] || [], local[key] || [], remote[key] || [], conflicts);
+  });
+
+  MERGE_SCALARS.forEach((key) => {
+    const b = base[key], l = local[key], r = remote[key];
+    if (deepEqual(l, r)) {
+      merged[key] = l;
+      return;
+    }
+    if (deepEqual(b, r)) {
+      merged[key] = l;
+      return;
+    }
+    if (deepEqual(b, l)) {
+      merged[key] = r;
+      return;
+    }
+    merged[key] = l;
+    conflicts.push(key);
+  });
+
+  merged.hiddenBudgetMonths = mergeSet(base.hiddenBudgetMonths, local.hiddenBudgetMonths, remote.hiddenBudgetMonths);
+
+  return { merged, conflicts };
+}
+
 const DEFAULT_CATEGORY_NAMES = [
   "Groceries",
   "Dining & Restaurants",
@@ -23,6 +254,22 @@ const DEFAULT_CATEGORY_NAMES = [
 
 function createDefaultCategories() {
   return DEFAULT_CATEGORY_NAMES.map((name) => ({ id: uid(), name, excluded: name === "Transfers" }));
+}
+
+// The subset of a loadData() result that actually gets merged/compared
+// across clients — same shape either way, so this can be applied to
+// both "what I just loaded" and "what I'm about to save."
+function normalizeSnapshot(data) {
+  return {
+    accounts: data.accounts || [],
+    transactions: data.transactions || [],
+    categories: data.categories || [],
+    budgetGroups: data.budgetGroups || [],
+    plannedIncome: data.plannedIncome != null ? data.plannedIncome : null,
+    incomeWarningDismissed: !!data.incomeWarningDismissed,
+    hiddenBudgetMonths: data.hiddenBudgetMonths || [],
+    excludeUnassignedFromBudget: !!data.excludeUnassignedFromBudget,
+  };
 }
 
 async function loadData() {
@@ -1067,6 +1314,21 @@ const STYLES = `
   border-radius: var(--radius);
   font-size: 13.5px;
   margin-bottom: 14px;
+}
+
+.sync-banner {
+  background: #EBEEF7;
+  border: 1px solid var(--accent);
+  color: var(--accent-hover);
+  padding: 10px 14px;
+  border-radius: var(--radius);
+  font-size: 13.5px;
+  margin-bottom: 14px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
 }
 
 .preview-table-wrap { overflow-x: auto; border: 1px solid var(--border); border-radius: var(--radius); margin-top: 6px; }
@@ -4365,22 +4627,19 @@ function App({ householdName } = {}) {
   const [toast, setToast] = useState(null);
   const [uploadKey, setUploadKey] = useState(0);
   const [uploadPrefill, setUploadPrefill] = useState(null);
+  const [remoteChangeAvailable, setRemoteChangeAvailable] = useState(false);
+  const [syncing, setSyncing] = useState(false);
+  const baseSnapshotRef = useRef(null);
 
   useEffect(() => {
     let cancelled = false;
     loadData().then((data) => {
       if (cancelled) return;
-      const nextAccounts = data.accounts || [];
-      setAccounts(nextAccounts);
-      setTransactions(data.transactions || []);
-      setCategories(data.categories || []);
-      setBudgetGroups(data.budgetGroups || []);
-      setPlannedIncome(data.plannedIncome != null ? data.plannedIncome : null);
-      setIncomeWarningDismissed(!!data.incomeWarningDismissed);
-      setHiddenBudgetMonths(data.hiddenBudgetMonths || []);
-      setExcludeUnassignedFromBudget(!!data.excludeUnassignedFromBudget);
+      const snap = normalizeSnapshot(data);
+      applySnapshotToState(snap);
+      baseSnapshotRef.current = snap;
       setLoaded(true);
-      if (nextAccounts.length > 0) setView("transactions");
+      if (snap.accounts.length > 0) setView("transactions");
     });
     return () => {
       cancelled = true;
@@ -4393,6 +4652,57 @@ function App({ householdName } = {}) {
     return () => clearTimeout(timer);
   }, [toast]);
 
+  // Poll for changes made elsewhere so an open tab finds out before the
+  // person starts editing, not only when their own save collides.
+  useEffect(() => {
+    if (!loaded) return;
+    let cancelled = false;
+    const checkForRemoteChanges = async () => {
+      try {
+        const remoteData = await loadData();
+        if (cancelled) return;
+        const remoteBlob = normalizeSnapshot(remoteData);
+        const base = baseSnapshotRef.current;
+        if (base && !deepEqual(remoteBlob, base)) {
+          setRemoteChangeAvailable(true);
+        }
+      } catch (e) {
+        /* transient network issue — just try again next interval */
+      }
+    };
+    const interval = setInterval(checkForRemoteChanges, 45000);
+    return () => {
+      cancelled = true;
+      clearInterval(interval);
+    };
+  }, [loaded]);
+
+  function applySnapshotToState(snap) {
+    setAccounts(snap.accounts);
+    setTransactions(snap.transactions);
+    setCategories(snap.categories);
+    setBudgetGroups(snap.budgetGroups);
+    setPlannedIncome(snap.plannedIncome);
+    setIncomeWarningDismissed(snap.incomeWarningDismissed);
+    setHiddenBudgetMonths(snap.hiddenBudgetMonths);
+    setExcludeUnassignedFromBudget(snap.excludeUnassignedFromBudget);
+  }
+
+  const handleSyncNow = useCallback(async () => {
+    setSyncing(true);
+    try {
+      const remoteData = await loadData();
+      const remoteBlob = normalizeSnapshot(remoteData);
+      applySnapshotToState(remoteBlob);
+      baseSnapshotRef.current = remoteBlob;
+      setRemoteChangeAvailable(false);
+      setToast("Synced with the latest data.");
+    } catch (e) {
+      setToast("Couldn't sync right now — try again in a moment.");
+    }
+    setSyncing(false);
+  }, []);
+
   const persist = useCallback(
     async (
       nextAccounts,
@@ -4404,24 +4714,56 @@ function App({ householdName } = {}) {
       nextHiddenBudgetMonths,
       nextExcludeUnassignedFromBudget
     ) => {
-      setAccounts(nextAccounts);
-      setTransactions(nextTransactions);
-      setCategories(nextCategories);
-      setBudgetGroups(nextBudgetGroups);
-      setPlannedIncome(nextPlannedIncome);
-      setIncomeWarningDismissed(nextIncomeWarningDismissed);
-      setHiddenBudgetMonths(nextHiddenBudgetMonths);
-      setExcludeUnassignedFromBudget(nextExcludeUnassignedFromBudget);
+      const localBlob = {
+        accounts: nextAccounts,
+        transactions: nextTransactions,
+        categories: nextCategories,
+        budgetGroups: nextBudgetGroups,
+        plannedIncome: nextPlannedIncome,
+        incomeWarningDismissed: nextIncomeWarningDismissed,
+        hiddenBudgetMonths: nextHiddenBudgetMonths,
+        excludeUnassignedFromBudget: nextExcludeUnassignedFromBudget,
+      };
+
+      // Show the edit immediately — the merge check below only changes
+      // this if someone else's change needs folding in too.
+      applySnapshotToState(localBlob);
+
+      let toSave = localBlob;
+      const base = baseSnapshotRef.current;
+      try {
+        const remoteData = await loadData();
+        const remoteBlob = normalizeSnapshot(remoteData);
+        if (base && !deepEqual(remoteBlob, base)) {
+          const { merged, conflicts } = mergeLedgerData(base, localBlob, remoteBlob);
+          toSave = merged;
+          applySnapshotToState(toSave);
+          setToast(
+            conflicts.length > 0
+              ? `Synced with a change made elsewhere just now — ${conflicts.length} value${
+                  conflicts.length === 1 ? "" : "s"
+                } overlapped and kept the most recent edit.`
+              : "Synced with a change made elsewhere just now — nothing was lost."
+          );
+        }
+      } catch (e) {
+        /* if checking remote fails, fall back to saving local as-is */
+      }
+
       const ok = await saveData(
-        nextAccounts,
-        nextTransactions,
-        nextCategories,
-        nextBudgetGroups,
-        nextPlannedIncome,
-        nextIncomeWarningDismissed,
-        nextHiddenBudgetMonths,
-        nextExcludeUnassignedFromBudget
+        toSave.accounts,
+        toSave.transactions,
+        toSave.categories,
+        toSave.budgetGroups,
+        toSave.plannedIncome,
+        toSave.incomeWarningDismissed,
+        toSave.hiddenBudgetMonths,
+        toSave.excludeUnassignedFromBudget
       );
+      if (ok) {
+        baseSnapshotRef.current = toSave;
+        setRemoteChangeAvailable(false);
+      }
       setSaveError(ok ? null : "Your last change couldn't be saved locally — it may not persist after reload.");
     },
     []
@@ -4923,6 +5265,14 @@ function App({ householdName } = {}) {
 
         <div className="main">
           {saveError && <div className="error-banner">{saveError}</div>}
+          {remoteChangeAvailable && (
+            <div className="sync-banner">
+              <span>This household's data was updated elsewhere. Sync before making changes to avoid overlap.</span>
+              <button className="btn btn-primary btn-sm" onClick={handleSyncNow} disabled={syncing}>
+                {syncing ? "Syncing…" : "Sync now"}
+              </button>
+            </div>
+          )}
 
           {view === "upload" && (
             <UploadView key={uploadKey} accounts={accounts} prefill={uploadPrefill} onImport={handleImport} />
