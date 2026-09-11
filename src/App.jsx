@@ -1889,6 +1889,18 @@ const STYLES = `
   /* Overview's two-column layout collapses to one. */
   .overview-grid { grid-template-columns: 1fr !important; }
 
+  /* The pivot-style tables (Reports' category table, Budget's history
+     tables) pin their first column with position: sticky so it stays
+     visible while scrolling the rest sideways — but with no width cap,
+     a long category name could make that pinned column eat most of a
+     narrow screen permanently, leaving little room for anything else.
+     Cap it and let the name wrap instead of forcing the column wider. */
+  .pivot-table th:first-child, .pivot-table td:first-child {
+    max-width: 33vw;
+    white-space: normal;
+    word-break: break-word;
+  }
+
   /* Account and category rows: stack instead of squeezing into one line */
   .account-card { flex-direction: column; align-items: flex-start; gap: 10px; }
   .account-card .figures { text-align: left; margin-right: 0; }
