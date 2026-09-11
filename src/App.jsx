@@ -487,6 +487,7 @@ function defaultReportPeriodConfig() {
     semiMonthlyDay1: 1,
     semiMonthlyDay2: 15,
     chartType: "bar", // "bar" | "donut"
+    hiddenCategories: [], // category ids hidden from the charts specifically — the table always shows everything
   };
 }
 
@@ -766,9 +767,10 @@ function mapRow(row, mapping) {
   return { date, description, amountOut, amountIn, reasons };
 }
 
-function buildTransactions(rows, mapping, accountId, accountName) {
+function buildTransactions(rows, mapping, accountId, accountName, uploadBatchId) {
   const valid = [];
   const invalid = [];
+  const uploadedAt = new Date().toISOString();
 
   rows.forEach((row, idx) => {
     const { date, description, amountOut, amountIn, reasons } = mapRow(row, mapping);
@@ -786,6 +788,8 @@ function buildTransactions(rows, mapping, accountId, accountName) {
         amountIn,
         categoryId: null,
         raw: row,
+        uploadedAt,
+        uploadBatchId,
       });
     }
   });
@@ -1326,6 +1330,20 @@ const STYLES = `
 
 .ledger-root * { box-sizing: border-box; }
 
+/* Safety net: form controls don't reliably inherit color/background from
+   the page in every browser (this is exactly the "bright white input on
+   a dark theme" bug) — every input/select/textarea/button gets an
+   explicit theme-correct baseline here. Anything with a more specific
+   rule elsewhere (e.g. .btn-primary's own background) still wins, since
+   these are plain element selectors with low specificity. */
+.ledger-root input, .ledger-root select, .ledger-root textarea, .ledger-root button {
+  font-family: inherit;
+  color: var(--ink);
+}
+.ledger-root input, .ledger-root select, .ledger-root textarea {
+  background: var(--panel);
+}
+
 .ledger-root h1, .ledger-root h2, .ledger-root h3 {
   font-family: 'Fraunces', Georgia, serif;
   font-weight: 500;
@@ -1483,7 +1501,7 @@ const STYLES = `
   padding: 8px 10px;
   border: 1px solid var(--border);
   border-radius: var(--radius);
-  background: #fff;
+  background: var(--panel);
   color: var(--ink);
 }
 .field input:focus, .field select:focus {
@@ -1502,10 +1520,11 @@ const STYLES = `
 .budget-amount-input {
   width: 70px; font-family: inherit; font-size: 13px; padding: 5px 7px;
   border: 1px solid var(--border); border-radius: var(--radius);
+  background: var(--panel); color: var(--ink);
 }
 .budget-row select {
   font-family: inherit; font-size: 12.5px; padding: 5px 7px;
-  border: 1px solid var(--border); border-radius: var(--radius); background: #fff; color: var(--ink);
+  border: 1px solid var(--border); border-radius: var(--radius); background: var(--panel); color: var(--ink);
 }
 
 .invert-note {
@@ -1584,7 +1603,7 @@ const STYLES = `
 .filter-bar { display: flex; gap: 10px; align-items: center; margin-bottom: 16px; flex-wrap: wrap; }
 .filter-bar select, .filter-bar input[type="text"] {
   font-family: inherit; font-size: 13.5px; padding: 7px 9px;
-  border: 1px solid var(--border); border-radius: var(--radius); background: #fff;
+  border: 1px solid var(--border); border-radius: var(--radius); background: var(--panel); color: var(--ink);
 }
 .filter-bar .checkbox-filter { display: flex; align-items: center; gap: 6px; font-size: 13.5px; color: var(--ink-muted); }
 
@@ -1607,7 +1626,7 @@ const STYLES = `
   padding: 5px 7px;
   border: 1px solid var(--border);
   border-radius: var(--radius);
-  background: #fff;
+  background: var(--panel);
   color: var(--ink);
   max-width: 150px;
 }
@@ -1624,7 +1643,7 @@ const STYLES = `
 .toggle-group { display: inline-flex; border: 1px solid var(--border); border-radius: var(--radius); overflow: hidden; }
 .toggle-btn {
   padding: 7px 16px; font-family: inherit; font-size: 13px; font-weight: 600;
-  border: none; background: #fff; color: var(--ink-muted); cursor: pointer;
+  border: none; background: var(--panel); color: var(--ink-muted); cursor: pointer;
 }
 .toggle-btn.active { background: var(--accent); color: #fff; }
 .toggle-btn + .toggle-btn { border-left: 1px solid var(--border); }
@@ -1713,7 +1732,10 @@ const STYLES = `
 
 .toast {
   position: fixed; bottom: 22px; left: 50%; transform: translateX(-50%);
-  background: var(--ink); color: #fff; padding: 10px 18px; border-radius: var(--radius);
+  /* Deliberately not var(--ink) — that flips to a LIGHT color in dark
+     themes, which would make this white text disappear. A toast reads
+     fine as a fixed dark chip regardless of the overall theme. */
+  background: #262B28; color: #fff; padding: 10px 18px; border-radius: var(--radius);
   font-size: 13.5px; box-shadow: 0 6px 18px rgba(0,0,0,0.18); z-index: 40;
 }
 
@@ -1873,7 +1895,13 @@ function EmptyState({ title, body, ctaLabel, onCta }) {
 /* ------------------------------------------------------------------ */
 
 function UploadView({ accounts, prefill, onImport }) {
-  const [mode, setMode] = useState(prefill && prefill.mode === "append" ? "append" : "new");
+  const [mode, setMode] = useState(() => {
+    if (prefill && prefill.mode === "append") return "append";
+    // Existing account is the common case after initial setup — default
+    // to it whenever there's something to append to, rather than making
+    // "create a new account" the default every time.
+    return accounts.length > 0 ? "append" : "new";
+  });
   const [targetAccountId, setTargetAccountId] = useState(
     (prefill && prefill.accountId) || (accounts[0] && accounts[0].id) || ""
   );
@@ -1927,7 +1955,7 @@ function UploadView({ accounts, prefill, onImport }) {
     e.preventDefault();
     if (!form.name.trim() || !form.dateCol || (!form.outCol && !form.inCol)) return;
     const accountId = mode === "append" && existingAccount ? existingAccount.id : uid();
-    const { valid, invalid } = buildTransactions(fileInfo.rows, form, accountId, form.name.trim());
+    const { valid, invalid } = buildTransactions(fileInfo.rows, form, accountId, form.name.trim(), uid());
     setReviewResult({
       valid,
       invalid,
@@ -1984,19 +2012,19 @@ function UploadView({ accounts, prefill, onImport }) {
                 <input
                   type="radio"
                   name="mode"
-                  checked={mode === "new"}
-                  onChange={() => setMode("new")}
+                  checked={mode === "append"}
+                  onChange={() => setMode("append")}
                 />
-                Add a new account
+                Add transactions to an existing account
               </label>
               <label className="radio-option">
                 <input
                   type="radio"
                   name="mode"
-                  checked={mode === "append"}
-                  onChange={() => setMode("append")}
+                  checked={mode === "new"}
+                  onChange={() => setMode("new")}
                 />
-                Add transactions to an existing account
+                This is a new account
               </label>
             </div>
           )}
@@ -2896,6 +2924,242 @@ function TransactionRow({ t, duplicateInfo, expanded, onToggleExpand, allTransac
   );
 }
 
+/* ------------------------------------------------------------------ */
+/* Overview                                                             */
+/*                                                                      */
+/* A single at-a-glance landing page: this period's totals, where the   */
+/* money actually went, and anything that needs attention (a budget     */
+/* over or nearing its limit, transactions with nowhere assigned yet).  */
+/* Reuses the same period preference set in Reports and the same pure   */
+/* budget-computation functions Budget itself uses — not a parallel     */
+/* re-implementation of either.                                        */
+/* ------------------------------------------------------------------ */
+
+function flagForBudgetItem(item, spent) {
+  const budget = item.budgetAmount || 0;
+  if (budget <= 0) return "ok";
+  const ratio = spent / budget;
+  if (item.budgetType === "accumulate") {
+    if (ratio >= 1) return "ok";
+    if (ratio >= 0.8) return "warn";
+    return "bad";
+  }
+  if (ratio >= 1) return "bad";
+  if (ratio >= 0.8) return "warn";
+  return "ok";
+}
+
+function OverviewView({ transactions, categories, budgetGroups, onNavigate }) {
+  const periodConfig = useMemo(() => loadReportPeriodConfig(), []);
+  const { keyFn: periodKeyFn, labelFn: periodLabelFn } = useMemo(() => periodFnsForConfig(periodConfig), [periodConfig]);
+
+  const trackedIds = useMemo(
+    () => new Set(categories.filter((c) => !c.excluded).map((c) => c.id)),
+    [categories]
+  );
+
+  const periodSummary = useMemo(() => {
+    const todayISO = new Date().toISOString().slice(0, 10);
+    const currentKey = periodKeyFn(todayISO);
+    const rowMap = {};
+    const catLabel = {};
+    let sumIn = 0;
+    let sumOut = 0;
+    transactions.forEach((t) => {
+      if (!t.date) return;
+      if (t.categoryId && !trackedIds.has(t.categoryId)) return;
+      if (periodKeyFn(t.date) !== currentKey) return;
+      const key = t.categoryId || "uncategorized";
+      if (!(key in rowMap)) {
+        rowMap[key] = 0;
+        catLabel[key] = t.categoryId ? categories.find((c) => c.id === key)?.name || "Unknown" : "Uncategorized";
+      }
+      rowMap[key] += (t.amountIn || 0) - (t.amountOut || 0);
+      sumIn += t.amountIn || 0;
+      sumOut += t.amountOut || 0;
+    });
+    const rows = Object.keys(rowMap)
+      .map((k) => ({ key: k, label: catLabel[k], value: rowMap[k] }))
+      .filter((r) => r.value !== 0);
+    return { currentKey, sumIn, sumOut, net: sumIn - sumOut, rows };
+  }, [transactions, categories, trackedIds, periodKeyFn]);
+
+  const topSpending = useMemo(
+    () =>
+      periodSummary.rows
+        .filter((r) => r.value < 0)
+        .sort((a, b) => a.value - b.value)
+        .slice(0, 5),
+    [periodSummary]
+  );
+
+  const donutData = useMemo(() => {
+    const spendRows = periodSummary.rows
+      .filter((r) => r.value < 0)
+      .sort((a, b) => a.value - b.value);
+    const top = spendRows.slice(0, 5);
+    const rest = spendRows.slice(5);
+    const wedges = top.map((r) => ({ name: r.label, value: Math.abs(r.value) }));
+    if (rest.length > 0) {
+      const otherSum = rest.reduce((s, r) => s + Math.abs(r.value), 0);
+      if (otherSum > 0) wedges.push({ name: "Other", value: otherSum, isOther: true });
+    }
+    return wedges;
+  }, [periodSummary]);
+
+  const budgetItems = useMemo(() => buildBudgetItems(categories, budgetGroups), [categories, budgetGroups]);
+  const weeklyData = useMemo(() => computeBudgetPeriodData(transactions, budgetItems, "weekly"), [transactions, budgetItems]);
+  const monthlyData = useMemo(() => computeBudgetPeriodData(transactions, budgetItems, "monthly"), [transactions, budgetItems]);
+
+  const { flagged, totalBudgetCount } = useMemo(() => {
+    const flagged = [];
+    let totalBudgetCount = 0;
+    [weeklyData, monthlyData].forEach((data) => {
+      if (!data) return;
+      data.budgeted.forEach((item) => {
+        if (item.isUnassignedPseudo) return;
+        totalBudgetCount += 1;
+        const spent = data.spendMap[item.id]?.[data.currentKey] || 0;
+        const flag = flagForBudgetItem(item, spent);
+        if (flag !== "ok") {
+          flagged.push({
+            item,
+            spent,
+            flag,
+            periodWord: item.budgetPeriod === "weekly" ? "this week" : "this month",
+          });
+        }
+      });
+    });
+    flagged.sort((a, b) => (a.flag === "bad" && b.flag !== "bad" ? -1 : a.flag !== "bad" && b.flag === "bad" ? 1 : 0));
+    return { flagged, totalBudgetCount };
+  }, [weeklyData, monthlyData]);
+
+  const uncategorizedCount = transactions.filter((t) => !t.categoryId).length;
+  const needsAttentionCount = flagged.length + (uncategorizedCount > 0 ? 1 : 0);
+
+  return (
+    <div>
+      <div className="view-header">
+        <h1>Overview</h1>
+        <p>
+          A snapshot of {periodLabelFn(periodSummary.currentKey)} — the period length and chart style here
+          follow whatever you've set in Reports.
+        </p>
+      </div>
+
+      <div className="summary-row">
+        <StatBlock value={formatMoney(periodSummary.sumIn)} label="Money in" />
+        <StatBlock value={formatMoney(periodSummary.sumOut)} label="Money out" />
+        <StatBlock value={formatMoney(periodSummary.net)} label="Net" />
+      </div>
+
+      <div style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr) minmax(0, 1fr)", gap: 20, marginTop: 4 }}>
+        <div className="panel">
+          <h3 style={{ marginTop: 0, marginBottom: 4, fontSize: 15 }}>Needs attention</h3>
+          {needsAttentionCount === 0 ? (
+            <p className="hint">Nothing flagged right now — budgets are on track and everything's categorized.</p>
+          ) : (
+            <div style={{ display: "flex", flexDirection: "column", gap: 8, marginTop: 10 }}>
+              {uncategorizedCount > 0 && (
+                <button
+                  className="account-card"
+                  style={{ width: "100%", textAlign: "left", cursor: "pointer", border: "none", background: "var(--subtle-bg)", borderRadius: "var(--radius)" }}
+                  onClick={() => onNavigate("transactions")}
+                >
+                  <div>
+                    <div className="name" style={{ fontSize: 13.5 }}>
+                      {uncategorizedCount} uncategorized transaction{uncategorizedCount === 1 ? "" : "s"}
+                    </div>
+                    <div className="meta">Tap to review them</div>
+                  </div>
+                </button>
+              )}
+              {flagged.map(({ item, spent, flag, periodWord }) => (
+                <button
+                  key={item.id}
+                  className="account-card"
+                  style={{ width: "100%", textAlign: "left", cursor: "pointer", border: "none", background: "var(--subtle-bg)", borderRadius: "var(--radius)" }}
+                  onClick={() => onNavigate("budget")}
+                >
+                  <div>
+                    <div className="name" style={{ fontSize: 13.5 }}>{item.name}</div>
+                    <div className="meta">
+                      {item.budgetType === "accumulate"
+                        ? `Behind on saving ${periodWord}`
+                        : flag === "bad"
+                        ? `Over budget ${periodWord}`
+                        : `Nearing its limit ${periodWord}`}
+                    </div>
+                  </div>
+                  <div className="figures">
+                    <div className={"net " + (flag === "bad" ? "money-out" : "")} style={{ fontSize: 14 }}>
+                      {formatMoney(spent)} / {formatMoney(item.budgetAmount)}
+                    </div>
+                  </div>
+                </button>
+              ))}
+            </div>
+          )}
+          {totalBudgetCount > 0 && (
+            <p className="muted-cell" style={{ fontSize: 12, marginTop: 12 }}>
+              {totalBudgetCount - flagged.length} of {totalBudgetCount} budgets on track.{" "}
+              <button className="btn btn-ghost btn-sm" onClick={() => onNavigate("budget")}>
+                See all
+              </button>
+            </p>
+          )}
+        </div>
+
+        <div className="panel">
+          <h3 style={{ marginTop: 0, marginBottom: 4, fontSize: 15 }}>Top spending this period</h3>
+          {topSpending.length === 0 ? (
+            <p className="hint">No spending recorded yet for {periodLabelFn(periodSummary.currentKey)}.</p>
+          ) : (
+            <div style={{ display: "flex", gap: 16, alignItems: "center", marginTop: 8 }}>
+              <div style={{ width: 120, height: 120, flexShrink: 0 }}>
+                <ResponsiveContainer>
+                  <PieChart>
+                    <Pie data={donutData} dataKey="value" nameKey="name" innerRadius="58%" outerRadius="92%" paddingAngle={donutData.length > 1 ? 2 : 0}>
+                      {donutData.map((d, i) => (
+                        <Cell key={i} fill={d.isOther ? "var(--chart-other)" : CHART_PALETTE[i % CHART_PALETTE.length]} />
+                      ))}
+                    </Pie>
+                    <Tooltip
+                      formatter={(value) => formatMoney(value)}
+                      contentStyle={{
+                        fontSize: 12,
+                        fontFamily: "'Work Sans', sans-serif",
+                        border: "1px solid var(--border)",
+                        borderRadius: 6,
+                        background: "var(--panel)",
+                      }}
+                    />
+                  </PieChart>
+                </ResponsiveContainer>
+              </div>
+              <div style={{ flex: 1, minWidth: 0 }}>
+                {topSpending.map((r, i) => (
+                  <div key={r.key} style={{ display: "flex", justifyContent: "space-between", gap: 10, fontSize: 13, padding: "4px 0" }}>
+                    <span style={{ display: "flex", alignItems: "center", gap: 6, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                      <span style={{ width: 9, height: 9, borderRadius: 2, background: CHART_PALETTE[i % CHART_PALETTE.length], flexShrink: 0, display: "inline-block" }} />
+                      {r.label}
+                    </span>
+                    <span className="money-out" style={{ flexShrink: 0 }}>{formatMoney(Math.abs(r.value))}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+          <button className="btn btn-ghost btn-sm" style={{ marginTop: 12 }} onClick={() => onNavigate("reports")}>
+            See full Reports
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function TransactionsView({ transactions, accounts, categories, duplicateInfo, onUpdate, onDelete, onGoUpload }) {
   const [filterAccount, setFilterAccount] = useState("all");
   const [filterCategory, setFilterCategory] = useState("all");
@@ -2903,6 +3167,36 @@ function TransactionsView({ transactions, accounts, categories, duplicateInfo, o
   const [dupOnly, setDupOnly] = useState(false);
   const [expandedId, setExpandedId] = useState(null);
   const [dateSortDir, setDateSortDir] = useState("desc");
+  const [dateFrom, setDateFrom] = useState("");
+  const [dateTo, setDateTo] = useState("");
+  const [filterBatchId, setFilterBatchId] = useState("all");
+
+  // The last several distinct uploads, newest first — surfaced by date/
+  // account/count so a person can jump straight to "what I just
+  // imported" without ever seeing or needing the underlying batch id.
+  const recentBatches = useMemo(() => {
+    const map = {};
+    transactions.forEach((t) => {
+      if (!t.uploadBatchId) return;
+      if (!map[t.uploadBatchId]) {
+        map[t.uploadBatchId] = { batchId: t.uploadBatchId, uploadedAt: t.uploadedAt, accountNames: new Set(), count: 0 };
+      }
+      map[t.uploadBatchId].count += 1;
+      if (t.accountName) map[t.uploadBatchId].accountNames.add(t.accountName);
+    });
+    return Object.values(map)
+      .sort((a, b) => (b.uploadedAt || "").localeCompare(a.uploadedAt || ""))
+      .slice(0, 10);
+  }, [transactions]);
+
+  function formatBatchLabel(batch) {
+    const dt = batch.uploadedAt ? new Date(batch.uploadedAt) : null;
+    const dateStr = dt
+      ? dt.toLocaleString("en-US", { month: "short", day: "numeric", year: "numeric", hour: "numeric", minute: "2-digit" })
+      : "Unknown time";
+    const accountStr = [...batch.accountNames].join(", ");
+    return `${dateStr} — ${accountStr} (${batch.count})`;
+  }
 
   const filtered = useMemo(() => {
     let list = transactions;
@@ -2910,6 +3204,9 @@ function TransactionsView({ transactions, accounts, categories, duplicateInfo, o
     if (filterCategory === "uncategorized") list = list.filter((t) => !t.categoryId);
     else if (filterCategory !== "all") list = list.filter((t) => t.categoryId === filterCategory);
     if (dupOnly) list = list.filter((t) => duplicateInfo.dupIds.has(t.id));
+    if (filterBatchId !== "all") list = list.filter((t) => t.uploadBatchId === filterBatchId);
+    if (dateFrom) list = list.filter((t) => t.date && t.date >= dateFrom);
+    if (dateTo) list = list.filter((t) => t.date && t.date <= dateTo);
     if (search.trim()) {
       const q = search.trim().toLowerCase();
       list = list.filter((t) => {
@@ -2921,7 +3218,7 @@ function TransactionsView({ transactions, accounts, categories, duplicateInfo, o
     }
     const dir = dateSortDir === "asc" ? 1 : -1;
     return [...list].sort((a, b) => (a.date < b.date ? -dir : a.date > b.date ? dir : 0));
-  }, [transactions, filterAccount, filterCategory, dupOnly, search, duplicateInfo, dateSortDir]);
+  }, [transactions, filterAccount, filterCategory, dupOnly, filterBatchId, search, duplicateInfo, dateSortDir, dateFrom, dateTo]);
 
   if (accounts.length === 0) {
     return (
@@ -2936,6 +3233,7 @@ function TransactionsView({ transactions, accounts, categories, duplicateInfo, o
 
   const totalIn = filtered.reduce((s, t) => s + (t.amountIn || 0), 0);
   const totalOut = filtered.reduce((s, t) => s + (t.amountOut || 0), 0);
+  const uncategorizedCount = transactions.filter((t) => !t.categoryId).length;
 
   return (
     <div>
@@ -2969,6 +3267,16 @@ function TransactionsView({ transactions, accounts, categories, duplicateInfo, o
             </option>
           ))}
         </select>
+        {recentBatches.length > 0 && (
+          <select value={filterBatchId} onChange={(e) => setFilterBatchId(e.target.value)}>
+            <option value="all">All transactions</option>
+            {recentBatches.map((b) => (
+              <option key={b.batchId} value={b.batchId}>
+                {formatBatchLabel(b)}
+              </option>
+            ))}
+          </select>
+        )}
         <input
           type="text"
           placeholder="Search transactions…"
@@ -2976,8 +3284,33 @@ function TransactionsView({ transactions, accounts, categories, duplicateInfo, o
           onChange={(e) => setSearch(e.target.value)}
         />
         <label className="checkbox-filter">
+          <input
+            type="checkbox"
+            checked={filterCategory === "uncategorized"}
+            onChange={(e) => setFilterCategory(e.target.checked ? "uncategorized" : "all")}
+          />
+          Uncategorized only ({uncategorizedCount})
+        </label>
+        <label className="checkbox-filter">
           <input type="checkbox" checked={dupOnly} onChange={(e) => setDupOnly(e.target.checked)} />
           Possible duplicates only ({duplicateInfo.dupIds.size})
+        </label>
+        <label className="checkbox-filter" style={{ gap: 8 }}>
+          Between
+          <input type="date" value={dateFrom} onChange={(e) => setDateFrom(e.target.value)} />
+          and
+          <input type="date" value={dateTo} onChange={(e) => setDateTo(e.target.value)} />
+          {(dateFrom || dateTo) && (
+            <button
+              className="btn btn-ghost btn-sm"
+              onClick={() => {
+                setDateFrom("");
+                setDateTo("");
+              }}
+            >
+              Clear
+            </button>
+          )}
         </label>
       </div>
 
@@ -3025,6 +3358,93 @@ function TransactionsView({ transactions, accounts, categories, duplicateInfo, o
             )}
           </tbody>
         </table>
+      </div>
+    </div>
+  );
+}
+
+/* ------------------------------------------------------------------ */
+/* Post-upload categorization                                          */
+/* ------------------------------------------------------------------ */
+
+function PostUploadCategorizeView({ transactions, batchId, accountName, categories, duplicateInfo, onUpdate, onDelete, onSkip }) {
+  const [expandedId, setExpandedId] = useState(null);
+  const batchTransactions = useMemo(
+    () => transactions.filter((t) => t.uploadBatchId === batchId),
+    [transactions, batchId]
+  );
+  const uncategorizedCount = batchTransactions.filter((t) => !t.categoryId).length;
+
+  if (batchTransactions.length === 0) {
+    return (
+      <EmptyState
+        title="Nothing left to categorize here"
+        body="This import doesn't have anything left to show — it may have already been categorized or removed."
+        ctaLabel="Go to Transactions"
+        onCta={onSkip}
+      />
+    );
+  }
+
+  return (
+    <div>
+      <div className="view-header">
+        <h1>Categorize your import</h1>
+        <p>
+          {batchTransactions.length} transaction{batchTransactions.length === 1 ? "" : "s"} just imported into{" "}
+          <strong>{accountName}</strong> — sort them into categories now, or skip and handle it later from
+          Transactions. Uploading another file works fine from here too; this batch will still be waiting when
+          you come back.
+        </p>
+      </div>
+
+      <div className="summary-row">
+        <StatBlock value={batchTransactions.length} label="Just imported" />
+        <StatBlock value={uncategorizedCount} label="Still uncategorized" />
+      </div>
+
+      <div className="actions-row" style={{ marginBottom: 16 }}>
+        <button className="btn btn-secondary" onClick={onSkip}>
+          Skip for now
+        </button>
+      </div>
+
+      <div className="panel" style={{ padding: 0, overflowX: "auto" }}>
+        <table className="tx-table">
+          <thead>
+            <tr>
+              <th>Date</th>
+              <th>Description</th>
+              <th>Account</th>
+              <th>Money out</th>
+              <th>Money in</th>
+              <th>Category</th>
+              <th></th>
+              <th></th>
+            </tr>
+          </thead>
+          <tbody>
+            {batchTransactions.map((t) => (
+              <TransactionRow
+                key={t.id}
+                t={t}
+                duplicateInfo={duplicateInfo}
+                expanded={expandedId === t.id}
+                onToggleExpand={(id) => setExpandedId(expandedId === id ? null : id)}
+                allTransactions={transactions}
+                categories={categories}
+                onUpdate={onUpdate}
+                onDelete={onDelete}
+              />
+            ))}
+          </tbody>
+        </table>
+      </div>
+
+      <div className="actions-row" style={{ marginTop: 16 }}>
+        <button className="btn btn-primary" onClick={onSkip}>
+          Done — go to Transactions
+        </button>
       </div>
     </div>
   );
@@ -3324,14 +3744,26 @@ function ReportsView({ transactions, accounts, categories, onGoCategories }) {
   // and a category that's reliably large every period (rent) still
   // shows correctly as $0 on a period it truly was $0, instead of a
   // fixed slot going to waste while something that was actually big
-  // that period gets buried in "Other".
+  // that period gets buried in "Other". Categories hidden from the
+  // charts are filtered out before ranking even happens — not just
+  // hidden at render time — so a hidden category never occupies a slot
+  // or gets folded into "Other" and inflating it; the chart's own totals
+  // recompute around whatever's left visible.
+  const hiddenSet = useMemo(() => new Set(periodConfig.hiddenCategories || []), [periodConfig.hiddenCategories]);
+  const visibleRows = useMemo(() => rows.filter((r) => !hiddenSet.has(r.key)), [rows, hiddenSet]);
+
   const rankedCategories = useMemo(() => {
-    return [...rows].sort((a, b) => {
+    return [...visibleRows].sort((a, b) => {
       const maxA = Math.max(0, ...a.cells.map((v) => Math.abs(v)));
       const maxB = Math.max(0, ...b.cells.map((v) => Math.abs(v)));
       return maxB - maxA;
     });
-  }, [rows]);
+  }, [visibleRows]);
+
+  const visiblePeriodTotals = useMemo(
+    () => periods.map((_, i) => visibleRows.reduce((s, r) => s + r.cells[i], 0)),
+    [periods, visibleRows]
+  );
 
   // A stable name -> color assignment across the FULL ranked list (not
   // just the top 6 shown on the bar chart), so a category keeps the
@@ -3483,19 +3915,59 @@ function ReportsView({ transactions, accounts, categories, onGoCategories }) {
         </div>
       )}
 
+      {rows.length > 0 && (
+        <div className="panel" style={{ marginBottom: 22 }}>
+          <h3 style={{ marginTop: 0, marginBottom: 8, fontSize: 15 }}>Categories shown in the charts</h3>
+          <p className="hint" style={{ marginBottom: 10 }}>
+            Hide a category from the bar and donut charts below without affecting anything else — the table
+            still shows everything, and the category is still tracked normally in Budget and Planning. Handy
+            for keeping something big and steady, like a paycheck or rent, from dominating the visual.
+          </p>
+          <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
+            {rows.map((r) => {
+              const hidden = hiddenSet.has(r.key);
+              return (
+                <button
+                  key={r.key}
+                  className="btn btn-sm"
+                  style={
+                    hidden
+                      ? { border: "1px solid var(--expense)", color: "var(--expense)", background: "var(--panel)" }
+                      : { border: "1px solid var(--border)", color: "var(--ink)", background: "var(--panel)" }
+                  }
+                  onClick={() => {
+                    const current = periodConfig.hiddenCategories || [];
+                    const next = hidden ? current.filter((id) => id !== r.key) : [...current, r.key];
+                    updateConfig({ hiddenCategories: next });
+                  }}
+                >
+                  {r.label} {hidden ? "(hidden) — show" : "— hide"}
+                </button>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
       <div className="summary-row">
         <StatBlock value={formatMoney(totalIn)} label="Tracked money in" />
         <StatBlock value={formatMoney(totalOut)} label="Tracked money out" />
         <StatBlock value={formatMoney(grandTotal)} label="Tracked net" />
       </div>
+      {(periodConfig.hiddenCategories || []).length > 0 && (
+        <p className="muted-cell" style={{ fontSize: 11.5, marginTop: -12, marginBottom: 16 }}>
+          These totals always include every category — the chart below is the only thing reflecting what
+          you've hidden.
+        </p>
+      )}
 
       {periodConfig.chartType === "donut" ? (
         <ReportsDonutGrid
           periods={periods}
           periodLabelFn={periodLabelFn}
-          rows={rows}
+          rows={visibleRows}
           categoryColor={categoryColor}
-          periodTotals={periodTotals}
+          periodTotals={visiblePeriodTotals}
         />
       ) : (
         <div className="panel chart-card">
@@ -5255,6 +5727,7 @@ function App({ householdName } = {}) {
   const [uploadPrefill, setUploadPrefill] = useState(null);
   const [remoteChangeAvailable, setRemoteChangeAvailable] = useState(false);
   const [syncing, setSyncing] = useState(false);
+  const [activeUploadBatch, setActiveUploadBatch] = useState(null); // { batchId, accountName }
   const baseSnapshotRef = useRef(null);
 
   useEffect(() => {
@@ -5265,7 +5738,7 @@ function App({ householdName } = {}) {
       applySnapshotToState(snap);
       baseSnapshotRef.current = snap;
       setLoaded(true);
-      if (snap.accounts.length > 0) setView("transactions");
+      if (snap.accounts.length > 0) setView("overview");
     });
     return () => {
       cancelled = true;
@@ -5436,7 +5909,13 @@ function App({ householdName } = {}) {
       }
       const nextTransactions = [...transactions, ...valid];
       persist(nextAccounts, nextTransactions, categories, budgetGroups, plannedIncome, incomeWarningDismissed, hiddenBudgetMonths, excludeUnassignedFromBudget);
-      setView("transactions");
+      const batchId = valid.length > 0 ? valid[0].uploadBatchId : null;
+      if (batchId) {
+        setActiveUploadBatch({ batchId, accountName: accountMeta.name });
+        setView("categorize");
+      } else {
+        setView("transactions");
+      }
       setToast(`Imported ${valid.length} transaction${valid.length === 1 ? "" : "s"} into ${accountMeta.name}.`);
     },
     [accounts, transactions, categories, budgetGroups, plannedIncome, incomeWarningDismissed, hiddenBudgetMonths, excludeUnassignedFromBudget, persist]
@@ -5813,6 +6292,12 @@ function App({ householdName } = {}) {
           <div className="sidebar-nav">
             <div className="sidebar-nav-label">Ledger</div>
             <button
+              className={"nav-btn" + (view === "overview" ? " active" : "")}
+              onClick={() => setView("overview")}
+            >
+              Overview
+            </button>
+            <button
               className={"nav-btn" + (view === "transactions" ? " active" : "")}
               onClick={() => setView("transactions")}
             >
@@ -5900,8 +6385,29 @@ function App({ householdName } = {}) {
             </div>
           )}
 
+          {view === "overview" && (
+            <OverviewView
+              transactions={transactions}
+              categories={categories}
+              budgetGroups={budgetGroups}
+              onNavigate={(v) => setView(v)}
+            />
+          )}
+
           {view === "upload" && (
             <UploadView key={uploadKey} accounts={accounts} prefill={uploadPrefill} onImport={handleImport} />
+          )}
+          {view === "categorize" && activeUploadBatch && (
+            <PostUploadCategorizeView
+              transactions={transactions}
+              batchId={activeUploadBatch.batchId}
+              accountName={activeUploadBatch.accountName}
+              categories={categories}
+              duplicateInfo={duplicateInfo}
+              onUpdate={handleUpdateTransaction}
+              onDelete={handleDeleteTransaction}
+              onSkip={() => setView("transactions")}
+            />
           )}
           {view === "transactions" && (
             <TransactionsView
