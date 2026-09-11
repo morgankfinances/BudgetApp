@@ -9,6 +9,20 @@ import { BarChart, Bar, PieChart, Pie, Cell, ReferenceLine, XAxis, YAxis, Cartes
 
 const STORAGE_KEY = "ledger-data-v1";
 
+const VIEW_TITLES = {
+  overview: "Overview",
+  transactions: "Transactions",
+  reports: "Reports",
+  accounts: "Accounts",
+  categories: "Categories",
+  upload: "Upload",
+  categorize: "Categorize import",
+  backup: "Backup",
+  planning: "Planning",
+  budgetGroups: "Budget Groups",
+  budget: "Budget",
+};
+
 /* ------------------------------------------------------------------ */
 /* Concurrent-edit merge                                                */
 /*                                                                      */
@@ -801,7 +815,20 @@ function buildTransactions(rows, mapping, accountId, accountName, uploadBatchId)
 /* Full backup: export everything to one CSV, and rebuild from one     */
 /* ------------------------------------------------------------------ */
 
-const BACKUP_COLUMNS = ["Account", "Date", "Description", "Money Out", "Money In", "Category", "Category Excluded", "Category Income"];
+const BACKUP_COLUMNS = [
+  "Account",
+  "Date",
+  "Description",
+  "Money Out",
+  "Money In",
+  "Category",
+  "Category Excluded",
+  "Category Income",
+  "Uploaded At",
+  "Upload Batch",
+  "Not A Duplicate",
+  "Counts Toward Period",
+];
 
 function exportBackupCSV(accounts, transactions, categories) {
   const categoryById = {};
@@ -822,6 +849,10 @@ function exportBackupCSV(accounts, transactions, categories) {
       Category: cat ? cat.name : "",
       "Category Excluded": cat ? (cat.excluded ? "Yes" : "No") : "",
       "Category Income": cat ? (cat.isIncome ? "Yes" : "No") : "",
+      "Uploaded At": t.uploadedAt || "",
+      "Upload Batch": t.uploadBatchId || "",
+      "Not A Duplicate": t.notDuplicate ? "Yes" : "No",
+      "Counts Toward Period": t.budgetPeriodOverride || "",
     };
   });
 
@@ -919,6 +950,10 @@ function buildFromBackupRows(rows) {
       amountIn,
       categoryId,
       raw: row,
+      uploadedAt: row["Uploaded At"] || undefined,
+      uploadBatchId: row["Upload Batch"] || undefined,
+      notDuplicate: String(row["Not A Duplicate"] || "").trim().toLowerCase() === "yes",
+      budgetPeriodOverride: row["Counts Toward Period"] || undefined,
     });
   });
 
@@ -1023,6 +1058,21 @@ function exportBudgetCSV(categories, budgetGroups, plannedIncome) {
         Amount: amount,
       });
     });
+    (item.fundAdjustments || []).forEach((adj) => {
+      rows.push({
+        "Row Type": "FundAdjustment",
+        "Item Type": itemType,
+        Name: item.name,
+        "Budget Amount": "",
+        "Budget Period": "",
+        "Budget Type": "",
+        "Accumulate Target": "",
+        Group: "",
+        Members: "",
+        Period: adj.date,
+        Amount: adj.amount,
+      });
+    });
   };
   categories.forEach((c) => pushOverrides(c, "Category"));
   budgetGroups.forEach((g) => pushOverrides(g, "Group"));
@@ -1045,6 +1095,8 @@ function buildBudgetFromRows(rows, currentCategories, currentBudgetGroups) {
   const groupDefs = {};
   const categoryOverrides = {};
   const groupOverrides = {};
+  const categoryFundAdjustments = {};
+  const groupFundAdjustments = {};
   const invalid = [];
 
   const normPeriod = (v) => (String(v || "").trim().toLowerCase() === "weekly" ? "weekly" : "monthly");
@@ -1100,6 +1152,18 @@ function buildBudgetFromRows(rows, currentCategories, currentBudgetGroups) {
       } else {
         invalid.push({ rowIndex: idx, reasons: ["incomplete override row"] });
       }
+    } else if (rowType === "FundAdjustment") {
+      const itemType = String(row["Item Type"] || "").trim();
+      const name = String(row["Name"] || "").trim();
+      const date = String(row["Period"] || "").trim();
+      const amt = parseMoney(row["Amount"]);
+      if (name && date && amt != null) {
+        const bucket = itemType === "Group" ? groupFundAdjustments : categoryFundAdjustments;
+        if (!bucket[name]) bucket[name] = [];
+        bucket[name].push({ date, amount: amt });
+      } else {
+        invalid.push({ rowIndex: idx, reasons: ["incomplete fund adjustment row"] });
+      }
     } else {
       invalid.push({ rowIndex: idx, reasons: [`unrecognized row type "${rowType}"`] });
     }
@@ -1116,6 +1180,7 @@ function buildBudgetFromRows(rows, currentCategories, currentBudgetGroups) {
       budgetType: upd.budgetType,
       accumulateTarget: upd.accumulateTarget,
       accumulateActuals: categoryOverrides[c.name] || c.accumulateActuals || {},
+      fundAdjustments: categoryFundAdjustments[c.name] || c.fundAdjustments || [],
     };
   });
   const newCategoryEntries = Object.keys(categoryUpdates)
@@ -1131,6 +1196,7 @@ function buildBudgetFromRows(rows, currentCategories, currentBudgetGroups) {
         budgetType: upd.budgetType,
         accumulateTarget: upd.accumulateTarget,
         accumulateActuals: categoryOverrides[name] || {},
+        fundAdjustments: categoryFundAdjustments[name] || [],
         createdAt: new Date().toISOString(),
       };
     });
@@ -1153,6 +1219,7 @@ function buildBudgetFromRows(rows, currentCategories, currentBudgetGroups) {
       accumulateTarget: def.accumulateTarget,
       categoryIds: def.memberNames.map((n) => nameToId[n]).filter(Boolean),
       accumulateActuals: groupOverrides[g.name] || g.accumulateActuals || {},
+      fundAdjustments: groupFundAdjustments[g.name] || g.fundAdjustments || [],
     };
   });
   const newGroupEntries = Object.keys(groupDefs)
@@ -1168,6 +1235,7 @@ function buildBudgetFromRows(rows, currentCategories, currentBudgetGroups) {
         accumulateTarget: def.accumulateTarget,
         categoryIds: def.memberNames.map((n) => nameToId[n]).filter(Boolean),
         accumulateActuals: groupOverrides[name] || {},
+        fundAdjustments: groupFundAdjustments[name] || [],
         createdAt: new Date().toISOString(),
       };
     });
@@ -1513,7 +1581,7 @@ const STYLES = `
 .form-grid .field.span-2 { grid-column: 1 / -1; }
 
 .radio-row { display: flex; gap: 16px; margin-bottom: 16px; }
-.radio-option { display: flex; align-items: center; gap: 6px; font-size: 14px; cursor: pointer; }
+.radio-option { display: flex; align-items: center; gap: 6px; font-size: 14px; cursor: pointer; flex-wrap: wrap; }
 
 .budget-row { display: flex; align-items: center; gap: 6px; margin-top: 8px; }
 .budget-row-label { font-size: 12.5px; color: var(--ink-muted); font-weight: 600; }
@@ -1641,6 +1709,7 @@ const STYLES = `
 .money-out { color: var(--expense); font-weight: 600; }
 
 .toggle-group { display: inline-flex; border: 1px solid var(--border); border-radius: var(--radius); overflow: hidden; }
+.overview-grid { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 20px; margin-top: 4px; }
 .toggle-btn {
   padding: 7px 16px; font-family: inherit; font-size: 13px; font-weight: 600;
   border: none; background: var(--panel); color: var(--ink-muted); cursor: pointer;
@@ -1668,7 +1737,7 @@ const STYLES = `
 .pivot-total-col { font-weight: 600; }
 
 .excluded-note {
-  display: flex; align-items: center; justify-content: space-between; gap: 12px;
+  display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap;
   font-size: 12.5px; color: var(--ink-muted); margin-top: 12px; padding: 10px 14px;
   border: 1px solid var(--border); border-radius: var(--radius); background: var(--subtle-bg);
 }
@@ -1764,17 +1833,61 @@ const STYLES = `
   display: flex; align-items: center; justify-content: center; min-height: 100vh; color: var(--ink-muted); font-size: 14px;
 }
 
+.mobile-topbar { display: none; }
+.sidebar-backdrop { display: none; }
+
 @media (max-width: 760px) {
   .app-shell { grid-template-columns: 1fr; }
-  .sidebar { flex-direction: row; align-items: center; padding: 12px 16px; gap: 14px; overflow-x: auto; }
-  .sidebar-brand { flex-shrink: 0; }
-  .sidebar-nav { flex-direction: row; }
-  .sidebar-nav .nav-btn { flex-shrink: 0; }
-  .sidebar-nav-label { display: none; }
-  .sidebar-section-divider { display: none; }
-  .sidebar-stats { display: none; }
+
+  .mobile-topbar {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 12px 16px;
+    background: var(--panel);
+    border-bottom: 1px solid var(--border);
+  }
+  .mobile-topbar h2 { margin: 0; font-size: 16px; font-family: 'Fraunces', serif; color: var(--ink); flex: 1; }
+  .hamburger-btn {
+    background: none; border: 1px solid var(--border); border-radius: var(--radius);
+    padding: 7px 9px; cursor: pointer; display: flex; flex-direction: column; gap: 4px; width: 32px;
+  }
+  .hamburger-btn span { display: block; height: 2px; background: var(--ink); border-radius: 2px; }
+
+  /* The sidebar becomes an off-canvas drawer — sliding over the content
+     instead of squeezing into a horizontal strip, so it can show the
+     same full vertical nav (sections, dividers, all of it) as desktop
+     rather than needing its own cut-down mobile-only layout. */
+  .sidebar {
+    position: fixed;
+    top: 0; left: 0; bottom: 0;
+    width: 270px;
+    max-width: 82vw;
+    transform: translateX(-100%);
+    transition: transform 0.22s ease;
+    z-index: 210;
+    overflow-y: auto;
+    box-shadow: 4px 0 24px rgba(0,0,0,0.25);
+  }
+  .sidebar.mobile-open { transform: translateX(0); }
+
+  .sidebar-backdrop.visible {
+    display: block;
+    position: fixed; inset: 0;
+    background: rgba(0,0,0,0.4);
+    z-index: 200;
+  }
+
   .main { padding: 18px 14px 50px; }
   .form-grid { grid-template-columns: 1fr; }
+
+  /* Toggle groups (period selector, chart type, etc.) — let buttons wrap
+     onto multiple rows instead of forcing a row wider than the screen. */
+  .toggle-group { display: flex; flex-wrap: wrap; width: 100%; }
+  .toggle-group .toggle-btn { flex: 1 1 auto; }
+
+  /* Overview's two-column layout collapses to one. */
+  .overview-grid { grid-template-columns: 1fr !important; }
 
   /* Account and category rows: stack instead of squeezing into one line */
   .account-card { flex-direction: column; align-items: flex-start; gap: 10px; }
@@ -3054,7 +3167,7 @@ function OverviewView({ transactions, categories, budgetGroups, onNavigate }) {
         <StatBlock value={formatMoney(periodSummary.net)} label="Net" />
       </div>
 
-      <div style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr) minmax(0, 1fr)", gap: 20, marginTop: 4 }}>
+      <div className="overview-grid">
         <div className="panel">
           <h3 style={{ marginTop: 0, marginBottom: 4, fontSize: 15 }}>Needs attention</h3>
           {needsAttentionCount === 0 ? (
@@ -3134,6 +3247,8 @@ function OverviewView({ transactions, categories, budgetGroups, onNavigate }) {
                         borderRadius: 6,
                         background: "var(--panel)",
                       }}
+                      itemStyle={{ color: "var(--ink)" }}
+                      labelStyle={{ color: "var(--ink)" }}
                     />
                   </PieChart>
                 </ResponsiveContainer>
@@ -4452,6 +4567,8 @@ function BudgetPerformanceChart({ title, periods, budgeted, spendMap, periodLabe
                 background: "var(--panel)",
                 boxShadow: "0 4px 14px rgba(0,0,0,0.12)",
               }}
+              itemStyle={{ color: "var(--ink)" }}
+              labelStyle={{ color: "var(--ink)" }}
             />
             <Bar dataKey="delta">
               {data.map((entry, i) => (
@@ -5728,6 +5845,7 @@ function App({ householdName } = {}) {
   const [remoteChangeAvailable, setRemoteChangeAvailable] = useState(false);
   const [syncing, setSyncing] = useState(false);
   const [activeUploadBatch, setActiveUploadBatch] = useState(null); // { batchId, accountName }
+  const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const baseSnapshotRef = useRef(null);
 
   useEffect(() => {
@@ -6283,13 +6401,26 @@ function App({ householdName } = {}) {
   return (
     <div className="ledger-root">
       <style>{STYLES}</style>
+      <div className="mobile-topbar">
+        <button
+          className="hamburger-btn"
+          onClick={() => setMobileMenuOpen((open) => !open)}
+          aria-label="Open menu"
+        >
+          <span />
+          <span />
+          <span />
+        </button>
+        <h2>{VIEW_TITLES[view] || "Ledger"}</h2>
+      </div>
+      <div className={"sidebar-backdrop" + (mobileMenuOpen ? " visible" : "")} onClick={() => setMobileMenuOpen(false)} />
       <div className="app-shell">
-        <div className="sidebar">
+        <div className={"sidebar" + (mobileMenuOpen ? " mobile-open" : "")}>
           <div className="sidebar-brand">
             <span className="sidebar-brand-mark" />
             {householdName ? `${householdName} Ledger` : "Ledger"}
           </div>
-          <div className="sidebar-nav">
+          <div className="sidebar-nav" onClick={() => setMobileMenuOpen(false)}>
             <div className="sidebar-nav-label">Ledger</div>
             <button
               className={"nav-btn" + (view === "overview" ? " active" : "")}
