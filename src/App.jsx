@@ -1237,9 +1237,9 @@ const STYLES = `
   --ink: #1E241F;
   --ink-muted: #62685E;
   --border: #DAD9CC;
-  --accent: #3B5BA0;
-  --accent-hover: #2E4880;
-  --accent-tint: #EBEEF7;
+  --accent: #C2661E;
+  --accent-hover: #9C4F15;
+  --accent-tint: #F7E9DC;
   --income: #3F7D5C;
   --expense: #AC4A2C;
   --warn-bg: #FBF1DA;
@@ -1314,34 +1314,6 @@ const STYLES = `
   --chart-6: #5FC4C4;
   --chart-7: #E08FB0;
   --chart-other: #7C879C;
-}
-
-:root[data-theme="dark-charcoal"] {
-  --bg: #17181C;
-  --panel: #212227;
-  --ink: #EDEDEE;
-  --ink-muted: #9D9EA3;
-  --border: #35363C;
-  --accent: #86A6E8;
-  --accent-hover: #A3C0F0;
-  --accent-tint: #262A38;
-  --income: #6FCB9A;
-  --expense: #E2896A;
-  --warn-bg: #332C1A;
-  --warn-border: #C4993F;
-  --warn-ink: #E7C381;
-  --danger: #E2685A;
-  --danger-tint-bg: #362522;
-  --danger-tint-border: #7A4038;
-  --subtle-bg: #2A2B31;
-  --chart-1: #86A6E8;
-  --chart-2: #6FCB9A;
-  --chart-3: #E2896A;
-  --chart-4: #D9A94E;
-  --chart-5: #ADA0E8;
-  --chart-6: #5FC4C4;
-  --chart-7: #E08FB0;
-  --chart-other: #8C8D93;
 }
 
 .ledger-root {
@@ -1745,14 +1717,12 @@ const STYLES = `
   font-size: 13.5px; box-shadow: 0 6px 18px rgba(0,0,0,0.18); z-index: 40;
 }
 
-.account-card {
-  display: flex; justify-content: space-between; align-items: center;
-  padding: 14px 4px; border-bottom: 1px solid var(--border);
-}
+.account-card { display: flex; justify-content: space-between; align-items: center; padding: 14px 4px; border-bottom: 1px solid var(--border); }
 .account-card:last-child { border-bottom: none; }
+.account-card > .account-name-block { flex: 1 1 auto; min-width: 0; }
 .account-card .name { font-weight: 600; font-size: 15px; display: flex; align-items: center; gap: 8px; }
 .account-card .meta { font-size: 12.5px; color: var(--ink-muted); margin-top: 2px; }
-.account-card .figures { text-align: right; margin-right: 18px; }
+.account-card .figures { text-align: right; margin-right: 18px; min-width: 150px; flex-shrink: 0; }
 .account-card .figures .net { font-family: 'Fraunces', serif; font-size: 17px; }
 
 .account-card-wrap { border-bottom: 1px solid var(--border); }
@@ -2284,7 +2254,7 @@ function AccountCard({ account, txCount, totalIn, totalOut, sampleRaw, onDelete,
   return (
     <div className="account-card-wrap">
       <div className="account-card">
-        <div>
+        <div className="account-name-block">
           {editing ? (
             <div className="row-actions">
               <input
@@ -3198,8 +3168,6 @@ function ReportsDonutGrid({ periods, periodLabelFn, rows, categoryColor, periodT
                           <Cell
                             key={di}
                             fill={d.isOther ? "var(--chart-other)" : categoryColor[d.name] || "var(--chart-other)"}
-                            stroke={d.signed >= 0 ? "var(--income)" : "var(--expense)"}
-                            strokeWidth={2}
                           />
                         ))}
                       </Pie>
@@ -3238,8 +3206,8 @@ function ReportsDonutGrid({ periods, periodLabelFn, rows, categoryColor, periodT
       </div>
       <p className="muted-cell" style={{ fontSize: 11.5, textAlign: "center", marginTop: 16 }}>
         Each donut shows that period's own biggest movers — a category shown alone in one period may be folded
-        into "Other" in another, or vice versa, depending on how big it was that period. A colored ring around a
-        wedge means money in that period; a plain edge means money out.
+        into "Other" in another, or vice versa, depending on how big it was that period. Hover a wedge to see
+        whether it was money in or out.
       </p>
       <div
         style={{
@@ -3429,7 +3397,7 @@ function ReportsView({ transactions, accounts, categories, onGoCategories }) {
             className={"toggle-btn" + (periodConfig.mode === "interval" ? " active" : "")}
             onClick={() => updateConfig({ mode: "interval" })}
           >
-            Every N days
+            Every X days
           </button>
           <button
             className={"toggle-btn" + (periodConfig.mode === "semimonthly" ? " active" : "")}

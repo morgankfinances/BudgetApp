@@ -37,10 +37,9 @@ import { resetHouseholdCache } from "./storageAdapter.js";
 const THEME_KEY = "ledger-theme-v1";
 
 const THEMES = [
-  { id: "light-sage", label: "Light — Sage" },
+  { id: "light-sage", label: "Default - Natural" },
   { id: "light-slate", label: "Light — Slate" },
   { id: "dark-midnight", label: "Dark — Midnight" },
-  { id: "dark-charcoal", label: "Dark — Charcoal" },
 ];
 
 function loadTheme() {
@@ -68,9 +67,9 @@ const THEME_VARS_CSS = `
   --ink: #1E241F;
   --ink-muted: #62685E;
   --border: #DAD9CC;
-  --accent: #3B5BA0;
-  --accent-hover: #2E4880;
-  --accent-tint: #EBEEF7;
+  --accent: #C2661E;
+  --accent-hover: #9C4F15;
+  --accent-tint: #F7E9DC;
   --income: #3F7D5C;
   --expense: #AC4A2C;
   --warn-bg: #FBF1DA;
@@ -96,13 +95,6 @@ const THEME_VARS_CSS = `
   --warn-ink: #EAC581; --danger: #E2685A; --danger-tint-bg: #3A2420; --danger-tint-border: #7A4038;
   --subtle-bg: #242A3D;
 }
-:root[data-theme="dark-charcoal"] {
-  --bg: #17181C; --panel: #212227; --ink: #EDEDEE; --ink-muted: #9D9EA3;
-  --border: #35363C; --accent: #86A6E8; --accent-hover: #A3C0F0; --accent-tint: #262A38;
-  --income: #6FCB9A; --expense: #E2896A; --warn-bg: #332C1A; --warn-border: #C4993F;
-  --warn-ink: #E7C381; --danger: #E2685A; --danger-tint-bg: #362522; --danger-tint-border: #7A4038;
-  --subtle-bg: #2A2B31;
-}
 .theme-picker-grid { display: flex; flex-direction: column; gap: 3px; }
 .theme-swatch-btn {
   display: flex; align-items: center; gap: 8px;
@@ -113,10 +105,9 @@ const THEME_VARS_CSS = `
 .theme-swatch-btn:hover { background: var(--subtle-bg); }
 .theme-swatch-btn.active { border-color: var(--accent); background: var(--accent-tint); color: var(--accent); font-weight: 600; }
 .theme-swatch { width: 18px; height: 18px; border-radius: 5px; border: 1px solid var(--border); flex-shrink: 0; }
-.theme-swatch-light-sage { background: linear-gradient(135deg, #F5F6F1 50%, #3B5BA0 50%); }
+.theme-swatch-light-sage { background: linear-gradient(135deg, #F5F6F1 50%, #C2661E 50%); }
 .theme-swatch-light-slate { background: linear-gradient(135deg, #F3F5F8 50%, #2B6CB0 50%); }
 .theme-swatch-dark-midnight { background: linear-gradient(135deg, #10131B 50%, #7B9EE0 50%); }
-.theme-swatch-dark-charcoal { background: linear-gradient(135deg, #17181C 50%, #86A6E8 50%); }
 `;
 
 function ThemePicker({ theme, onChange }) {
