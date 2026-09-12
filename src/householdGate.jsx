@@ -388,8 +388,10 @@ function HouseholdPanel({ onClose, onDataChanged, theme, onThemeChange }) {
   const [copied, setCopied] = useState(false);
   const [error, setError] = useState(null);
   const [leaveConfirming, setLeaveConfirming] = useState(false);
+  const [leaveError, setLeaveError] = useState(null);
   const [deleteConfirming, setDeleteConfirming] = useState(false);
   const [deleting, setDeleting] = useState(false);
+  const [deleteError, setDeleteError] = useState(null);
   const [switchOpen, setSwitchOpen] = useState(false);
   const [switchCode, setSwitchCode] = useState("");
   const [switchConfirming, setSwitchConfirming] = useState(false);
@@ -502,10 +504,10 @@ function HouseholdPanel({ onClose, onDataChanged, theme, onThemeChange }) {
   }
 
   async function handleLeave() {
-    setError(null);
+    setLeaveError(null);
     const { error } = await supabase.rpc("leave_household");
     if (error) {
-      setError(error.message);
+      setLeaveError(error.message);
       return;
     }
     window.location.reload();
@@ -517,11 +519,11 @@ function HouseholdPanel({ onClose, onDataChanged, theme, onThemeChange }) {
 
   async function handleDeleteEverything() {
     setDeleting(true);
-    setError(null);
+    setDeleteError(null);
     const { error } = await supabase.rpc("delete_my_household_data");
     if (error) {
       setDeleting(false);
-      setError(error.message);
+      setDeleteError(error.message);
       return;
     }
     await supabase.auth.signOut();
@@ -779,6 +781,7 @@ function HouseholdPanel({ onClose, onDataChanged, theme, onThemeChange }) {
                 Cancel
               </button>
             </div>
+            {leaveError && <p style={{ color: "var(--danger)", fontSize: 13, marginTop: 8 }}>{leaveError}</p>}
           </div>
         ) : (
           <button style={{ ...buttonStyle, marginBottom: 8 }} onClick={() => setLeaveConfirming(true)}>
@@ -814,6 +817,7 @@ function HouseholdPanel({ onClose, onDataChanged, theme, onThemeChange }) {
                 Cancel
               </button>
             </div>
+            {deleteError && <p style={{ color: "var(--danger)", fontSize: 13, marginTop: 8 }}>{deleteError}</p>}
           </div>
         ) : (
           <button
