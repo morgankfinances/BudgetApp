@@ -1143,7 +1143,13 @@ function buildBudgetFromRows(rows, currentCategories, currentBudgetGroups) {
     } else if (rowType === "Override") {
       const itemType = String(row["Item Type"] || "").trim();
       const name = String(row["Name"] || "").trim();
-      const period = String(row["Period"] || "").trim();
+      let period = String(row["Period"] || "").trim();
+      // A bare "YYYY-MM" (no day) looks equivalent to "YYYY-MM-01" to a
+      // person, but as a stored key it isn't — the rest of the app always
+      // keys monthly periods by the 1st, so an ungenerous typo like this
+      // would silently create a second, invisible-looking "duplicate"
+      // period alongside the real one instead of matching it.
+      if (/^\d{4}-\d{2}$/.test(period)) period = `${period}-01`;
       const amt = parseMoney(row["Amount"]);
       if (name && period && amt != null) {
         const bucket = itemType === "Group" ? groupOverrides : categoryOverrides;
