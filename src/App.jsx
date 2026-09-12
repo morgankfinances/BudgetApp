@@ -5859,6 +5859,7 @@ function App({ householdName } = {}) {
   const [activeUploadBatch, setActiveUploadBatch] = useState(null); // { batchId, accountName }
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const baseSnapshotRef = useRef(null);
+  const savingRef = useRef(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -5887,6 +5888,13 @@ function App({ householdName } = {}) {
     if (!loaded) return;
     let cancelled = false;
     const checkForRemoteChanges = async () => {
+      // A save that's still in flight has already updated the remote
+      // data but hasn't updated baseSnapshotRef yet (that only happens
+      // once saveData() resolves) — checking during that gap compares
+      // fresh remote data against a baseline that's a beat behind it,
+      // which looks exactly like "someone else changed this" even
+      // though it's this same session's own edit landing.
+      if (savingRef.current) return;
       try {
         const remoteData = await loadData();
         if (cancelled) return;
@@ -5919,6 +5927,7 @@ function App({ householdName } = {}) {
 
   const handleSyncNow = useCallback(async () => {
     setSyncing(true);
+    savingRef.current = true;
     try {
       const remoteData = await loadData();
       const remoteBlob = normalizeSnapshot(remoteData);
@@ -5928,6 +5937,8 @@ function App({ householdName } = {}) {
       setToast("Synced with the latest data.");
     } catch (e) {
       setToast("Couldn't sync right now — try again in a moment.");
+    } finally {
+      savingRef.current = false;
     }
     setSyncing(false);
   }, []);
@@ -5957,43 +5968,48 @@ function App({ householdName } = {}) {
       // Show the edit immediately — the merge check below only changes
       // this if someone else's change needs folding in too.
       applySnapshotToState(localBlob);
+      savingRef.current = true;
 
       let toSave = localBlob;
       const base = baseSnapshotRef.current;
       try {
-        const remoteData = await loadData();
-        const remoteBlob = normalizeSnapshot(remoteData);
-        if (base && !deepEqual(remoteBlob, base)) {
-          const { merged, conflicts } = mergeLedgerData(base, localBlob, remoteBlob);
-          toSave = merged;
-          applySnapshotToState(toSave);
-          setToast(
-            conflicts.length > 0
-              ? `Synced with a change made elsewhere just now — ${conflicts.length} value${
-                  conflicts.length === 1 ? "" : "s"
-                } overlapped and kept the most recent edit.`
-              : "Synced with a change made elsewhere just now — nothing was lost."
-          );
+        try {
+          const remoteData = await loadData();
+          const remoteBlob = normalizeSnapshot(remoteData);
+          if (base && !deepEqual(remoteBlob, base)) {
+            const { merged, conflicts } = mergeLedgerData(base, localBlob, remoteBlob);
+            toSave = merged;
+            applySnapshotToState(toSave);
+            setToast(
+              conflicts.length > 0
+                ? `Synced with a change made elsewhere just now — ${conflicts.length} value${
+                    conflicts.length === 1 ? "" : "s"
+                  } overlapped and kept the most recent edit.`
+                : "Synced with a change made elsewhere just now — nothing was lost."
+            );
+          }
+        } catch (e) {
+          /* if checking remote fails, fall back to saving local as-is */
         }
-      } catch (e) {
-        /* if checking remote fails, fall back to saving local as-is */
-      }
 
-      const ok = await saveData(
-        toSave.accounts,
-        toSave.transactions,
-        toSave.categories,
-        toSave.budgetGroups,
-        toSave.plannedIncome,
-        toSave.incomeWarningDismissed,
-        toSave.hiddenBudgetMonths,
-        toSave.excludeUnassignedFromBudget
-      );
-      if (ok) {
-        baseSnapshotRef.current = toSave;
-        setRemoteChangeAvailable(false);
+        const ok = await saveData(
+          toSave.accounts,
+          toSave.transactions,
+          toSave.categories,
+          toSave.budgetGroups,
+          toSave.plannedIncome,
+          toSave.incomeWarningDismissed,
+          toSave.hiddenBudgetMonths,
+          toSave.excludeUnassignedFromBudget
+        );
+        if (ok) {
+          baseSnapshotRef.current = toSave;
+          setRemoteChangeAvailable(false);
+        }
+        setSaveError(ok ? null : "Your last change couldn't be saved locally — it may not persist after reload.");
+      } finally {
+        savingRef.current = false;
       }
-      setSaveError(ok ? null : "Your last change couldn't be saved locally — it may not persist after reload.");
     },
     []
   );
