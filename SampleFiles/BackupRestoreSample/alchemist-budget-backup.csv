@@ -1,0 +1,12 @@
+Row Type,Item Type,Name,Budget Amount,Budget Period,Budget Type,Accumulate Target,Group,Members,Period,Amount
+Settings,,,,,,,,,,2700
+Category,Category,Rent,1100,monthly,spend,,,,,
+Category,Category,Groceries,240,monthly,spend,,,,,
+Category,Category,Silverline Trolley Pass,75,monthly,spend,,,,,
+Category,Category,Guild Apprenticeship Debt,210,monthly,spend,,,,,
+Category,Category,Dining Out,50,monthly,spend,,,,,
+Category,Category,Almanac Subscription,20,monthly,spend,,,,,
+Category,Category,Alchemical Supplies Fund,170,monthly,accumulate,1800,,,,
+Group,Group,Household Overhead,220,monthly,spend,,,Hearthglow Utilities|Safehold Insurance|Whisperwire Messenger Service,,
+Override,Category,Alchemical Supplies Fund,,,,,,,2026-06-01,86
+Override,Category,Alchemical Supplies Fund,,,,,,,2026-07-01,210
