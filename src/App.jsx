@@ -1283,6 +1283,54 @@ function computeDuplicates(transactions) {
   return { dupIds, groupByKey, keyByTxId };
 }
 
+// For every currently-uncategorized transaction, suggest a category based
+// on the most common category among the 10 most recent OTHER transactions
+// that share the exact same (trimmed, case-insensitive) description and
+// are themselves confirmed — actually categorized by a person, not just
+// carrying an earlier unconfirmed suggestion. That last part matters: if
+// a wrong guess could feed the next guess, mistakes would compound
+// instead of getting corrected. This never touches categoryId itself —
+// it's a pure, read-only suggestion the UI overlays on top of a
+// genuinely uncategorized transaction, so nothing here changes what
+// counts as "uncategorized" anywhere else in the app until a person
+// actually confirms it.
+function buildCategorySuggestions(transactions, categories) {
+  const validCategoryIds = new Set(categories.map((c) => c.id));
+  const byDescription = new Map();
+  transactions.forEach((t) => {
+    if (!t.categoryId || !validCategoryIds.has(t.categoryId)) return;
+    const norm = (t.description || "").trim().toLowerCase();
+    if (!norm) return;
+    if (!byDescription.has(norm)) byDescription.set(norm, []);
+    byDescription.get(norm).push(t);
+  });
+  byDescription.forEach((list) => list.sort((a, b) => (a.date < b.date ? 1 : a.date > b.date ? -1 : 0)));
+
+  const suggestionByTxnId = new Map();
+  transactions.forEach((t) => {
+    if (t.categoryId) return;
+    const norm = (t.description || "").trim().toLowerCase();
+    if (!norm) return;
+    const candidates = (byDescription.get(norm) || []).slice(0, 10);
+    if (candidates.length === 0) return;
+    const counts = {};
+    candidates.forEach((c) => {
+      counts[c.categoryId] = (counts[c.categoryId] || 0) + 1;
+    });
+    let best = null;
+    let bestCount = 0;
+    candidates.forEach((c) => {
+      const n = counts[c.categoryId];
+      if (n > bestCount) {
+        bestCount = n;
+        best = c.categoryId;
+      }
+    });
+    if (best) suggestionByTxnId.set(t.id, best);
+  });
+  return suggestionByTxnId;
+}
+
 /* ------------------------------------------------------------------ */
 /* Styles                                                               */
 /* ------------------------------------------------------------------ */
@@ -1704,6 +1752,26 @@ const STYLES = `
   color: var(--ink);
   max-width: 150px;
 }
+.category-cell { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.category-select.suggested {
+  border: 1px dashed var(--accent);
+  background: var(--accent-tint);
+  color: var(--accent);
+  font-style: italic;
+}
+.suggested-confirm-btn {
+  border: 1px solid var(--accent);
+  color: var(--accent);
+  background: none;
+  border-radius: var(--radius);
+  font-size: 10.5px;
+  padding: 3px 6px;
+  line-height: 1.2;
+  cursor: pointer;
+  white-space: nowrap;
+  font-family: inherit;
+}
+.suggested-confirm-btn:hover { background: var(--accent-tint); }
 .tx-table td.desc-cell {
   max-width: 200px;
   overflow: hidden;
@@ -2851,7 +2919,7 @@ function CategoriesView({ categories, transactions, onAdd, onRename, onDelete, o
 /* Transactions view                                                    */
 /* ------------------------------------------------------------------ */
 
-function TransactionRow({ t, duplicateInfo, expanded, onToggleExpand, allTransactions, categories, onUpdate, onDelete }) {
+function TransactionRow({ t, duplicateInfo, expanded, onToggleExpand, allTransactions, categories, onUpdate, onDelete, suggestedCategoryId }) {
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState({
     date: t.date || "",
@@ -2982,17 +3050,36 @@ function TransactionRow({ t, duplicateInfo, expanded, onToggleExpand, allTransac
           )}
         </td>
         <td data-label="Category">
-          <select
-            value={t.categoryId || ""}
-            onChange={(e) => onUpdate(t.id, { categoryId: e.target.value || null })}
-          >
-            <option value="">Uncategorized</option>
-            {categories.map((c) => (
-              <option key={c.id} value={c.id}>
-                {c.name}
-              </option>
-            ))}
-          </select>
+          {(() => {
+            const isSuggestion = !t.categoryId && suggestedCategoryId;
+            return (
+              <div className="category-cell">
+                <select
+                  className={isSuggestion ? "category-select suggested" : "category-select"}
+                  value={t.categoryId || (isSuggestion ? suggestedCategoryId : "")}
+                  onChange={(e) => onUpdate(t.id, { categoryId: e.target.value || null })}
+                  title={isSuggestion ? "Suggested based on how you've categorized this before — pick a category to confirm or change it" : undefined}
+                >
+                  <option value="">Uncategorized</option>
+                  {categories.map((c) => (
+                    <option key={c.id} value={c.id}>
+                      {c.name}
+                    </option>
+                  ))}
+                </select>
+                {isSuggestion && (
+                  <button
+                    type="button"
+                    className="suggested-confirm-btn"
+                    title="Accept this suggested category"
+                    onClick={() => onUpdate(t.id, { categoryId: suggestedCategoryId })}
+                  >
+                    ✓ Suggested
+                  </button>
+                )}
+              </div>
+            );
+          })()}
         </td>
         <td className="no-label-cell">
           {isDup && (
@@ -3304,6 +3391,11 @@ function TransactionsView({ transactions, accounts, categories, duplicateInfo, o
   const [dateTo, setDateTo] = useState("");
   const [filterBatchId, setFilterBatchId] = useState("all");
 
+  const categorySuggestions = useMemo(
+    () => buildCategorySuggestions(transactions, categories),
+    [transactions, categories]
+  );
+
   // The last several distinct uploads, newest first — surfaced by date/
   // account/count so a person can jump straight to "what I just
   // imported" without ever seeing or needing the underlying batch id.
@@ -3480,6 +3572,7 @@ function TransactionsView({ transactions, accounts, categories, duplicateInfo, o
                 categories={categories}
                 onUpdate={onUpdate}
                 onDelete={onDelete}
+                suggestedCategoryId={categorySuggestions.get(t.id) || null}
               />
             ))}
             {filtered.length === 0 && (
@@ -3507,6 +3600,10 @@ function PostUploadCategorizeView({ transactions, batchId, accountName, categori
     [transactions, batchId]
   );
   const uncategorizedCount = batchTransactions.filter((t) => !t.categoryId).length;
+  const categorySuggestions = useMemo(
+    () => buildCategorySuggestions(transactions, categories),
+    [transactions, categories]
+  );
 
   if (batchTransactions.length === 0) {
     return (
@@ -3568,6 +3665,7 @@ function PostUploadCategorizeView({ transactions, batchId, accountName, categori
                 categories={categories}
                 onUpdate={onUpdate}
                 onDelete={onDelete}
+                suggestedCategoryId={categorySuggestions.get(t.id) || null}
               />
             ))}
           </tbody>
