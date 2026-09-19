@@ -89,11 +89,13 @@ export default function DisclosureGate({ children }) {
             <li style={{ marginBottom: 10 }}>
               <strong>No uptime or data-loss guarantees.</strong> This runs on free-tier infrastructure with no
               formal backups. Please don't treat it as your only copy of anything important. Exporting your data
-              periodically from the Backup tab is a good habit.
+              periodically from the Backup tab is a good habit, and the app allows mass reupload via the backkup page as well.
             </li>
             <li style={{ marginBottom: 0 }}>
-              <strong>Want your account and data fully deleted?</strong> There's no self-service delete yet,
-              email <strong>{CONTACT_EMAIL}</strong> and it'll be taken care of.
+              <strong>Want your account and data fully deleted?</strong> Inside of "Settings" on the bottom right, 
+              the "Delete Account" button will permanently delete your acccount and remove all data from the database.
+              Please be aware that because it deletes all data from the database, this is irreversible. You may want to create
+              a backup of all your data first.
             </li>
           </ul>
         </div>
