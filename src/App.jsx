@@ -1909,6 +1909,7 @@ const STYLES = `
 
 .mobile-topbar { display: none; }
 .sidebar-backdrop { display: none; }
+.mobile-expand-toggle { display: none; }
 
 @media (max-width: 760px) {
   .app-shell { grid-template-columns: 1fr; }
@@ -1980,6 +1981,15 @@ const STYLES = `
   .account-card .figures { text-align: left; margin-right: 0; }
   .account-card .row-actions { flex-wrap: wrap; }
 
+  /* Category cards collapse to just a name and count by default — the
+     exclude/income checkboxes and the merge/delete actions only take
+     space once the chevron is tapped. */
+  .category-card-info { width: 100%; }
+  .category-card .category-extra { display: none; }
+  .category-card .category-extra.mobile-expanded { display: block; }
+  .category-card .category-actions { display: none; }
+  .category-card .category-actions.mobile-expanded { display: flex; margin-top: 10px; }
+
   /* Transactions table -> stacked cards. Each <td> becomes its own line,
      labeled via the data-label attribute set in TransactionRow, instead
      of scrolling a wide table sideways on a narrow screen. */
@@ -2006,6 +2016,37 @@ const STYLES = `
   .tx-table td input[type="text"], .tx-table td input[type="date"] { width: 100% !important; box-sizing: border-box; }
   .tx-table select { max-width: none; width: 100%; box-sizing: border-box; }
   .dup-detail-row td { padding: 10px 12px !important; }
+
+  /* Collapsed-by-default transaction rows: a compact one-line summary is
+     always visible; the existing, fully-detailed row (unchanged from
+     desktop — same editing, same category picker) is hidden until the
+     chevron is tapped, so nothing about how a transaction is edited has
+     to be built or maintained twice. */
+  .tx-table tr.tx-row-compact { padding: 10px 12px; cursor: pointer; }
+  .tx-table tr.tx-row-full { display: none; }
+  .tx-table tr.tx-row-full.mobile-expanded { display: block; margin-top: -10px; }
+  .tx-table tr.tx-row-compact td { padding: 0; border-bottom: none; }
+  .tx-compact-line { display: flex; align-items: center; gap: 8px; }
+  .tx-compact-date { font-size: 11.5px; color: var(--ink-muted); flex-shrink: 0; white-space: nowrap; }
+  .tx-compact-desc { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13.5px; }
+  .tx-compact-amount { flex-shrink: 0; font-weight: 600; font-size: 13.5px; }
+  .tx-compact-subline { margin-top: 3px; font-size: 11.5px; color: var(--ink-muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .tx-compact-suggested { color: var(--accent); font-style: italic; }
+  .mobile-expand-toggle {
+    flex-shrink: 0;
+    width: 24px;
+    height: 24px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    background: var(--panel);
+    color: var(--ink-muted);
+    font-size: 10px;
+    padding: 0;
+    cursor: pointer;
+  }
 }
 `;
 
@@ -2706,6 +2747,7 @@ function CategoryCard({ category, categories, txCount, transactions, onRename, o
   const [merging, setMerging] = useState(false);
   const [mergeTargetId, setMergeTargetId] = useState("");
   const [mergeConfirming, setMergeConfirming] = useState(false);
+  const [mobileExpanded, setMobileExpanded] = useState(false);
 
   const otherCategories = categories.filter((c) => c.id !== category.id);
 
@@ -2734,8 +2776,8 @@ function CategoryCard({ category, categories, txCount, transactions, onRename, o
   const mergeTarget = otherCategories.find((c) => c.id === mergeTargetId);
 
   return (
-    <div className="account-card">
-      <div>
+    <div className="account-card category-card">
+      <div className="category-card-info">
         {editing ? (
           <div className="row-actions">
             <input
@@ -2761,29 +2803,40 @@ function CategoryCard({ category, categories, txCount, transactions, onRename, o
             <button className="btn btn-ghost btn-sm" onClick={startEdit}>
               Rename
             </button>
+            <button
+              type="button"
+              className="mobile-expand-toggle"
+              style={{ marginLeft: "auto" }}
+              onClick={() => setMobileExpanded((v) => !v)}
+              aria-label={mobileExpanded ? "Show less" : "Show more"}
+            >
+              {mobileExpanded ? "▲" : "▼"}
+            </button>
           </div>
         )}
         <div className="meta">
           {txCount} transaction{txCount === 1 ? "" : "s"}
         </div>
-        <label className="radio-option" style={{ marginTop: 6, fontSize: 12.5, color: "var(--ink-muted)" }}>
-          <input
-            type="checkbox"
-            checked={!!category.excluded}
-            onChange={(e) => onToggleExcluded(category.id, e.target.checked)}
-          />
-          Exclude from totals &amp; reports (e.g. transfers between your own accounts)
-        </label>
-        <label className="radio-option" style={{ marginTop: 4, fontSize: 12.5, color: "var(--ink-muted)" }}>
-          <input
-            type="checkbox"
-            checked={!!category.isIncome}
-            onChange={(e) => onToggleIsIncome(category.id, e.target.checked)}
-          />
-          This is income (paycheck, etc.) — never counts as unassigned spending
-        </label>
+        <div className={"category-extra" + (mobileExpanded ? " mobile-expanded" : "")}>
+          <label className="radio-option" style={{ marginTop: 6, fontSize: 12.5, color: "var(--ink-muted)" }}>
+            <input
+              type="checkbox"
+              checked={!!category.excluded}
+              onChange={(e) => onToggleExcluded(category.id, e.target.checked)}
+            />
+            Exclude from totals &amp; reports (e.g. transfers between your own accounts)
+          </label>
+          <label className="radio-option" style={{ marginTop: 4, fontSize: 12.5, color: "var(--ink-muted)" }}>
+            <input
+              type="checkbox"
+              checked={!!category.isIncome}
+              onChange={(e) => onToggleIsIncome(category.id, e.target.checked)}
+            />
+            This is income (paycheck, etc.) — never counts as unassigned spending
+          </label>
+        </div>
       </div>
-      <div className="row-actions">
+      <div className={"row-actions category-actions" + (mobileExpanded ? " mobile-expanded" : "")}>
         {merging ? (
           mergeConfirming ? (
             <span className="confirm-inline">
@@ -2929,8 +2982,12 @@ function TransactionRow({ t, duplicateInfo, expanded, onToggleExpand, allTransac
     budgetPeriodOverride: t.budgetPeriodOverride || "",
   });
   const [confirmingDelete, setConfirmingDelete] = useState(false);
+  const [mobileExpanded, setMobileExpanded] = useState(false);
 
   const isDup = duplicateInfo.dupIds.has(t.id);
+  const categoryName = t.categoryId ? categories.find((c) => c.id === t.categoryId)?.name || "Unknown" : null;
+  const suggestedName = suggestedCategoryId ? categories.find((c) => c.id === suggestedCategoryId)?.name || null : null;
+  const primaryAmount = t.amountOut != null ? -t.amountOut : t.amountIn != null ? t.amountIn : null;
 
   function startEdit() {
     setDraft({
@@ -2963,7 +3020,41 @@ function TransactionRow({ t, duplicateInfo, expanded, onToggleExpand, allTransac
 
   return (
     <>
-      <tr>
+      <tr className="tx-row-compact" onClick={() => setMobileExpanded((e) => !e)}>
+        <td colSpan={8}>
+          <div className="tx-compact-line">
+            <span className="tx-compact-date">{formatDateDisplay(t.date)}</span>
+            <span className="tx-compact-desc">{t.description || "—"}</span>
+            <span className={"tx-compact-amount " + (primaryAmount == null ? "" : primaryAmount < 0 ? "money-out" : "money-in")}>
+              {primaryAmount == null ? "—" : formatMoney(primaryAmount)}
+            </span>
+            <button
+              type="button"
+              className="mobile-expand-toggle"
+              onClick={(e) => {
+                e.stopPropagation();
+                setMobileExpanded((v) => !v);
+              }}
+              aria-label={mobileExpanded ? "Show less" : "Show more"}
+            >
+              {mobileExpanded ? "▲" : "▼"}
+            </button>
+          </div>
+          <div className="tx-compact-subline">
+            {categoryName ? (
+              categoryName
+            ) : suggestedName ? (
+              <span className="tx-compact-suggested">Suggested: {suggestedName}</span>
+            ) : (
+              <span className="muted-cell">Uncategorized</span>
+            )}
+            {" · "}
+            {t.accountName}
+            {isDup && <span className="badge" style={{ marginLeft: 6 }}>possible duplicate</span>}
+          </div>
+        </td>
+      </tr>
+      <tr className={"tx-row-full" + (mobileExpanded ? " mobile-expanded" : "")}>
         <td data-label="Date">
           {editing ? (
             <>
@@ -5964,6 +6055,13 @@ function App({ householdName } = {}) {
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const baseSnapshotRef = useRef(null);
   const savingRef = useRef(false);
+
+  // Keep the browser tab title in sync with whichever page is showing —
+  // the same VIEW_TITLES map the mobile top bar already uses, so there's
+  // one source of truth for a view's display name rather than two.
+  useEffect(() => {
+    document.title = VIEW_TITLES[view] ? `${VIEW_TITLES[view]} | Coinrose` : "Coinrose";
+  }, [view]);
 
   useEffect(() => {
     let cancelled = false;
