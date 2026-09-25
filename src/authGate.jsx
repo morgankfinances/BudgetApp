@@ -355,6 +355,17 @@ export default function AuthGate({ children }) {
     return () => listener.subscription.unsubscribe();
   }, []);
 
+  // Tab title for the screens this file shows. Once someone is signed in
+  // (and not mid-password-reset), the app sets its own titles, so this
+  // leaves the title alone.
+  useEffect(() => {
+    if (session && !recovering) return;
+    let page = null; // still checking the session
+    if (session && recovering) page = "Choose a New Password";
+    else if (session === null) page = mode === "forgot" ? "Reset Password" : "Sign In";
+    document.title = page ? `${page} | Coinrose` : "Coinrose";
+  }, [session, recovering, mode]);
+
   function switchMode(next) {
     setMode(next);
     setError(null);

@@ -1188,6 +1188,18 @@ export default function HouseholdGate({ children }) {
     checkMembership();
   }, []);
 
+  // Tab title for the household screens. Once the app is showing
+  // ("ready"), the app sets its own titles by page.
+  useEffect(() => {
+    if (status === "ready") return;
+    const page = {
+      pending: "Waiting for Approval",
+      denied: "Request Not Approved",
+      none: createdCode ? "Household Created" : "Set Up Your Household",
+    }[status];
+    document.title = page ? `${page} | Coinrose` : "Coinrose";
+  }, [status, createdCode]);
+
   // Poll for a decision while waiting on approval.
   useEffect(() => {
     if (status !== "pending") return;

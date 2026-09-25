@@ -11,7 +11,7 @@
 // Uses the same page layout as the sign-in screen (logo, wordmark, card),
 // shared from authGate.jsx so the two screens always match.
 
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import { AuthShell } from "./authGate.jsx";
 
 const ACK_KEY = "ledger-disclosure-ack-v1";
@@ -29,6 +29,10 @@ function readAcknowledged() {
 
 export default function DisclosureGate({ children }) {
   const [acknowledged, setAcknowledged] = useState(readAcknowledged);
+
+  useEffect(() => {
+    if (!acknowledged) document.title = "Before You Get Started | Coinrose";
+  }, [acknowledged]);
 
   function handleAccept() {
     try {
