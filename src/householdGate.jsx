@@ -109,34 +109,72 @@ const THEME_VARS_CSS = `
 .theme-swatch-light-slate { background: linear-gradient(135deg, #F3F5F8 50%, #2B6CB0 50%); }
 .theme-swatch-dark-midnight { background: linear-gradient(135deg, #10131B 50%, #7B9EE0 50%); }
 
-/* Themed logo: every logo spot holds both images, and only the one that
-   matches the current theme shows. Any theme whose id starts with
-   "dark-" gets the gold coin, so a future dark theme is covered too. */
+/* Themed art: every spot holds both the black and the gold image, and
+   only the one matching the current theme shows. Any theme whose id
+   starts with "dark-" gets the gold version, so a future dark theme is
+   covered too. */
 .logo-dark { display: none; }
 :root[data-theme^="dark-"] .logo-light { display: none; }
 :root[data-theme^="dark-"] .logo-dark { display: inline-block; }
+
+/* Loading indicator: the compass rose, turning slowly. It stays still for
+   anyone whose device is set to reduce motion. */
+.coinrose-loading { display: flex; flex-direction: column; align-items: center; gap: 12px; }
+.coinrose-loading-star { width: 44px; height: 44px; animation: coinrose-spin 8s linear infinite; }
+.coinrose-loading-label { font-family: 'Work Sans', -apple-system, sans-serif; font-size: 14px; color: var(--ink-muted); }
+@keyframes coinrose-spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { .coinrose-loading-star { animation: none; } }
 `;
 
-// Logo images, both in public/. File names are case-sensitive on
-// Vercel, so these must match the files exactly.
+// Brand images, all in public/. File names are case-sensitive on Vercel,
+// so these must match the files exactly.
 export const LOGO_LIGHT_SRC = "/Black_Coin.svg";
 export const LOGO_DARK_SRC = "/Gold_Coin.svg";
+export const STAR_LIGHT_SRC = "/Black_Star.svg";
+export const STAR_DARK_SRC = "/Gold_Star.svg";
+export const DECO_RING_SRC = "/Gold_Deco_Ring.svg"; // gold only: used faintly, so it suits every theme
 
-// If a logo file is ever missing, hide it instead of showing a broken-
+// If an image file is ever missing, hide it instead of showing a broken-
 // image icon. (An inline style wins over the theme rules above.)
-function hideMissingLogo(e) {
+function hideMissingImage(e) {
   e.currentTarget.style.display = "none";
 }
 
-// The app's logo, switching automatically with the theme: the black coin
-// on the light themes, the gold coin on the dark theme. Used by the
-// sidebar, the mobile top bar, and the sign-in and disclosure screens.
-export function ThemedLogo({ className = "" }) {
+// An image that switches with the theme: the black version on the light
+// themes, the gold version on the dark theme.
+function ThemedImage({ lightSrc, darkSrc, className = "" }) {
   return (
     <>
-      <img className={`${className} logo-light`} src={LOGO_LIGHT_SRC} alt="" onError={hideMissingLogo} />
-      <img className={`${className} logo-dark`} src={LOGO_DARK_SRC} alt="" onError={hideMissingLogo} />
+      <img className={`${className} logo-light`} src={lightSrc} alt="" onError={hideMissingImage} />
+      <img className={`${className} logo-dark`} src={darkSrc} alt="" onError={hideMissingImage} />
     </>
+  );
+}
+
+// The coin logo. Used by the sidebar, the mobile top bar, and the sign-in
+// and disclosure screens.
+export function ThemedLogo({ className = "" }) {
+  return <ThemedImage lightSrc={LOGO_LIGHT_SRC} darkSrc={LOGO_DARK_SRC} className={className} />;
+}
+
+// The compass-rose star. Used in loading screens, empty states, and
+// Overview's "nothing flagged" message.
+export function ThemedStar({ className = "" }) {
+  return <ThemedImage lightSrc={STAR_LIGHT_SRC} darkSrc={STAR_DARK_SRC} className={className} />;
+}
+
+// The decorative ring behind the sign-in and disclosure cards.
+export function DecoRing({ className = "" }) {
+  return <img className={className} src={DECO_RING_SRC} alt="" aria-hidden="true" onError={hideMissingImage} />;
+}
+
+// Every loading screen in the app uses this: the turning compass rose.
+export function LoadingIndicator({ label = "Loading…" }) {
+  return (
+    <div className="coinrose-loading" role="status">
+      <ThemedStar className="coinrose-loading-star" />
+      <div className="coinrose-loading-label">{label}</div>
+    </div>
   );
 }
 
@@ -1186,7 +1224,11 @@ export default function HouseholdGate({ children }) {
   }
 
   if (status === "checking") {
-    return <div style={boxStyle}>Loading…</div>;
+    return (
+      <div style={boxStyle}>
+        <LoadingIndicator />
+      </div>
+    );
   }
 
   if (status === "pending") {

@@ -13,9 +13,9 @@
 // Import "./storageAdapter.js" separately (once, at app startup) before
 // this renders App, so window.storage is ready when App loads data.
 
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useLayoutEffect } from "react";
 import { supabase } from "./supabaseClient.js";
-import { applySavedTheme, ThemedLogo } from "./householdGate.jsx";
+import { applySavedTheme, ThemedLogo, DecoRing, LoadingIndicator } from "./householdGate.jsx";
 
 const MIN_PASSWORD_LENGTH = 12;
 
@@ -49,6 +49,8 @@ const AUTH_STYLES = `
 @import url('https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,500;9..144,600&family=Work+Sans:wght@400;500;600;700&display=swap');
 
 .auth-root {
+  position: relative;
+  overflow: hidden;
   min-height: 100vh;
   display: flex;
   align-items: center;
@@ -60,7 +62,21 @@ const AUTH_STYLES = `
   font-family: 'Work Sans', -apple-system, sans-serif;
 }
 .auth-root * { box-sizing: border-box; }
-.auth-column { width: min(380px, 100%); }
+.auth-column { width: min(380px, 100%); position: relative; z-index: 1; }
+
+/* Faint gold ring behind the card: decoration only. */
+.auth-deco-ring {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: min(760px, 150vw);
+  height: auto;
+  transform: translate(-50%, -50%);
+  opacity: 0.12;
+  pointer-events: none;
+  z-index: 0;
+}
+:root[data-theme^="dark-"] .auth-deco-ring { opacity: 0.18; }
 .auth-column.wide { width: min(520px, 100%); }
 
 .auth-body { font-size: 14px; line-height: 1.6; color: var(--ink-muted, #62685E); }
@@ -206,7 +222,6 @@ const AUTH_STYLES = `
   margin: 18px 4px 0;
   line-height: 1.5;
 }
-.auth-loading { color: var(--ink-muted, #62685E); font-size: 14px; }
 `;
 
 // The page layout shared by the sign-in screens and disclosureGate.jsx:
@@ -215,6 +230,7 @@ export function AuthShell({ children, tagline = "Your household's money, organiz
   return (
     <div className="auth-root">
       <style>{AUTH_STYLES}</style>
+      <DecoRing className="auth-deco-ring" />
       <div className={"auth-column" + (wide ? " wide" : "")}>
         <div className="auth-brand">
           <ThemedLogo className="auth-logo" />
@@ -314,8 +330,13 @@ export default function AuthGate({ children }) {
   const [error, setError] = useState(null);
   const [busy, setBusy] = useState(false);
 
-  useEffect(() => {
+  // Apply the saved theme before the first frame is drawn, so only the
+  // matching version of each themed image ever appears.
+  useLayoutEffect(() => {
     applySavedTheme();
+  }, []);
+
+  useEffect(() => {
     supabase.auth.getSession().then(({ data }) => setSession(data.session));
     const { data: listener } = supabase.auth.onAuthStateChange((event, nextSession) => {
       if (event === "PASSWORD_RECOVERY") setRecovering(true);
@@ -380,7 +401,7 @@ export default function AuthGate({ children }) {
     return (
       <div className="auth-root">
         <style>{AUTH_STYLES}</style>
-        <p className="auth-loading">Loading…</p>
+        <LoadingIndicator />
       </div>
     );
   }

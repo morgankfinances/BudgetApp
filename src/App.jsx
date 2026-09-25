@@ -2,7 +2,7 @@ import React, { useState, useEffect, useMemo, useCallback, useRef } from "react"
 import Papa from "papaparse";
 import * as XLSX from "xlsx";
 import { BarChart, Bar, PieChart, Pie, Cell, ReferenceLine, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from "recharts";
-import { ThemedLogo } from "./householdGate.jsx";
+import { ThemedLogo, ThemedStar, LoadingIndicator } from "./householdGate.jsx";
 
 /* ------------------------------------------------------------------ */
 /* Storage                                                             */
@@ -1494,15 +1494,16 @@ const STYLES = `
   font-size: 19px;
   font-weight: 600;
   display: flex;
-  align-items: center;
+  flex-direction: column;
+  align-items: flex-start;
   gap: 10px;
   line-height: 1.25;
   word-break: break-word;
 }
 
 .sidebar-brand-logo {
-  width: 32px;
-  height: 32px;
+  width: 44px;
+  height: 44px;
   object-fit: contain;
   flex-shrink: 0;
 }
@@ -1871,6 +1872,8 @@ const STYLES = `
   text-align: center; padding: 50px 20px; color: var(--ink-muted);
 }
 .empty-state h2 { color: var(--ink); font-size: 19px; margin-bottom: 8px; }
+.empty-state-star { width: 56px; height: 56px; margin-bottom: 14px; }
+.inline-star { width: 18px; height: 18px; flex-shrink: 0; }
 .empty-state p { max-width: 42ch; margin: 0 auto 18px; font-size: 14px; }
 
 .toast {
@@ -2120,6 +2123,9 @@ function DualScrollPanel({ children }) {
 function EmptyState({ title, body, ctaLabel, onCta }) {
   return (
     <div className="empty-state">
+      <div>
+        <ThemedStar className="empty-state-star" />
+      </div>
       <h2>{title}</h2>
       <p>{body}</p>
       {ctaLabel && (
@@ -3368,7 +3374,10 @@ function OverviewView({ transactions, categories, budgetGroups, onNavigate }) {
         <div className="panel">
           <h3 style={{ marginTop: 0, marginBottom: 4, fontSize: 15 }}>Needs attention</h3>
           {needsAttentionCount === 0 ? (
-            <p className="hint">Nothing flagged right now — budgets are on track and everything's categorized.</p>
+            <p className="hint" style={{ display: "flex", alignItems: "center", gap: 8 }}>
+              <ThemedStar className="inline-star" />
+              Nothing flagged right now — budgets are on track and everything's categorized.
+            </p>
           ) : (
             <div style={{ display: "flex", flexDirection: "column", gap: 8, marginTop: 10 }}>
               {uncategorizedCount > 0 && (
@@ -6622,7 +6631,9 @@ function App({ householdName } = {}) {
     return (
       <div className="ledger-root">
         <style>{STYLES}</style>
-        <div className="loading-screen">Loading your ledger…</div>
+        <div className="loading-screen">
+          <LoadingIndicator label="Loading your ledger…" />
+        </div>
       </div>
     );
   }
