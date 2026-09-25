@@ -1924,6 +1924,48 @@ const STYLES = `
    screen (see the mobile rules below). */
 .coinrose-bg-ring.beside-sidebar { left: calc(216px + (100vw - 216px) / 2); }
 
+/* Tutorial: a dialog card near the bottom of the screen with a light
+   dimming layer, so the page it's describing stays visible behind it. */
+.tutorial-scrim {
+  position: fixed;
+  inset: 0;
+  z-index: 250;
+  background: rgba(0, 0, 0, 0.28);
+}
+.tutorial-card {
+  position: fixed;
+  bottom: 24px;
+  left: calc(216px + (100vw - 216px) / 2);
+  transform: translateX(-50%);
+  width: min(480px, calc(100vw - 32px));
+  background: var(--panel);
+  color: var(--ink);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 18px 20px 16px;
+  box-shadow: 0 16px 40px rgba(0, 0, 0, 0.25);
+}
+.tutorial-top { display: flex; justify-content: space-between; align-items: baseline; }
+.tutorial-count { font-size: 11.5px; font-weight: 600; letter-spacing: 0.04em; text-transform: uppercase; color: var(--ink-muted); }
+.ledger-root .tutorial-skip {
+  background: none; border: none; padding: 0; font-family: inherit; font-size: 12.5px;
+  font-weight: 600; color: var(--ink-muted); cursor: pointer; text-decoration: underline;
+}
+.tutorial-progress { height: 4px; border-radius: 999px; background: var(--subtle-bg); overflow: hidden; margin: 10px 0 14px; }
+.tutorial-progress-fill { height: 100%; background: var(--accent); border-radius: 999px; transition: width 0.2s ease; }
+.ledger-root .tutorial-title { font-size: 20px; margin-bottom: 8px; }
+.tutorial-body { font-size: 14px; line-height: 1.6; color: var(--ink-muted); margin: 0 0 16px; }
+.tutorial-actions { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.ledger-root .tutorial-btn {
+  font-family: inherit; font-size: 13.5px; font-weight: 600; padding: 8px 14px;
+  border-radius: var(--radius); cursor: pointer;
+}
+.ledger-root .tutorial-btn-primary { background: var(--accent); color: #fff; border: 1px solid var(--accent); }
+.ledger-root .tutorial-btn-primary:hover { background: var(--accent-hover); }
+.ledger-root .tutorial-btn-secondary { background: var(--panel); color: var(--ink); border: 1px solid var(--border); }
+/* The dark theme's accent is a light blue, where white text is hard to read. */
+:root[data-theme^="dark-"] .ledger-root .tutorial-btn-primary { color: #10131B; }
+
 .mobile-topbar { display: none; }
 .sidebar-backdrop { display: none; }
 .mobile-expand-toggle { display: none; }
@@ -2009,6 +2051,7 @@ const STYLES = `
   .budget-card { max-width: none; flex-basis: 100%; }
 
   .coinrose-bg-ring.beside-sidebar { left: 50%; }
+  .tutorial-card { left: 50%; bottom: 16px; }
 
   /* Account and category rows: stack instead of squeezing into one line */
   .account-card { flex-direction: column; align-items: flex-start; gap: 10px; }
@@ -6068,6 +6111,169 @@ function BackupView({ accounts, transactions, categories, budgetGroups, plannedI
 /* App                                                                  */
 /* ------------------------------------------------------------------ */
 
+/* ------------------------------------------------------------------ */
+/* Tutorial                                                             */
+/*                                                                      */
+/* A guided tour: a dialog card that walks through the app one page at  */
+/* a time, switching to each page as it goes so the real page shows     */
+/* behind the card. Starts automatically the first time someone uses    */
+/* the app on this browser, and can be replayed from Settings.          */
+/* ------------------------------------------------------------------ */
+
+const TUTORIAL_SEEN_KEY = "coinrose-tutorial-seen-v1";
+
+// Settings (householdGate.jsx) sends this signal to replay the tour. A
+// signal instead of an import keeps the two files from importing each
+// other in a loop.
+const TUTORIAL_EVENT = "coinrose:start-tutorial";
+
+function tutorialAlreadySeen() {
+  try {
+    return localStorage.getItem(TUTORIAL_SEEN_KEY) === "true";
+  } catch (e) {
+    return true; // storage unavailable: don't pop it up every visit
+  }
+}
+
+function markTutorialSeen() {
+  try {
+    localStorage.setItem(TUTORIAL_SEEN_KEY, "true");
+  } catch (e) {
+    /* ignore */
+  }
+}
+
+// Each step: the page to show behind the card, a title, and the text.
+const TUTORIAL_STEPS = [
+  {
+    view: "overview",
+    title: "Welcome to Coinrose",
+    body: "Coinrose brings your household's accounts together in one place, so you can see where your money goes and plan where it should go. This quick tour shows you around. You can skip it anytime and replay it later from Settings.",
+  },
+  {
+    view: "overview",
+    title: "Your Overview",
+    body: "This is your home page. Once you've added transactions, it shows this period's money in and out, your top spending categories, and anything that needs attention, like a budget running over or transactions waiting to be categorized.",
+  },
+  {
+    view: "overview",
+    title: "Getting around",
+    body: "Every page lives in the sidebar on the left, grouped into Ledger, Budgeting, and Data. On a phone, tap the ☰ button at the top of the screen to open it.",
+  },
+  {
+    view: "upload",
+    title: "Start by uploading a statement",
+    body: "Download a CSV file of your transactions from your bank or credit card's website, then upload it here. Coinrose guesses which columns hold the date, description, and amounts, and you confirm. Each bank account or card becomes its own account in Coinrose.",
+  },
+  {
+    view: "transactions",
+    title: "Categorize your transactions",
+    body: "Everything you upload lands here. Choose a category for each transaction from its dropdown. As you go, Coinrose learns from your choices and suggests categories for similar transactions, marked as suggested until you confirm them. Filters at the top find uncategorized transactions, a date range, or a recent upload.",
+  },
+  {
+    view: "categories",
+    title: "Shape your categories",
+    body: "Add, rename, or merge categories to match how you actually spend. Mark paychecks and other income as income, and exclude transfers between your own accounts so they don't count as spending.",
+  },
+  {
+    view: "reports",
+    title: "See where your money goes",
+    body: "Reports charts your spending by category over time. Choose weekly, monthly, or custom periods to match how you're paid, switch between bar and donut charts, and hide big, steady categories like rent to see everything else more clearly.",
+  },
+  {
+    view: "planning",
+    title: "Plan your budget",
+    body: "Enter the income you expect, then give categories a budget. A Spend budget is a limit that resets each period. An Accumulate budget saves toward a goal over time.",
+  },
+  {
+    view: "budgetGroups",
+    title: "Group related categories",
+    body: "Budget Groups let several categories share one budget, like Groceries and Dining Out under a single Food limit.",
+  },
+  {
+    view: "budget",
+    title: "Track your progress",
+    body: "Budget shows how each budget is doing this period, with progress bars, a performance chart, and a history of past periods.",
+  },
+  {
+    view: "backup",
+    title: "Keep a backup",
+    body: "Now and then, download a copy of your transactions and budget setup here. The same page can restore from those files if you ever need to.",
+  },
+  {
+    view: "overview",
+    title: "You're all set",
+    body: "Settings, in the bottom-right corner, is where you invite household members, choose a light or dark theme, set a password, and replay this tour.",
+  },
+];
+
+function TutorialDialog({ step, onBack, onNext, onSkip, onFinish, onUpload, showUpload }) {
+  const s = TUTORIAL_STEPS[step];
+  const isFirst = step === 0;
+  const isLast = step === TUTORIAL_STEPS.length - 1;
+  const nextRef = useRef(null);
+
+  // Keyboard: Escape skips; focus lands on the main button each step.
+  useEffect(() => {
+    nextRef.current?.focus();
+  }, [step]);
+  useEffect(() => {
+    function onKey(e) {
+      if (e.key === "Escape") onSkip();
+    }
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [onSkip]);
+
+  return (
+    <div className="tutorial-scrim">
+      <div className="tutorial-card" role="dialog" aria-modal="true" aria-labelledby="tutorial-title">
+        <div className="tutorial-top">
+          <span className="tutorial-count">
+            Step {step + 1} of {TUTORIAL_STEPS.length}
+          </span>
+          {!isLast && (
+            <button type="button" className="tutorial-skip" onClick={onSkip}>
+              Skip tour
+            </button>
+          )}
+        </div>
+        <div className="tutorial-progress">
+          <div className="tutorial-progress-fill" style={{ width: `${((step + 1) / TUTORIAL_STEPS.length) * 100}%` }} />
+        </div>
+        <h2 id="tutorial-title" className="tutorial-title">
+          {s.title}
+        </h2>
+        <p className="tutorial-body">{s.body}</p>
+        <div className="tutorial-actions">
+          {!isFirst && (
+            <button type="button" className="tutorial-btn tutorial-btn-secondary" onClick={onBack}>
+              Back
+            </button>
+          )}
+          <div style={{ flex: 1 }} />
+          {isLast ? (
+            <>
+              {showUpload && (
+                <button type="button" className="tutorial-btn tutorial-btn-secondary" onClick={onUpload}>
+                  Upload a statement
+                </button>
+              )}
+              <button ref={nextRef} type="button" className="tutorial-btn tutorial-btn-primary" onClick={onFinish}>
+                Finish
+              </button>
+            </>
+          ) : (
+            <button ref={nextRef} type="button" className="tutorial-btn tutorial-btn-primary" onClick={onNext}>
+              {isFirst ? "Start the tour" : "Next"}
+            </button>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function App({ householdName } = {}) {
   const [loaded, setLoaded] = useState(false);
   const [accounts, setAccounts] = useState([]);
@@ -6078,7 +6284,7 @@ function App({ householdName } = {}) {
   const [incomeWarningDismissed, setIncomeWarningDismissed] = useState(false);
   const [hiddenBudgetMonths, setHiddenBudgetMonths] = useState([]);
   const [excludeUnassignedFromBudget, setExcludeUnassignedFromBudget] = useState(false);
-  const [view, setView] = useState("upload");
+  const [view, setView] = useState("overview");
   const [saveError, setSaveError] = useState(null);
   const [toast, setToast] = useState(null);
   const [uploadKey, setUploadKey] = useState(0);
@@ -6087,8 +6293,37 @@ function App({ householdName } = {}) {
   const [syncing, setSyncing] = useState(false);
   const [activeUploadBatch, setActiveUploadBatch] = useState(null); // { batchId, accountName }
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+  const [tutorialStep, setTutorialStep] = useState(null); // null = tour not showing
   const baseSnapshotRef = useRef(null);
   const savingRef = useRef(false);
+
+  // Tutorial: start automatically the first time the app is used on this
+  // browser, once the data has loaded.
+  useEffect(() => {
+    if (loaded && !tutorialAlreadySeen()) setTutorialStep(0);
+  }, [loaded]);
+
+  // Tutorial: replay when Settings asks for it.
+  useEffect(() => {
+    function start() {
+      setTutorialStep(0);
+    }
+    window.addEventListener(TUTORIAL_EVENT, start);
+    return () => window.removeEventListener(TUTORIAL_EVENT, start);
+  }, []);
+
+  // Tutorial: show each step's page behind the card.
+  useEffect(() => {
+    if (tutorialStep === null) return;
+    setView(TUTORIAL_STEPS[tutorialStep].view);
+    setMobileMenuOpen(false);
+    window.scrollTo(0, 0);
+  }, [tutorialStep]);
+
+  const endTutorial = useCallback(() => {
+    markTutorialSeen();
+    setTutorialStep(null);
+  }, []);
 
   // Keep the browser tab title in sync with whichever page is showing —
   // the same VIEW_TITLES map the mobile top bar already uses, so there's
@@ -6105,7 +6340,6 @@ function App({ householdName } = {}) {
       applySnapshotToState(snap);
       baseSnapshotRef.current = snap;
       setLoaded(true);
-      if (snap.accounts.length > 0) setView("overview");
     });
     return () => {
       cancelled = true;
@@ -6905,6 +7139,24 @@ function App({ householdName } = {}) {
       </div>
 
       {toast && <div className="toast">{toast}</div>}
+
+      {tutorialStep !== null && (
+        <TutorialDialog
+          step={tutorialStep}
+          onBack={() => setTutorialStep((n) => Math.max(0, n - 1))}
+          onNext={() => setTutorialStep((n) => Math.min(TUTORIAL_STEPS.length - 1, n + 1))}
+          onSkip={() => {
+            endTutorial();
+            setView("overview");
+          }}
+          onFinish={endTutorial}
+          onUpload={() => {
+            endTutorial();
+            setView("upload");
+          }}
+          showUpload={accounts.length === 0}
+        />
+      )}
     </div>
   );
 }

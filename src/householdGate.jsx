@@ -1031,6 +1031,18 @@ function HouseholdPanel({ onClose, onDataChanged, theme, onThemeChange }) {
         <button
           style={{ ...buttonStyle, marginBottom: 8 }}
           onClick={() => {
+            // Close Settings, then ask the app to replay the tour. (A signal
+            // instead of an import keeps the files from importing each other
+            // in a loop.)
+            onClose();
+            window.dispatchEvent(new Event("coinrose:start-tutorial"));
+          }}
+        >
+          View tutorial
+        </button>
+        <button
+          style={{ ...buttonStyle, marginBottom: 8 }}
+          onClick={() => {
             // Close Settings, then ask disclosureGate.jsx to show the notice.
             // (A signal instead of an import keeps the two files from
             // importing each other in a loop.)
