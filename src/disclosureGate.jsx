@@ -138,12 +138,11 @@ function DisclosureNotice({ heading, buttonLabel, onButton }) {
               page as well.
             </li>
             <li>
-              <strong>Want your data deleted?</strong> In "Settings" on the bottom right, "Delete all my data"
-              permanently removes your household's accounts, transactions, and budgets from the database. It's
-              available when you're the only member of your household; if others share it, use "Leave this
-              household" instead. This is irreversible, so you may want to create a backup of all your data
-              first. That button doesn't remove your sign-in itself; to have your login removed as well, email
-              me at <a href={`mailto:${CONTACT_EMAIL}`}>{CONTACT_EMAIL}</a>.
+              <strong>Want your data deleted?</strong> In "Settings" on the bottom right, "Delete my account"
+              permanently deletes your login. If you're the only member of your household, it also deletes the
+              household and all of its data; if others share it, their data stays with them. This is
+              irreversible, so you may want to create a backup of all your data first. Questions? Email me at{" "}
+              <a href={`mailto:${CONTACT_EMAIL}`}>{CONTACT_EMAIL}</a>.
             </li>
           </ul>
         </div>

@@ -593,46 +593,101 @@ function HistorySection() {
   );
 }
 
-function MemberRow({ member, currentUserId, onRemove }) {
+const roleTagStyle = {
+  fontSize: 10.5,
+  fontWeight: 600,
+  textTransform: "uppercase",
+  letterSpacing: 0.4,
+  padding: "1px 6px",
+  borderRadius: 999,
+  border: "1px solid var(--border)",
+  color: "var(--ink-muted)",
+  marginLeft: 6,
+  whiteSpace: "nowrap",
+};
+
+// One person in the household. Owners get controls for everyone else
+// (change role, remove) and can step down themselves while another owner
+// exists; members just see the list.
+function MemberRow({ member, currentUserId, viewerIsOwner, ownerCount, onRemove, onSetRole }) {
   const [confirming, setConfirming] = useState(false);
   const isSelf = member.user_id === currentUserId;
+  const isOwner = member.role === "owner";
+  const canStepDown = isSelf && isOwner && ownerCount > 1;
 
   return (
-    <div style={rowStyle}>
-      <span>
-        {member.email}
-        {isSelf ? " (you)" : ""}
+    <div style={{ ...rowStyle, flexWrap: "wrap" }}>
+      <span style={{ display: "flex", alignItems: "center", flexWrap: "wrap", minWidth: 0 }}>
+        <span style={{ overflowWrap: "anywhere" }}>
+          {member.email}
+          {isSelf ? " (you)" : ""}
+        </span>
+        <span style={{ ...roleTagStyle, ...(isOwner ? { borderColor: "var(--accent)", color: "var(--accent)" } : {}) }}>
+          {isOwner ? "Owner" : "Member"}
+        </span>
       </span>
-      {!isSelf &&
-        (confirming ? (
-          <span style={{ display: "flex", gap: 6 }}>
+      {viewerIsOwner && !isSelf && !confirming && (
+        <span style={{ display: "flex", gap: 6 }}>
+          <button style={smallBtnStyle} onClick={() => onSetRole(member.user_id, isOwner ? "member" : "owner")}>
+            {isOwner ? "Make member" : "Make owner"}
+          </button>
+          <button style={smallBtnStyle} onClick={() => setConfirming(true)}>
+            Remove
+          </button>
+        </span>
+      )}
+      {viewerIsOwner && canStepDown && (
+        <button style={smallBtnStyle} onClick={() => onSetRole(member.user_id, "member")}>
+          Step down to member
+        </button>
+      )}
+      {confirming && (
+        <div style={{ width: "100%", marginTop: 8 }}>
+          <p style={{ fontSize: 12.5, color: "var(--ink-muted)", margin: "0 0 8px" }}>
+            <strong>Keep a copy:</strong> they get their own household with a copy of everything up to now.{" "}
+            <strong>Without a copy:</strong> they leave with nothing, and any household data stays only here.
+          </p>
+          <span style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
             <button
               style={{ ...smallBtnStyle, borderColor: "var(--danger)", color: "var(--danger)" }}
-              onClick={() => onRemove(member.user_id)}
+              onClick={() => onRemove(member.user_id, true)}
             >
-              Confirm
+              Remove, keep a copy
+            </button>
+            <button
+              style={{ ...smallBtnStyle, borderColor: "var(--danger)", color: "var(--danger)" }}
+              onClick={() => onRemove(member.user_id, false)}
+            >
+              Remove without a copy
             </button>
             <button style={smallBtnStyle} onClick={() => setConfirming(false)}>
               Cancel
             </button>
           </span>
-        ) : (
-          <button style={smallBtnStyle} onClick={() => setConfirming(true)}>
-            Remove
-          </button>
-        ))}
+        </div>
+      )}
     </div>
   );
 }
 
 function RequestRow({ request, onApprove, onDeny }) {
+  const [role, setRole] = useState("member");
   return (
-    <div style={rowStyle}>
-      <span>{request.requester_email || "Unknown"}</span>
-      <span style={{ display: "flex", gap: 6 }}>
+    <div style={{ ...rowStyle, flexWrap: "wrap" }}>
+      <span style={{ overflowWrap: "anywhere" }}>{request.requester_email || "Unknown"}</span>
+      <span style={{ display: "flex", gap: 6, alignItems: "center" }}>
+        <select
+          aria-label="Role for this person"
+          value={role}
+          onChange={(e) => setRole(e.target.value)}
+          style={{ ...smallBtnStyle, padding: "4px 6px" }}
+        >
+          <option value="member">As member</option>
+          <option value="owner">As owner</option>
+        </select>
         <button
           style={{ ...smallBtnStyle, borderColor: "var(--income)", color: "var(--income)" }}
-          onClick={() => onApprove(request.id)}
+          onClick={() => onApprove(request.id, role)}
         >
           Approve
         </button>
@@ -654,7 +709,7 @@ function RequestRow({ request, onApprove, onDeny }) {
 // joining, leaving, approving, or renaming.
 let settingsCache = null;
 
-function HouseholdPanel({ onClose, onDataChanged, theme, onThemeChange }) {
+function HouseholdPanel({ onClose, onDataChanged, onRoleKnown, theme, onThemeChange }) {
   const [household, setHousehold] = useState(settingsCache?.household ?? null);
   const [members, setMembers] = useState(settingsCache?.members ?? []);
   const [requests, setRequests] = useState(settingsCache?.requests ?? []);
@@ -670,6 +725,9 @@ function HouseholdPanel({ onClose, onDataChanged, theme, onThemeChange }) {
   const [deleteConfirming, setDeleteConfirming] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [deleteError, setDeleteError] = useState(null);
+  const [accountConfirming, setAccountConfirming] = useState(false);
+  const [accountDeleting, setAccountDeleting] = useState(false);
+  const [accountError, setAccountError] = useState(null);
   const [switchOpen, setSwitchOpen] = useState(false);
   const [switchCode, setSwitchCode] = useState("");
   const [switchConfirming, setSwitchConfirming] = useState(false);
@@ -727,6 +785,11 @@ function HouseholdPanel({ onClose, onDataChanged, theme, onThemeChange }) {
     load();
   }, []);
 
+  // Let the Settings button know whether to show the join-request badge.
+  useEffect(() => {
+    if (members.length > 0) onRoleKnown?.(viewerIsOwner);
+  }, [members, currentUserId]);
+
   async function handleRegenerate() {
     if (!household) return;
     setRegenerating(true);
@@ -750,9 +813,9 @@ function HouseholdPanel({ onClose, onDataChanged, theme, onThemeChange }) {
     });
   }
 
-  async function handleApprove(requestId) {
+  async function handleApprove(requestId, role) {
     setError(null);
-    const { error } = await supabase.rpc("approve_join_request", { p_request_id: requestId });
+    const { error } = await supabase.rpc("approve_join_request", { p_request_id: requestId, p_role: role });
     if (error) {
       setError(error.message);
       return;
@@ -772,12 +835,28 @@ function HouseholdPanel({ onClose, onDataChanged, theme, onThemeChange }) {
     onDataChanged?.();
   }
 
-  async function handleRemove(targetUserId) {
+  async function handleRemove(targetUserId, keepCopy) {
     if (!household) return;
     setError(null);
     const { error } = await supabase.rpc("remove_household_member", {
       p_household_id: household.id,
       p_target_user_id: targetUserId,
+      p_keep_copy: keepCopy,
+    });
+    if (error) {
+      setError(error.message);
+      return;
+    }
+    load();
+  }
+
+  async function handleSetRole(targetUserId, role) {
+    if (!household) return;
+    setError(null);
+    const { error } = await supabase.rpc("set_member_role", {
+      p_household_id: household.id,
+      p_user_id: targetUserId,
+      p_role: role,
     });
     if (error) {
       setError(error.message);
@@ -807,6 +886,18 @@ function HouseholdPanel({ onClose, onDataChanged, theme, onThemeChange }) {
     if (error) {
       setDeleting(false);
       setDeleteError(error.message);
+      return;
+    }
+    await supabase.auth.signOut();
+  }
+
+  async function handleDeleteAccount() {
+    setAccountDeleting(true);
+    setAccountError(null);
+    const { error } = await supabase.rpc("delete_my_account");
+    if (error) {
+      setAccountDeleting(false);
+      setAccountError(error.message);
       return;
     }
     await supabase.auth.signOut();
@@ -859,6 +950,8 @@ function HouseholdPanel({ onClose, onDataChanged, theme, onThemeChange }) {
   }
 
   const expiry = household ? formatExpiry(household.invite_code_expires_at) : null;
+  const viewerIsOwner = members.some((m) => m.user_id === currentUserId && m.role === "owner");
+  const ownerCount = members.filter((m) => m.role === "owner").length;
 
   // First open: show the spinner until everything is ready, then the whole
   // menu at once, instead of sections appearing one after another.
@@ -927,18 +1020,28 @@ function HouseholdPanel({ onClose, onDataChanged, theme, onThemeChange }) {
                 }}
               >
                 {household.name}
-                <button style={smallBtnStyle} onClick={startEditName}>
-                  Rename
-                </button>
+                {viewerIsOwner && (
+                  <button style={smallBtnStyle} onClick={startEditName}>
+                    Rename
+                  </button>
+                )}
               </p>
             )}
 
             <div style={sectionLabelStyle}>Members</div>
             {members.map((m) => (
-              <MemberRow key={m.user_id} member={m} currentUserId={currentUserId} onRemove={handleRemove} />
+              <MemberRow
+                key={m.user_id}
+                member={m}
+                currentUserId={currentUserId}
+                viewerIsOwner={viewerIsOwner}
+                ownerCount={ownerCount}
+                onRemove={handleRemove}
+                onSetRole={handleSetRole}
+              />
             ))}
 
-            {requests.length > 0 && (
+            {viewerIsOwner && requests.length > 0 && (
               <>
                 <div style={sectionLabelStyle}>Waiting to join ({requests.length})</div>
                 {requests.map((r) => (
@@ -947,45 +1050,53 @@ function HouseholdPanel({ onClose, onDataChanged, theme, onThemeChange }) {
               </>
             )}
 
-            <div style={sectionLabelStyle}>Invite code</div>
-            <div
-              style={{
-                fontSize: 20,
-                fontWeight: 700,
-                letterSpacing: 3,
-                padding: 12,
-                textAlign: "center",
-                border: "1px solid var(--border)",
-                borderRadius: 6,
-                marginBottom: 8,
-                fontFamily: "monospace",
-                background: "var(--bg)",
-                color: "var(--ink)",
-              }}
-            >
-              {household.invite_code}
-            </div>
-            {expiry && (
-              <p
+            {viewerIsOwner ? (
+              <>
+              <div style={sectionLabelStyle}>Invite code</div>
+              <div
                 style={{
-                  fontSize: 12.5,
-                  color: expiry.expired ? "var(--danger)" : "var(--ink-muted)",
-                  marginBottom: 14,
+                  fontSize: 20,
+                  fontWeight: 700,
+                  letterSpacing: 3,
+                  padding: 12,
+                  textAlign: "center",
+                  border: "1px solid var(--border)",
+                  borderRadius: 6,
+                  marginBottom: 8,
+                  fontFamily: "monospace",
+                  background: "var(--bg)",
+                  color: "var(--ink)",
                 }}
               >
-                {expiry.text}
+                {household.invite_code}
+              </div>
+              {expiry && (
+                <p
+                  style={{
+                    fontSize: 12.5,
+                    color: expiry.expired ? "var(--danger)" : "var(--ink-muted)",
+                    marginBottom: 14,
+                  }}
+                >
+                  {expiry.text}
+                </p>
+              )}
+              <p style={{ fontSize: 12.5, color: "var(--ink-muted)", marginBottom: 14 }}>
+                Anyone who enters this code will show up above under "Waiting to join" until you approve them —
+                they won't see any data until then.
+              </p>
+              <button style={{ ...buttonStyle, marginBottom: 8 }} onClick={handleCopy}>
+                {copied ? "Copied!" : "Copy code"}
+              </button>
+              <button style={{ ...buttonStyle, marginBottom: 8 }} onClick={handleRegenerate} disabled={regenerating}>
+                {regenerating ? "Generating…" : "Generate a new code"}
+              </button>
+              </>
+            ) : (
+              <p style={{ fontSize: 12.5, color: "var(--ink-muted)", margin: "10px 0 14px" }}>
+                Owners invite new people and approve requests to join.
               </p>
             )}
-            <p style={{ fontSize: 12.5, color: "var(--ink-muted)", marginBottom: 14 }}>
-              Anyone who enters this code will show up above under "Waiting to join" until you approve them —
-              they won't see any data until then.
-            </p>
-            <button style={{ ...buttonStyle, marginBottom: 8 }} onClick={handleCopy}>
-              {copied ? "Copied!" : "Copy code"}
-            </button>
-            <button style={{ ...buttonStyle, marginBottom: 8 }} onClick={handleRegenerate} disabled={regenerating}>
-              {regenerating ? "Generating…" : "Generate a new code"}
-            </button>
             {error && <p style={{ color: "var(--danger)", fontSize: 13 }}>{error}</p>}
 
             <HistorySection />
@@ -1157,6 +1268,36 @@ function HouseholdPanel({ onClose, onDataChanged, theme, onThemeChange }) {
           </button>
         )}
 
+        {accountConfirming ? (
+          <div style={{ marginBottom: 8 }}>
+            <p style={{ fontSize: 12.5, color: "var(--danger)", marginBottom: 8 }}>
+              {members.length > 1
+                ? "This permanently deletes your login and removes you from this household. The household's data stays with its other members. This cannot be undone."
+                : "This permanently deletes your login, your household, and every account, transaction, and budget in it. Nothing is kept anywhere. This cannot be undone, so you may want to download a backup first."}
+            </p>
+            <div style={{ display: "flex", gap: 8 }}>
+              <button
+                style={{ ...buttonStyle, border: "1px solid var(--danger)", color: "var(--danger)" }}
+                onClick={handleDeleteAccount}
+                disabled={accountDeleting}
+              >
+                {accountDeleting ? "Deleting…" : "Yes, delete my account"}
+              </button>
+              <button style={buttonStyle} onClick={() => setAccountConfirming(false)}>
+                Cancel
+              </button>
+            </div>
+            {accountError && <p style={{ color: "var(--danger)", fontSize: 13, marginTop: 8 }}>{accountError}</p>}
+          </div>
+        ) : (
+          <button
+            style={{ ...buttonStyle, marginBottom: 8, border: "1px solid var(--danger)", color: "var(--danger)" }}
+            onClick={() => setAccountConfirming(true)}
+          >
+            Delete my account
+          </button>
+        )}
+
         <button style={{ ...buttonStyle, marginTop: 8, background: "none" }} onClick={onClose}>
           Close
         </button>
@@ -1175,6 +1316,7 @@ export default function HouseholdGate({ children }) {
   const [busy, setBusy] = useState(false);
   const [panelOpen, setPanelOpen] = useState(false);
   const [pendingCount, setPendingCount] = useState(0);
+  const [isOwner, setIsOwner] = useState(false); // only owners can act on join requests, so only they see the badge
   const [theme, setTheme] = useState(loadTheme);
 
   // Injects the theme CSS variables into <head> once, regardless of
@@ -1222,11 +1364,12 @@ export default function HouseholdGate({ children }) {
 
     const { data: membership } = await supabase
       .from("household_members")
-      .select("household_id, households(name)")
+      .select("household_id, role, households(name)")
       .eq("user_id", user.id)
       .maybeSingle();
 
     if (membership) {
+      setIsOwner(membership.role === "owner");
       setStatus("ready");
       setActiveHouseholdName(membership.households?.name || "");
       refreshPendingCount(membership.household_id);
@@ -1283,9 +1426,10 @@ export default function HouseholdGate({ children }) {
       } = await supabase.auth.getUser();
       const { data: membership } = await supabase
         .from("household_members")
-        .select("household_id")
+        .select("household_id, role")
         .eq("user_id", user.id)
         .maybeSingle();
+      setIsOwner(membership?.role === "owner");
       refreshPendingCount(membership?.household_id);
     }, 30000);
     return () => clearInterval(interval);
@@ -1480,7 +1624,7 @@ export default function HouseholdGate({ children }) {
         }}
       >
         Settings
-        {pendingCount > 0 && (
+        {isOwner && pendingCount > 0 && (
           <span
             style={{
               marginLeft: 6,
@@ -1504,6 +1648,7 @@ export default function HouseholdGate({ children }) {
         <HouseholdPanel
           onClose={() => setPanelOpen(false)}
           onDataChanged={checkMembership}
+          onRoleKnown={setIsOwner}
           theme={theme}
           onThemeChange={handleThemeChange}
         />
