@@ -126,6 +126,7 @@ const AUTH_STYLES = `
   box-shadow: 0 6px 24px rgba(0, 0, 0, 0.06);
 }
 .auth-card h2 {
+  color: var(--heading, #1E241F);
   font-family: 'Fraunces', Georgia, serif;
   font-weight: 500;
   font-size: 21px;

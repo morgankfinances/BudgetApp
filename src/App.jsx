@@ -1359,6 +1359,7 @@ const STYLES = `
    this file only needs to read the resulting variables. */
 
 :root {
+  --heading: #1E241F;
   --bg: #F5F6F1;
   --panel: #FFFFFF;
   --ink: #1E241F;
@@ -1388,6 +1389,7 @@ const STYLES = `
 }
 
 :root[data-theme="light-slate"] {
+  --heading: #1C2430;
   --bg: #F3F5F8;
   --panel: #FFFFFF;
   --ink: #1C2430;
@@ -1416,6 +1418,7 @@ const STYLES = `
 }
 
 :root[data-theme="dark-midnight"] {
+  --heading: #C8CDD8;
   --bg: #10131B;
   --panel: #1B2030;
   --ink: #E7E9F1;
@@ -1468,7 +1471,11 @@ const STYLES = `
   background: var(--panel);
 }
 
+/* Headings get an explicit theme color (not just inherited), so no
+   outside stylesheet (like leftover Vite template styles in index.css)
+   can turn them dark on the dark theme. */
 .ledger-root h1, .ledger-root h2, .ledger-root h3 {
+  color: var(--heading);
   font-family: 'Fraunces', Georgia, serif;
   font-weight: 500;
   margin: 0;
@@ -1873,7 +1880,7 @@ const STYLES = `
 .empty-state {
   text-align: center; padding: 50px 20px; color: var(--ink-muted);
 }
-.empty-state h2 { color: var(--ink); font-size: 19px; margin-bottom: 8px; }
+.empty-state h2 { color: var(--heading); font-size: 19px; margin-bottom: 8px; }
 .empty-state-star { width: 56px; height: 56px; margin-bottom: 14px; }
 .inline-star { width: 18px; height: 18px; flex-shrink: 0; }
 .empty-state p { max-width: 42ch; margin: 0 auto 18px; font-size: 14px; }
@@ -1920,6 +1927,9 @@ const STYLES = `
 .mobile-topbar { display: none; }
 .sidebar-backdrop { display: none; }
 .mobile-expand-toggle { display: none; }
+/* The one-line transaction summary row is only for phones; desktop shows
+   just the full row. */
+.tx-table tr.tx-row-compact { display: none; }
 
 @media (max-width: 760px) {
   .app-shell { grid-template-columns: 1fr; }
@@ -1932,7 +1942,7 @@ const STYLES = `
     background: var(--panel);
     border-bottom: 1px solid var(--border);
   }
-  .mobile-topbar h2 { margin: 0; font-size: 16px; font-family: 'Fraunces', serif; color: var(--ink); flex: 1; }
+  .mobile-topbar h2 { margin: 0; font-size: 16px; font-family: 'Fraunces', serif; color: var(--heading); flex: 1; }
   .mobile-topbar-logo { width: 28px; height: 28px; object-fit: contain; flex-shrink: 0; }
   .hamburger-btn {
     background: none; border: 1px solid var(--border); border-radius: var(--radius);
@@ -2046,7 +2056,7 @@ const STYLES = `
      desktop — same editing, same category picker) is hidden until the
      chevron is tapped, so nothing about how a transaction is edited has
      to be built or maintained twice. */
-  .tx-table tr.tx-row-compact { padding: 10px 12px; cursor: pointer; }
+  .tx-table tr.tx-row-compact { display: block; padding: 10px 12px; cursor: pointer; }
   .tx-table tr.tx-row-full { display: none; }
   .tx-table tr.tx-row-full.mobile-expanded { display: block; margin-top: -10px; }
   .tx-table tr.tx-row-compact td { padding: 0; border-bottom: none; }
