@@ -1,4 +1,4 @@
-// src/AuthGate.jsx
+// src/authGate.jsx
 // Wraps <App /> and only renders it once someone is signed in.
 //
 // Two ways in:
@@ -18,6 +18,10 @@ import { supabase } from "./supabaseClient.js";
 import { applySavedTheme } from "./householdGate.jsx";
 
 const MIN_PASSWORD_LENGTH = 12;
+
+// The logo shown above the sign-in card. Same file as the browser-tab
+// icon (it lives in public/), so replacing that one file updates both.
+const LOGO_SRC = "/favicon.svg";
 
 // The password-reset email links back here with ?reset=1 added. That's
 // a marker we control, so it works the same regardless of how Supabase
@@ -61,6 +65,15 @@ const AUTH_STYLES = `
 }
 .auth-root * { box-sizing: border-box; }
 .auth-column { width: min(380px, 100%); }
+.auth-column.wide { width: min(520px, 100%); }
+
+.auth-body { font-size: 14px; line-height: 1.6; color: var(--ink-muted, #62685E); }
+.auth-body p { margin: 0 0 14px; }
+.auth-list { padding-left: 18px; margin: 0 0 20px; }
+.auth-list li { margin-bottom: 12px; }
+.auth-list li:last-child { margin-bottom: 0; }
+.auth-list strong { color: var(--ink, #1E241F); font-weight: 600; }
+.auth-body a { color: var(--accent, #C2661E); font-weight: 600; }
 
 .auth-brand {
   font-family: 'Fraunces', Georgia, serif;
@@ -72,12 +85,11 @@ const AUTH_STYLES = `
   justify-content: center;
   gap: 10px;
 }
-.auth-brand-mark {
-  width: 12px;
-  height: 12px;
-  border-radius: 3px;
-  background: var(--accent, #C2661E);
-  display: inline-block;
+.auth-logo {
+  width: 40px;
+  height: 40px;
+  object-fit: contain;
+  display: block;
 }
 .auth-tagline {
   text-align: center;
@@ -202,16 +214,25 @@ const AUTH_STYLES = `
 .auth-loading { color: var(--ink-muted, #62685E); font-size: 14px; }
 `;
 
-function Shell({ children }) {
+// The page layout shared by the sign-in screens and disclosureGate.jsx:
+// logo, wordmark, optional tagline, then whatever card goes below.
+export function AuthShell({ children, tagline = "Your household's money, organized together.", wide = false }) {
   return (
     <div className="auth-root">
       <style>{AUTH_STYLES}</style>
-      <div className="auth-column">
+      <div className={"auth-column" + (wide ? " wide" : "")}>
         <div className="auth-brand">
-          <span className="auth-brand-mark" />
+          <img
+            className="auth-logo"
+            src={LOGO_SRC}
+            alt=""
+            onError={(e) => {
+              e.currentTarget.style.display = "none";
+            }}
+          />
           Coinrose
         </div>
-        <p className="auth-tagline">Your household's money, organized together.</p>
+        {tagline ? <p className="auth-tagline">{tagline}</p> : <div style={{ height: 22 }} />}
         {children}
       </div>
     </div>
@@ -258,7 +279,7 @@ function SetNewPasswordForm({ onDone }) {
   }
 
   return (
-    <Shell>
+    <AuthShell>
       <div className="auth-card">
         <h2>Choose a new password</h2>
         <p className="auth-sub">Use at least {MIN_PASSWORD_LENGTH} characters. A few random words strung together works well.</p>
@@ -291,7 +312,7 @@ function SetNewPasswordForm({ onDone }) {
         </form>
         <ErrorMessage text={error} />
       </div>
-    </Shell>
+    </AuthShell>
   );
 }
 
@@ -405,7 +426,7 @@ export default function AuthGate({ children }) {
   );
 
   return (
-    <Shell>
+    <AuthShell>
       <div className="auth-card">
         {mode === "forgot" ? (
           <>
@@ -506,6 +527,6 @@ export default function AuthGate({ children }) {
         New here? Use <strong>Email link</strong> to create your account. You can add a password afterward in
         Settings.
       </p>
-    </Shell>
+    </AuthShell>
   );
 }

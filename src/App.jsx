@@ -9,6 +9,17 @@ import { BarChart, Bar, PieChart, Pie, Cell, ReferenceLine, XAxis, YAxis, Cartes
 
 const STORAGE_KEY = "ledger-data-v1";
 
+// The logo shown in the sidebar brand and the mobile top bar. Same file
+// as the browser-tab icon (it lives in public/), so replacing that one
+// file updates every spot at once.
+const LOGO_SRC = "/favicon.svg";
+
+// If the logo file is ever missing, hide it instead of showing a
+// broken-image icon.
+function hideIfMissing(e) {
+  e.currentTarget.style.display = "none";
+}
+
 const VIEW_TITLES = {
   overview: "Overview",
   transactions: "Transactions",
@@ -1493,18 +1504,17 @@ const STYLES = `
   font-size: 19px;
   font-weight: 600;
   display: flex;
-  align-items: baseline;
-  gap: 6px;
+  align-items: center;
+  gap: 10px;
   line-height: 1.25;
   word-break: break-word;
 }
 
-.sidebar-brand-mark {
-  width: 9px; height: 9px;
-  background: var(--accent);
-  border-radius: 2px;
-  display: inline-block;
-  margin-right: 2px;
+.sidebar-brand-logo {
+  width: 32px;
+  height: 32px;
+  object-fit: contain;
+  flex-shrink: 0;
 }
 
 .sidebar-nav {
@@ -1923,6 +1933,7 @@ const STYLES = `
     border-bottom: 1px solid var(--border);
   }
   .mobile-topbar h2 { margin: 0; font-size: 16px; font-family: 'Fraunces', serif; color: var(--ink); flex: 1; }
+  .mobile-topbar-logo { width: 28px; height: 28px; object-fit: contain; flex-shrink: 0; }
   .hamburger-btn {
     background: none; border: 1px solid var(--border); border-radius: var(--radius);
     padding: 7px 9px; cursor: pointer; display: flex; flex-direction: column; gap: 4px; width: 32px;
@@ -6642,12 +6653,13 @@ function App({ householdName } = {}) {
           <span />
         </button>
         <h2>{VIEW_TITLES[view] || "Ledger"}</h2>
+        <img className="mobile-topbar-logo" src={LOGO_SRC} alt="" onError={hideIfMissing} />
       </div>
       <div className={"sidebar-backdrop" + (mobileMenuOpen ? " visible" : "")} onClick={() => setMobileMenuOpen(false)} />
       <div className="app-shell">
         <div className={"sidebar" + (mobileMenuOpen ? " mobile-open" : "")}>
           <div className="sidebar-brand">
-            <span className="sidebar-brand-mark" />
+            <img className="sidebar-brand-logo" src={LOGO_SRC} alt="" onError={hideIfMissing} />
             {householdName ? `${householdName} Ledger` : "Ledger"}
           </div>
           <div className="sidebar-nav" onClick={() => setMobileMenuOpen(false)}>

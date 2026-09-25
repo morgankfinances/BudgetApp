@@ -1,4 +1,4 @@
-// src/HouseholdGate.jsx
+// src/householdGate.jsx
 // Sits between AuthGate and App. Handles the full household lifecycle:
 //   - "none": no household and no pending request -> create or request to join
 //   - "pending": a join request is out, waiting on an existing member
@@ -111,7 +111,7 @@ const THEME_VARS_CSS = `
 `;
 
 // Applies this device's saved theme right away. The sign-in screen
-// (AuthGate) renders before HouseholdGate mounts, so it calls this
+// (authGate.jsx) renders before this file's component mounts, so it calls this
 // itself; otherwise someone using the dark theme would see a bright
 // sign-in screen first. Safe to call repeatedly.
 export function applySavedTheme() {
