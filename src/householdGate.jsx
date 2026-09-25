@@ -639,12 +639,21 @@ function RequestRow({ request, onApprove, onDeny }) {
   );
 }
 
+// The Settings panel's household info (name, invite code, members, join
+// requests), saved after it first loads so Settings opens instantly the
+// next time. Lives only while the app is open in this tab, and is cleared
+// whenever household membership is re-checked: on sign-in, and after
+// joining, leaving, approving, or renaming.
+let settingsCache = null;
+
 function HouseholdPanel({ onClose, onDataChanged, theme, onThemeChange }) {
-  const [household, setHousehold] = useState(null);
-  const [members, setMembers] = useState([]);
-  const [requests, setRequests] = useState([]);
-  const [currentUserId, setCurrentUserId] = useState(null);
-  const [loading, setLoading] = useState(true);
+  const [household, setHousehold] = useState(settingsCache?.household ?? null);
+  const [members, setMembers] = useState(settingsCache?.members ?? []);
+  const [requests, setRequests] = useState(settingsCache?.requests ?? []);
+  const [currentUserId, setCurrentUserId] = useState(settingsCache?.currentUserId ?? null);
+  // Only the very first open shows the spinner; after that the saved copy
+  // shows right away while fresh data loads quietly behind it.
+  const [loading, setLoading] = useState(!settingsCache);
   const [regenerating, setRegenerating] = useState(false);
   const [copied, setCopied] = useState(false);
   const [error, setError] = useState(null);
@@ -664,7 +673,6 @@ function HouseholdPanel({ onClose, onDataChanged, theme, onThemeChange }) {
   const [renaming, setRenaming] = useState(false);
 
   async function load() {
-    setLoading(true);
     setError(null);
 
     const {
@@ -698,6 +706,12 @@ function HouseholdPanel({ onClose, onDataChanged, theme, onThemeChange }) {
 
     setMembers(memberData || []);
     setRequests(requestData || []);
+    settingsCache = {
+      household: membership.households,
+      members: memberData || [],
+      requests: requestData || [],
+      currentUserId: user.id,
+    };
     setLoading(false);
   }
 
@@ -837,6 +851,24 @@ function HouseholdPanel({ onClose, onDataChanged, theme, onThemeChange }) {
   }
 
   const expiry = household ? formatExpiry(household.invite_code_expires_at) : null;
+
+  // First open: show the spinner until everything is ready, then the whole
+  // menu at once, instead of sections appearing one after another.
+  if (loading) {
+    return (
+      <div style={overlayStyle} onClick={onClose}>
+        <div style={cardStyle} onClick={(e) => e.stopPropagation()}>
+          <h2 style={{ marginTop: 0, marginBottom: 4, fontSize: 18 }}>Settings</h2>
+          <div style={{ padding: "36px 0 28px", display: "flex", justifyContent: "center" }}>
+            <LoadingIndicator label="Loading settings…" />
+          </div>
+          <button style={{ ...buttonStyle, background: "none" }} onClick={onClose}>
+            Close
+          </button>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div style={overlayStyle} onClick={onClose}>
@@ -1175,6 +1207,7 @@ export default function HouseholdGate({ children }) {
   async function checkMembership() {
     setStatus("checking");
     resetHouseholdCache();
+    settingsCache = null;
     const {
       data: { user },
     } = await supabase.auth.getUser();
