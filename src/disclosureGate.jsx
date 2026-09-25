@@ -11,7 +11,7 @@
 // Uses the same page layout as the sign-in screen (logo, wordmark, card),
 // shared from authGate.jsx so the two screens always match.
 
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useRef } from "react";
 import { AuthShell } from "./authGate.jsx";
 
 const ACK_KEY = "ledger-disclosure-ack-v1";
@@ -27,12 +27,58 @@ function readAcknowledged() {
   }
 }
 
+// The Settings panel (householdGate.jsx) opens the notice again by sending
+// this signal. A signal instead of an import keeps the two files from
+// importing each other in a loop.
+const SHOW_EVENT = "coinrose:show-disclosure";
+
+// Styles for the "view it again" overlay: covers the whole app (above the
+// Settings button and panel) and scrolls on its own.
+const OVERLAY_STYLES = `
+.disclosure-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 300;
+  overflow-y: auto;
+  background: var(--bg, #F5F6F1);
+}
+`;
+
 export default function DisclosureGate({ children }) {
   const [acknowledged, setAcknowledged] = useState(readAcknowledged);
+  const [reviewing, setReviewing] = useState(false);
+  const previousTitle = useRef(null);
 
   useEffect(() => {
     if (!acknowledged) document.title = "Before You Get Started | Coinrose";
   }, [acknowledged]);
+
+  // Open the notice when Settings asks for it.
+  useEffect(() => {
+    function open() {
+      previousTitle.current = document.title;
+      setReviewing(true);
+    }
+    window.addEventListener(SHOW_EVENT, open);
+    return () => window.removeEventListener(SHOW_EVENT, open);
+  }, []);
+
+  // While it's open: its own tab title, and Escape closes it.
+  useEffect(() => {
+    if (!reviewing) return;
+    document.title = "About This App | Coinrose";
+    function onKey(e) {
+      if (e.key === "Escape") closeReview();
+    }
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [reviewing]);
+
+  function closeReview() {
+    setReviewing(false);
+    // Put back the title of the page underneath.
+    if (previousTitle.current) document.title = previousTitle.current;
+  }
 
   function handleAccept() {
     try {
@@ -43,14 +89,30 @@ export default function DisclosureGate({ children }) {
     setAcknowledged(true);
   }
 
-  if (acknowledged) {
-    return children;
+  if (!acknowledged) {
+    return <DisclosureNotice heading="Before you get started" buttonLabel="I understand, continue" onButton={handleAccept} />;
   }
 
   return (
+    <>
+      {children}
+      {reviewing && (
+        <div className="disclosure-overlay" role="dialog" aria-modal="true" aria-label="About this app">
+          <style>{OVERLAY_STYLES}</style>
+          <DisclosureNotice heading="About this app" buttonLabel="Close" onButton={closeReview} />
+        </div>
+      )}
+    </>
+  );
+}
+
+// The notice itself, shared by the first-time screen and the "view it
+// again" overlay opened from Settings.
+function DisclosureNotice({ heading, buttonLabel, onButton }) {
+  return (
     <AuthShell tagline={null} wide>
       <div className="auth-card">
-        <h2>Before you get started</h2>
+        <h2>{heading}</h2>
         <div className="auth-body" style={{ marginTop: 12 }}>
           <p>
             This is a personal project, not a commercial product or a financial institution — worth keeping in
@@ -85,8 +147,8 @@ export default function DisclosureGate({ children }) {
             </li>
           </ul>
         </div>
-        <button type="button" className="auth-primary" onClick={handleAccept}>
-          I understand, continue
+        <button type="button" className="auth-primary" onClick={onButton}>
+          {buttonLabel}
         </button>
       </div>
     </AuthShell>

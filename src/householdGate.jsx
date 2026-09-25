@@ -1027,6 +1027,20 @@ function HouseholdPanel({ onClose, onDataChanged, theme, onThemeChange }) {
 
         <PasswordSection />
 
+        <div style={sectionLabelStyle}>About</div>
+        <button
+          style={{ ...buttonStyle, marginBottom: 8 }}
+          onClick={() => {
+            // Close Settings, then ask disclosureGate.jsx to show the notice.
+            // (A signal instead of an import keeps the two files from
+            // importing each other in a loop.)
+            onClose();
+            window.dispatchEvent(new Event("coinrose:show-disclosure"));
+          }}
+        >
+          View disclosure
+        </button>
+
         <div style={sectionLabelStyle}>Account</div>
         {leaveConfirming ? (
           <div style={{ marginBottom: 8 }}>
