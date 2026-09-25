@@ -15,6 +15,7 @@
 
 import React, { useState, useEffect } from "react";
 import { supabase } from "./supabaseClient.js";
+import { applySavedTheme } from "./HouseholdGate.jsx";
 
 const MIN_PASSWORD_LENGTH = 12;
 
@@ -41,53 +42,189 @@ function clearResetMarker() {
   }
 }
 
-// The sign-in screen renders before the theme is loaded, so every color
-// has a fallback matching the default theme.
-const muted = "var(--ink-muted, #62685E)";
-const danger = "var(--danger, #A6392B)";
-const success = "var(--income, #3F7D5C)";
+// Same fonts, colors, card, field, and button styles as the main app,
+// scoped under .auth-root. Every color has a fallback matching the
+// default theme, in case the theme hasn't been applied yet.
+const AUTH_STYLES = `
+@import url('https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,500;9..144,600&family=Work+Sans:wght@400;500;600;700&display=swap');
 
-const pageStyle = {
-  display: "flex",
-  minHeight: "100vh",
-  alignItems: "center",
-  justifyContent: "center",
-  fontFamily: "sans-serif",
-  background: "var(--bg, #F5F6F1)",
-  color: "var(--ink, #1E241F)",
-};
-const cardStyle = { width: "min(340px, 92vw)", boxSizing: "border-box" };
-const inputStyle = {
-  width: "100%",
-  padding: 10,
-  marginTop: 10,
-  boxSizing: "border-box",
-  fontSize: 14,
-  border: "1px solid var(--border, #DAD9CC)",
-  borderRadius: 5,
-  background: "var(--panel, #FFFFFF)",
-  color: "var(--ink, #1E241F)",
-};
-const primaryButtonStyle = {
-  width: "100%",
-  padding: 10,
-  marginTop: 12,
-  fontSize: 14,
-  border: "none",
-  borderRadius: 5,
-  background: "var(--accent, #C2661E)",
-  color: "#fff",
-  cursor: "pointer",
-};
-const linkButtonStyle = {
-  background: "none",
-  border: "none",
-  padding: 0,
-  color: "var(--accent, #C2661E)",
-  cursor: "pointer",
-  fontSize: 13,
-  textDecoration: "underline",
-};
+.auth-root {
+  min-height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 32px 16px;
+  box-sizing: border-box;
+  background: var(--bg, #F5F6F1);
+  color: var(--ink, #1E241F);
+  font-family: 'Work Sans', -apple-system, sans-serif;
+}
+.auth-root * { box-sizing: border-box; }
+.auth-column { width: min(380px, 100%); }
+
+.auth-brand {
+  font-family: 'Fraunces', Georgia, serif;
+  font-size: 30px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+}
+.auth-brand-mark {
+  width: 12px;
+  height: 12px;
+  border-radius: 3px;
+  background: var(--accent, #C2661E);
+  display: inline-block;
+}
+.auth-tagline {
+  text-align: center;
+  color: var(--ink-muted, #62685E);
+  font-size: 14px;
+  margin: 6px 0 22px;
+}
+
+.auth-card {
+  background: var(--panel, #FFFFFF);
+  border: 1px solid var(--border, #DAD9CC);
+  border-radius: 10px;
+  padding: 26px 24px;
+  box-shadow: 0 6px 24px rgba(0, 0, 0, 0.06);
+}
+.auth-card h2 {
+  font-family: 'Fraunces', Georgia, serif;
+  font-weight: 500;
+  font-size: 21px;
+  letter-spacing: -0.01em;
+  margin: 0 0 4px;
+}
+.auth-sub { color: var(--ink-muted, #62685E); font-size: 13.5px; margin: 0 0 18px; line-height: 1.45; }
+
+.auth-tabs {
+  display: flex;
+  border: 1px solid var(--border, #DAD9CC);
+  border-radius: 6px;
+  overflow: hidden;
+  margin-bottom: 20px;
+}
+.auth-tab {
+  flex: 1;
+  padding: 8px 10px;
+  font-family: inherit;
+  font-size: 13px;
+  font-weight: 600;
+  border: none;
+  background: var(--panel, #FFFFFF);
+  color: var(--ink-muted, #62685E);
+  cursor: pointer;
+}
+.auth-tab + .auth-tab { border-left: 1px solid var(--border, #DAD9CC); }
+.auth-tab.active { background: var(--accent, #C2661E); color: #fff; }
+
+.auth-field { display: flex; flex-direction: column; gap: 5px; margin-bottom: 14px; }
+.auth-field-top { display: flex; justify-content: space-between; align-items: baseline; }
+.auth-field label { font-size: 13px; font-weight: 600; color: var(--ink, #1E241F); }
+.auth-field input {
+  font-family: inherit;
+  font-size: 14.5px;
+  padding: 10px 12px;
+  border: 1px solid var(--border, #DAD9CC);
+  border-radius: 6px;
+  background: var(--panel, #FFFFFF);
+  color: var(--ink, #1E241F);
+  width: 100%;
+}
+.auth-field input:focus { outline: 2px solid var(--accent, #C2661E); outline-offset: 1px; }
+.auth-hint { font-size: 12px; color: var(--ink-muted, #62685E); }
+
+.auth-primary {
+  width: 100%;
+  margin-top: 6px;
+  padding: 11px 14px;
+  font-family: inherit;
+  font-size: 14.5px;
+  font-weight: 600;
+  border: none;
+  border-radius: 6px;
+  background: var(--accent, #C2661E);
+  color: #fff;
+  cursor: pointer;
+  transition: background 0.12s ease, opacity 0.12s ease;
+}
+.auth-primary:hover:not(:disabled) { background: var(--accent-hover, #9C4F15); }
+.auth-primary:disabled { opacity: 0.55; cursor: not-allowed; }
+/* The dark theme's accent is a light blue, where white text is hard to
+   read. Dark text on it has strong contrast instead. */
+:root[data-theme="dark-midnight"] .auth-primary,
+:root[data-theme="dark-midnight"] .auth-tab.active { color: #10131B; }
+
+.auth-link {
+  background: none;
+  border: none;
+  padding: 0;
+  font-family: inherit;
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--accent, #C2661E);
+  cursor: pointer;
+}
+.auth-link:hover { text-decoration: underline; }
+.auth-back { display: block; margin-top: 18px; }
+
+.auth-message {
+  font-size: 13.5px;
+  line-height: 1.5;
+  padding: 12px 14px;
+  border-radius: 6px;
+  margin: 0;
+}
+.auth-message.success {
+  background: var(--accent-tint, #F7E9DC);
+  color: var(--ink, #1E241F);
+  border: 1px solid var(--border, #DAD9CC);
+}
+.auth-message.error {
+  background: var(--danger-tint-bg, #FBEAE6);
+  color: var(--danger, #A6392B);
+  border: 1px solid var(--danger-tint-border, #E3A190);
+  margin-top: 14px;
+}
+
+.auth-footnote {
+  text-align: center;
+  font-size: 12.5px;
+  color: var(--ink-muted, #62685E);
+  margin: 18px 4px 0;
+  line-height: 1.5;
+}
+.auth-loading { color: var(--ink-muted, #62685E); font-size: 14px; }
+`;
+
+function Shell({ children }) {
+  return (
+    <div className="auth-root">
+      <style>{AUTH_STYLES}</style>
+      <div className="auth-column">
+        <div className="auth-brand">
+          <span className="auth-brand-mark" />
+          Coinrose
+        </div>
+        <p className="auth-tagline">Your household's money, organized together.</p>
+        {children}
+      </div>
+    </div>
+  );
+}
+
+function ErrorMessage({ text }) {
+  return text ? (
+    <p className="auth-message error" role="alert">
+      {text}
+    </p>
+  ) : null;
+}
 
 function SetNewPasswordForm({ onDone }) {
   const [password, setPassword] = useState("");
@@ -121,36 +258,40 @@ function SetNewPasswordForm({ onDone }) {
   }
 
   return (
-    <div style={pageStyle}>
-      <div style={cardStyle}>
-        <h2 style={{ marginBottom: 4 }}>Choose a new password</h2>
-        <p style={{ fontSize: 13, color: muted }}>At least {MIN_PASSWORD_LENGTH} characters.</p>
+    <Shell>
+      <div className="auth-card">
+        <h2>Choose a new password</h2>
+        <p className="auth-sub">Use at least {MIN_PASSWORD_LENGTH} characters. A few random words strung together works well.</p>
         <form onSubmit={handleSubmit}>
-          <input
-            type="password"
-            autoComplete="new-password"
-            required
-            placeholder="New password"
-            value={password}
-            onChange={(e) => setPassword(e.target.value)}
-            style={inputStyle}
-          />
-          <input
-            type="password"
-            autoComplete="new-password"
-            required
-            placeholder="Confirm new password"
-            value={confirm}
-            onChange={(e) => setConfirm(e.target.value)}
-            style={inputStyle}
-          />
-          <button type="submit" disabled={busy} style={primaryButtonStyle}>
+          <div className="auth-field">
+            <label htmlFor="auth-new-password">New password</label>
+            <input
+              id="auth-new-password"
+              type="password"
+              autoComplete="new-password"
+              required
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+            />
+          </div>
+          <div className="auth-field">
+            <label htmlFor="auth-confirm-password">Confirm new password</label>
+            <input
+              id="auth-confirm-password"
+              type="password"
+              autoComplete="new-password"
+              required
+              value={confirm}
+              onChange={(e) => setConfirm(e.target.value)}
+            />
+          </div>
+          <button type="submit" className="auth-primary" disabled={busy}>
             {busy ? "Saving…" : "Save password"}
           </button>
         </form>
-        {error && <p style={{ color: danger, fontSize: 13 }}>{error}</p>}
+        <ErrorMessage text={error} />
       </div>
-    </div>
+    </Shell>
   );
 }
 
@@ -165,6 +306,7 @@ export default function AuthGate({ children }) {
   const [busy, setBusy] = useState(false);
 
   useEffect(() => {
+    applySavedTheme();
     supabase.auth.getSession().then(({ data }) => setSession(data.session));
     const { data: listener } = supabase.auth.onAuthStateChange((event, nextSession) => {
       if (event === "PASSWORD_RECOVERY") setRecovering(true);
@@ -205,7 +347,7 @@ export default function AuthGate({ children }) {
       // a stranger which emails have accounts here.
       setError(
         /invalid login credentials/i.test(error.message)
-          ? "Email or password is incorrect. If you haven't set a password yet, sign in with an email link instead."
+          ? "Email or password is incorrect. If you haven't set a password yet, use an email link instead."
           : error.message
       );
     }
@@ -226,7 +368,12 @@ export default function AuthGate({ children }) {
   }
 
   if (session === undefined) {
-    return <div style={{ ...pageStyle, color: muted }}>Loading…</div>;
+    return (
+      <div className="auth-root">
+        <style>{AUTH_STYLES}</style>
+        <p className="auth-loading">Loading…</p>
+      </div>
+    );
   }
 
   if (session && recovering) {
@@ -240,113 +387,125 @@ export default function AuthGate({ children }) {
     );
   }
 
-  if (!session) {
-    return (
-      <div style={pageStyle}>
-        <div style={cardStyle}>
-          <h2 style={{ marginBottom: 4 }}>Sign in to Coinrose</h2>
+  if (session) return children;
 
-          {mode === "password" && (
-            <>
-              <form onSubmit={handlePasswordSignIn}>
-                <input
-                  type="email"
-                  autoComplete="email"
-                  required
-                  placeholder="you@example.com"
-                  value={email}
-                  onChange={(e) => setEmail(e.target.value)}
-                  style={inputStyle}
-                />
-                <input
-                  type="password"
-                  autoComplete="current-password"
-                  required
-                  placeholder="Password"
-                  value={password}
-                  onChange={(e) => setPassword(e.target.value)}
-                  style={inputStyle}
-                />
-                <button type="submit" disabled={busy} style={primaryButtonStyle}>
-                  {busy ? "Signing in…" : "Sign in"}
-                </button>
-              </form>
-              <div style={{ display: "flex", justifyContent: "space-between", marginTop: 14 }}>
-                <button type="button" style={linkButtonStyle} onClick={() => switchMode("forgot")}>
-                  Forgot password?
-                </button>
-                <button type="button" style={linkButtonStyle} onClick={() => switchMode("link")}>
-                  Email me a sign-in link
-                </button>
-              </div>
-              <p style={{ fontSize: 12.5, color: muted, marginTop: 16 }}>
-                New here? Choose "Email me a sign-in link" to create your account. You can add a password
-                afterward in Settings.
-              </p>
-            </>
-          )}
+  const emailField = (
+    <div className="auth-field">
+      <label htmlFor="auth-email">Email</label>
+      <input
+        id="auth-email"
+        type="email"
+        autoComplete="email"
+        required
+        placeholder="you@example.com"
+        value={email}
+        onChange={(e) => setEmail(e.target.value)}
+      />
+    </div>
+  );
 
-          {mode === "link" &&
-            (sent ? (
-              <p style={{ fontSize: 14, color: success }}>
-                Check <strong>{email}</strong> for a sign-in link, then come back to this tab.
-              </p>
-            ) : (
-              <form onSubmit={handleSendLink}>
-                <p style={{ fontSize: 13, color: muted }}>
-                  We'll email you a one-time link. This is also how new accounts are created.
-                </p>
-                <input
-                  type="email"
-                  autoComplete="email"
-                  required
-                  placeholder="you@example.com"
-                  value={email}
-                  onChange={(e) => setEmail(e.target.value)}
-                  style={inputStyle}
-                />
-                <button type="submit" disabled={busy} style={primaryButtonStyle}>
-                  {busy ? "Sending…" : "Send sign-in link"}
-                </button>
-              </form>
-            ))}
-
-          {mode === "forgot" &&
-            (sent ? (
-              <p style={{ fontSize: 14, color: success }}>
+  return (
+    <Shell>
+      <div className="auth-card">
+        {mode === "forgot" ? (
+          <>
+            <h2>Reset your password</h2>
+            {sent ? (
+              <p className="auth-message success">
                 If an account with a password exists for <strong>{email}</strong>, a reset link is on its way.
               </p>
             ) : (
-              <form onSubmit={handleForgot}>
-                <p style={{ fontSize: 13, color: muted }}>
-                  Enter your email and we'll send a link to choose a new password.
-                </p>
-                <input
-                  type="email"
-                  autoComplete="email"
-                  required
-                  placeholder="you@example.com"
-                  value={email}
-                  onChange={(e) => setEmail(e.target.value)}
-                  style={inputStyle}
-                />
-                <button type="submit" disabled={busy} style={primaryButtonStyle}>
-                  {busy ? "Sending…" : "Send reset link"}
+              <>
+                <p className="auth-sub">Enter your email and we'll send you a link to choose a new password.</p>
+                <form onSubmit={handleForgot}>
+                  {emailField}
+                  <button type="submit" className="auth-primary" disabled={busy}>
+                    {busy ? "Sending…" : "Send reset link"}
+                  </button>
+                </form>
+              </>
+            )}
+            <ErrorMessage text={error} />
+            <button type="button" className="auth-link auth-back" onClick={() => switchMode("password")}>
+              ← Back to sign in
+            </button>
+          </>
+        ) : (
+          <>
+            <h2>Welcome back</h2>
+            <p className="auth-sub">Sign in with your password, or have a one-time link emailed to you.</p>
+
+            <div className="auth-tabs" role="tablist">
+              <button
+                type="button"
+                role="tab"
+                aria-selected={mode === "password"}
+                className={"auth-tab" + (mode === "password" ? " active" : "")}
+                onClick={() => switchMode("password")}
+              >
+                Password
+              </button>
+              <button
+                type="button"
+                role="tab"
+                aria-selected={mode === "link"}
+                className={"auth-tab" + (mode === "link" ? " active" : "")}
+                onClick={() => switchMode("link")}
+              >
+                Email link
+              </button>
+            </div>
+
+            {mode === "password" && (
+              <form onSubmit={handlePasswordSignIn}>
+                {emailField}
+                <div className="auth-field">
+                  <div className="auth-field-top">
+                    <label htmlFor="auth-password">Password</label>
+                    <button type="button" className="auth-link" onClick={() => switchMode("forgot")}>
+                      Forgot password?
+                    </button>
+                  </div>
+                  <input
+                    id="auth-password"
+                    type="password"
+                    autoComplete="current-password"
+                    required
+                    value={password}
+                    onChange={(e) => setPassword(e.target.value)}
+                  />
+                </div>
+                <button type="submit" className="auth-primary" disabled={busy}>
+                  {busy ? "Signing in…" : "Sign in"}
                 </button>
               </form>
-            ))}
+            )}
 
-          {mode !== "password" && (
-            <button type="button" style={{ ...linkButtonStyle, marginTop: 14 }} onClick={() => switchMode("password")}>
-              ← Back to password sign-in
-            </button>
-          )}
+            {mode === "link" &&
+              (sent ? (
+                <p className="auth-message success">
+                  Check <strong>{email}</strong> for a sign-in link, then come back to this tab.
+                </p>
+              ) : (
+                <form onSubmit={handleSendLink}>
+                  {emailField}
+                  <span className="auth-hint" style={{ display: "block", margin: "-6px 0 12px" }}>
+                    No password needed. This is also how new accounts are created.
+                  </span>
+                  <button type="submit" className="auth-primary" disabled={busy}>
+                    {busy ? "Sending…" : "Email me a sign-in link"}
+                  </button>
+                </form>
+              ))}
 
-          {error && <p style={{ color: danger, fontSize: 13 }}>{error}</p>}
-        </div>
+            <ErrorMessage text={error} />
+          </>
+        )}
       </div>
-    );
-  }
-
-  return children;
+      <p className="auth-footnote">
+        New here? Use <strong>Email link</strong> to create your account. You can add a password afterward in
+        Settings.
+      </p>
+    </Shell>
+  );
 }

@@ -110,6 +110,25 @@ const THEME_VARS_CSS = `
 .theme-swatch-dark-midnight { background: linear-gradient(135deg, #10131B 50%, #7B9EE0 50%); }
 `;
 
+// Applies this device's saved theme right away. The sign-in screen
+// (AuthGate) renders before HouseholdGate mounts, so it calls this
+// itself; otherwise someone using the dark theme would see a bright
+// sign-in screen first. Safe to call repeatedly.
+export function applySavedTheme() {
+  try {
+    let styleEl = document.getElementById("ledger-theme-vars");
+    if (!styleEl) {
+      styleEl = document.createElement("style");
+      styleEl.id = "ledger-theme-vars";
+      document.head.appendChild(styleEl);
+    }
+    styleEl.textContent = THEME_VARS_CSS;
+    document.documentElement.setAttribute("data-theme", loadTheme());
+  } catch (e) {
+    /* ignore: the sign-in screen falls back to default colors */
+  }
+}
+
 function ThemePicker({ theme, onChange }) {
   return (
     <div className="theme-picker-grid">
