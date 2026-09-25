@@ -4,6 +4,7 @@ import Papa from "papaparse";
 import * as XLSX from "xlsx";
 import { BarChart, Bar, PieChart, Pie, Cell, ReferenceLine, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from "recharts";
 import { ThemedLogo, ThemedStar, LoadingIndicator, DecoRing } from "./householdGate.jsx";
+import { loadLedger, fetchLedgerVersion, computeLedgerChanges, hasChanges, saveLedgerChanges } from "./ledgerStore.js";
 
 /* ------------------------------------------------------------------ */
 /* Storage                                                             */
@@ -288,75 +289,49 @@ function normalizeSnapshot(data) {
   };
 }
 
-async function loadData() {
-  try {
-    const res = await window.storage.get(STORAGE_KEY, false);
-    if (res && res.value) {
-      const parsed = JSON.parse(res.value);
-      const categories = Array.isArray(parsed.categories) ? parsed.categories : createDefaultCategories();
-      const budgetGroups = Array.isArray(parsed.budgetGroups) ? parsed.budgetGroups : [];
-      const normalizeBudgetItem = (b) => ({
-        ...b,
-        budgetType: b.budgetType === "accumulate" ? "accumulate" : "spend",
-        accumulateTarget: b.accumulateTarget != null ? b.accumulateTarget : null,
-        accumulateActuals: b.accumulateActuals && typeof b.accumulateActuals === "object" ? b.accumulateActuals : {},
-        fundAdjustments: Array.isArray(b.fundAdjustments) ? b.fundAdjustments : [],
-      });
-      return {
-        accounts: parsed.accounts || [],
-        transactions: parsed.transactions || [],
-        categories: categories.map((c) => normalizeBudgetItem({ ...c, excluded: !!c.excluded, isIncome: !!c.isIncome })),
-        budgetGroups: budgetGroups.map(normalizeBudgetItem),
-        plannedIncome: parsed.plannedIncome != null ? parsed.plannedIncome : null,
-        incomeWarningDismissed: !!parsed.incomeWarningDismissed,
-        hiddenBudgetMonths: Array.isArray(parsed.hiddenBudgetMonths) ? parsed.hiddenBudgetMonths : [],
-        excludeUnassignedFromBudget: !!parsed.excludeUnassignedFromBudget,
-      };
-    }
-  } catch (e) {
-    /* key doesn't exist yet on first run */
-  }
+// Applies the app's defaults and cleanup to freshly loaded data. For a
+// household that has never saved anything, categories comes in as
+// undefined and gets the default set.
+function normalizeLoadedLedger(parsed) {
+  const categories = Array.isArray(parsed.categories) ? parsed.categories : createDefaultCategories();
+  const budgetGroups = Array.isArray(parsed.budgetGroups) ? parsed.budgetGroups : [];
+  const normalizeBudgetItem = (b) => ({
+    ...b,
+    budgetType: b.budgetType === "accumulate" ? "accumulate" : "spend",
+    accumulateTarget: b.accumulateTarget != null ? b.accumulateTarget : null,
+    accumulateActuals: b.accumulateActuals && typeof b.accumulateActuals === "object" ? b.accumulateActuals : {},
+    fundAdjustments: Array.isArray(b.fundAdjustments) ? b.fundAdjustments : [],
+  });
   return {
-    accounts: [],
-    transactions: [],
-    categories: createDefaultCategories(),
-    budgetGroups: [],
-    plannedIncome: null,
-    incomeWarningDismissed: false,
-    hiddenBudgetMonths: [],
-    excludeUnassignedFromBudget: false,
+    accounts: parsed.accounts || [],
+    transactions: parsed.transactions || [],
+    categories: categories.map((c) => normalizeBudgetItem({ ...c, excluded: !!c.excluded, isIncome: !!c.isIncome })),
+    budgetGroups: budgetGroups.map(normalizeBudgetItem),
+    plannedIncome: parsed.plannedIncome != null ? parsed.plannedIncome : null,
+    incomeWarningDismissed: !!parsed.incomeWarningDismissed,
+    hiddenBudgetMonths: Array.isArray(parsed.hiddenBudgetMonths) ? parsed.hiddenBudgetMonths : [],
+    excludeUnassignedFromBudget: !!parsed.excludeUnassignedFromBudget,
   };
 }
 
-async function saveData(
-  accounts,
-  transactions,
-  categories,
-  budgetGroups,
-  plannedIncome,
-  incomeWarningDismissed,
-  hiddenBudgetMonths,
-  excludeUnassignedFromBudget
-) {
-  try {
-    const result = await window.storage.set(
-      STORAGE_KEY,
-      JSON.stringify({
-        accounts,
-        transactions,
-        categories,
-        budgetGroups,
-        plannedIncome,
-        incomeWarningDismissed,
-        hiddenBudgetMonths,
-        excludeUnassignedFromBudget,
-      }),
-      false
-    );
-    return !!result;
-  } catch (e) {
-    return false;
-  }
+// Loads the household's data from the database tables. Returns:
+//   snapshot   what the app shows
+//   savedBase  what the database actually holds (for working out what
+//              changed at the next save)
+//   version    the household's change counter
+// Throws if the data can't be loaded, rather than quietly showing an
+// empty ledger that the next save could then build on.
+async function loadData() {
+  const { data, settingsSaved, version } = await loadLedger();
+  const neverSaved =
+    !settingsSaved && data.accounts.length === 0 && data.categories.length === 0 && data.transactions.length === 0;
+  const snapshot = normalizeSnapshot(
+    normalizeLoadedLedger({ ...data, categories: neverSaved ? undefined : data.categories })
+  );
+  // A brand-new household's default categories exist only in the app until
+  // the first save, so they're left out of what the database holds.
+  const savedBase = { ...snapshot, categories: neverSaved ? [] : snapshot.categories, settingsSaved };
+  return { snapshot, savedBase, version };
 }
 
 /* ------------------------------------------------------------------ */
@@ -6352,6 +6327,8 @@ function App({ householdName } = {}) {
   const [tutorialStep, setTutorialStep] = useState(null); // null = tour not showing
   const baseSnapshotRef = useRef(null);
   const savingRef = useRef(false);
+  const versionRef = useRef(null); // the household's change counter as of our last load or save
+  const [loadError, setLoadError] = useState(false);
 
   // Tutorial: start automatically the first time the app is used on this
   // browser, once the data has loaded.
@@ -6390,13 +6367,17 @@ function App({ householdName } = {}) {
 
   useEffect(() => {
     let cancelled = false;
-    loadData().then((data) => {
-      if (cancelled) return;
-      const snap = normalizeSnapshot(data);
-      applySnapshotToState(snap);
-      baseSnapshotRef.current = snap;
-      setLoaded(true);
-    });
+    loadData()
+      .then(({ snapshot, savedBase, version }) => {
+        if (cancelled) return;
+        applySnapshotToState(snapshot);
+        baseSnapshotRef.current = savedBase;
+        versionRef.current = version;
+        setLoaded(true);
+      })
+      .catch(() => {
+        if (!cancelled) setLoadError(true);
+      });
     return () => {
       cancelled = true;
     };
@@ -6414,19 +6395,17 @@ function App({ householdName } = {}) {
     if (!loaded) return;
     let cancelled = false;
     const checkForRemoteChanges = async () => {
-      // A save that's still in flight has already updated the remote
-      // data but hasn't updated baseSnapshotRef yet (that only happens
-      // once saveData() resolves) — checking during that gap compares
-      // fresh remote data against a baseline that's a beat behind it,
-      // which looks exactly like "someone else changed this" even
-      // though it's this same session's own edit landing.
+      // Skip while one of our own saves is in flight: it has already moved
+      // the change counter, but versionRef only catches up when the save
+      // returns, so checking now would mistake our own save for someone
+      // else's.
       if (savingRef.current) return;
       try {
-        const remoteData = await loadData();
+        // One number: the household's change counter. If it moved and we
+        // didn't move it, someone else saved.
+        const version = await fetchLedgerVersion();
         if (cancelled) return;
-        const remoteBlob = normalizeSnapshot(remoteData);
-        const base = baseSnapshotRef.current;
-        if (base && !deepEqual(remoteBlob, base)) {
+        if (version !== null && versionRef.current !== null && version !== versionRef.current) {
           setRemoteChangeAvailable(true);
         }
       } catch (e) {
@@ -6455,10 +6434,10 @@ function App({ householdName } = {}) {
     setSyncing(true);
     savingRef.current = true;
     try {
-      const remoteData = await loadData();
-      const remoteBlob = normalizeSnapshot(remoteData);
-      applySnapshotToState(remoteBlob);
-      baseSnapshotRef.current = remoteBlob;
+      const { snapshot, savedBase, version } = await loadData();
+      applySnapshotToState(snapshot);
+      baseSnapshotRef.current = savedBase;
+      versionRef.current = version;
       setRemoteChangeAvailable(false);
       setToast("Synced with the latest data.");
     } catch (e) {
@@ -6491,48 +6470,34 @@ function App({ householdName } = {}) {
         excludeUnassignedFromBudget: nextExcludeUnassignedFromBudget,
       };
 
-      // Show the edit immediately — the merge check below only changes
-      // this if someone else's change needs folding in too.
+      // Show the edit immediately.
       applySnapshotToState(localBlob);
       savingRef.current = true;
 
-      let toSave = localBlob;
+      // Only rows that actually changed are sent, so a save can't overwrite
+      // anything someone else changed elsewhere, even if this screen is a
+      // little out of date.
       const base = baseSnapshotRef.current;
       try {
-        try {
-          const remoteData = await loadData();
-          const remoteBlob = normalizeSnapshot(remoteData);
-          if (base && !deepEqual(remoteBlob, base)) {
-            const { merged, conflicts } = mergeLedgerData(base, localBlob, remoteBlob);
-            toSave = merged;
-            applySnapshotToState(toSave);
-            setToast(
-              conflicts.length > 0
-                ? `Synced with a change made elsewhere just now — ${conflicts.length} value${
-                    conflicts.length === 1 ? "" : "s"
-                  } overlapped and kept the most recent edit.`
-                : "Synced with a change made elsewhere just now — nothing was lost."
-            );
-          }
-        } catch (e) {
-          /* if checking remote fails, fall back to saving local as-is */
+        const changes = computeLedgerChanges(base, localBlob);
+        if (!hasChanges(changes)) {
+          setSaveError(null);
+          return;
         }
-
-        const ok = await saveData(
-          toSave.accounts,
-          toSave.transactions,
-          toSave.categories,
-          toSave.budgetGroups,
-          toSave.plannedIncome,
-          toSave.incomeWarningDismissed,
-          toSave.hiddenBudgetMonths,
-          toSave.excludeUnassignedFromBudget
-        );
-        if (ok) {
-          baseSnapshotRef.current = toSave;
-          setRemoteChangeAvailable(false);
+        const previousVersion = versionRef.current;
+        const newVersion = await saveLedgerChanges(changes);
+        baseSnapshotRef.current = { ...localBlob, settingsSaved: true };
+        versionRef.current = newVersion;
+        // Our save moves the counter by exactly one. A bigger jump means
+        // someone else saved in between: offer to bring their changes in.
+        if (previousVersion !== null && newVersion !== previousVersion + 1) {
+          setRemoteChangeAvailable(true);
         }
-        setSaveError(ok ? null : "Your last change couldn't be saved locally — it may not persist after reload.");
+        setSaveError(null);
+      } catch (e) {
+        // Nothing is lost: what was last saved hasn't moved, so this change
+        // is sent again with the next one.
+        setSaveError("Your last change couldn't be saved. Check your connection; it will be retried with your next change.");
       } finally {
         savingRef.current = false;
       }
@@ -6768,7 +6733,15 @@ function App({ householdName } = {}) {
       const nextTransactions = transactions.map((t) =>
         t.categoryId === sourceCategoryId ? { ...t, categoryId: targetCategoryId } : t
       );
-      persist(accounts, nextTransactions, nextCategories, budgetGroups, plannedIncome, incomeWarningDismissed, hiddenBudgetMonths, excludeUnassignedFromBudget);
+      // In budget groups, the merged category is replaced by the one it
+      // merged into, so the group keeps covering that spending.
+      const nextBudgetGroups = budgetGroups.map((g) => {
+        const ids = g.categoryIds || [];
+        if (!ids.includes(sourceCategoryId)) return g;
+        const replaced = ids.map((id) => (id === sourceCategoryId ? targetCategoryId : id));
+        return { ...g, categoryIds: replaced.filter((id, i) => replaced.indexOf(id) === i) };
+      });
+      persist(accounts, nextTransactions, nextCategories, nextBudgetGroups, plannedIncome, incomeWarningDismissed, hiddenBudgetMonths, excludeUnassignedFromBudget);
       setToast(`Merged "${source?.name || "category"}" into "${target?.name || "category"}".`);
     },
     [accounts, transactions, categories, budgetGroups, plannedIncome, incomeWarningDismissed, hiddenBudgetMonths, excludeUnassignedFromBudget, persist]
@@ -6936,10 +6909,33 @@ function App({ householdName } = {}) {
       const nextTransactions = transactions.map((t) =>
         t.categoryId === categoryId ? { ...t, categoryId: null } : t
       );
-      persist(accounts, nextTransactions, nextCategories, budgetGroups, plannedIncome, incomeWarningDismissed, hiddenBudgetMonths, excludeUnassignedFromBudget);
+      // Remove it from any budget group too, in the same save, so Data
+      // History can put it back in its groups if the delete is undone.
+      const nextBudgetGroups = budgetGroups.map((g) =>
+        (g.categoryIds || []).includes(categoryId)
+          ? { ...g, categoryIds: g.categoryIds.filter((id) => id !== categoryId) }
+          : g
+      );
+      persist(accounts, nextTransactions, nextCategories, nextBudgetGroups, plannedIncome, incomeWarningDismissed, hiddenBudgetMonths, excludeUnassignedFromBudget);
     },
     [accounts, transactions, categories, budgetGroups, plannedIncome, incomeWarningDismissed, hiddenBudgetMonths, excludeUnassignedFromBudget, persist]
   );
+
+  if (loadError) {
+    return (
+      <div className="ledger-root">
+        <style>{STYLES}</style>
+        <div className="loading-screen">
+          <div style={{ textAlign: "center" }}>
+            <p style={{ marginBottom: 14 }}>Couldn't load your ledger. Check your connection and try again.</p>
+            <button className="btn btn-secondary" onClick={() => window.location.reload()}>
+              Try again
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   if (!loaded) {
     return (

@@ -334,9 +334,6 @@ function formatExpiry(expiresAt) {
   return { text: `Expires in ${days} day${days === 1 ? "" : "s"}`, expired: false };
 }
 
-// Has to match the STORAGE_KEY constant in App.jsx — that's the one blob
-// this whole app reads and writes, and the one history tracks.
-const LEDGER_STORAGE_KEY = "ledger-data-v1";
 
 function formatRelativeTime(iso) {
   const diffMs = Date.now() - new Date(iso).getTime();
@@ -505,13 +502,17 @@ function HistorySection() {
   const [restoring, setRestoring] = useState(false);
   const [error, setError] = useState(null);
 
+  // Save points from the last 7 days, newest first. Security rules limit
+  // this to the signed-in person's own household.
   async function loadHistory() {
     setLoading(true);
     setError(null);
-    const { data, error } = await supabase.rpc("list_storage_history", {
-      p_key: LEDGER_STORAGE_KEY,
-      p_shared: false,
-    });
+    const { data, error } = await supabase
+      .from("ledger_change_sets")
+      .select("id, started_at, change_count")
+      .order("started_at", { ascending: false })
+      .order("id", { ascending: false })
+      .limit(100);
     if (error) setError(error.message);
     setEntries(data || []);
     setLoading(false);
@@ -525,7 +526,7 @@ function HistorySection() {
   async function handleRestore(id) {
     setRestoring(true);
     setError(null);
-    const { error } = await supabase.rpc("restore_storage_history", { p_history_id: id });
+    const { error } = await supabase.rpc("restore_ledger_to", { p_change_set_id: id });
     if (error) {
       setRestoring(false);
       setError(error.message);
@@ -546,8 +547,9 @@ function HistorySection() {
       ) : (
         <>
           <p style={{ fontSize: 12.5, color: "var(--ink-muted)", marginBottom: 8 }}>
-            Every past version of your data, kept for 1 hour. Restoring replaces everything currently in the
-            app with that older version — it's not a way to bring back just one item.
+            Each entry is a save point from the last 7 days, covering up to 5 minutes of changes. Restoring
+            puts all your data back the way it was just before that save point, undoing everything after it.
+            The restore shows up here as a new save point, so it can be undone too.
           </p>
           {loading ? (
             <p style={{ fontSize: 13, color: "var(--ink-muted)" }}>Loading…</p>
@@ -556,7 +558,13 @@ function HistorySection() {
           ) : (
             entries.map((entry) => (
               <div style={rowStyle} key={entry.id}>
-                <span>{formatRelativeTime(entry.archived_at)}</span>
+                <span>
+                  {formatRelativeTime(entry.started_at)}
+                  <span style={{ color: "var(--ink-muted)", fontSize: 12 }}>
+                    {" "}
+                    · {entry.change_count} change{entry.change_count === 1 ? "" : "s"}
+                  </span>
+                </span>
                 {confirmingId === entry.id ? (
                   <span style={{ display: "flex", gap: 6 }}>
                     <button
