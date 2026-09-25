@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useMemo, useCallback, useRef } from "react";
+import { createPortal } from "react-dom";
 import Papa from "papaparse";
 import * as XLSX from "xlsx";
 import { BarChart, Bar, PieChart, Pie, Cell, ReferenceLine, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from "recharts";
@@ -1944,27 +1945,32 @@ const STYLES = `
   border-radius: 12px;
   padding: 18px 20px 16px;
   box-shadow: 0 16px 40px rgba(0, 0, 0, 0.25);
+  font-family: 'Work Sans', -apple-system, sans-serif;
+  box-sizing: border-box;
 }
 .tutorial-top { display: flex; justify-content: space-between; align-items: baseline; }
 .tutorial-count { font-size: 11.5px; font-weight: 600; letter-spacing: 0.04em; text-transform: uppercase; color: var(--ink-muted); }
-.ledger-root .tutorial-skip {
+.tutorial-card .tutorial-skip {
   background: none; border: none; padding: 0; font-family: inherit; font-size: 12.5px;
   font-weight: 600; color: var(--ink-muted); cursor: pointer; text-decoration: underline;
 }
 .tutorial-progress { height: 4px; border-radius: 999px; background: var(--subtle-bg); overflow: hidden; margin: 10px 0 14px; }
 .tutorial-progress-fill { height: 100%; background: var(--accent); border-radius: 999px; transition: width 0.2s ease; }
-.ledger-root .tutorial-title { font-size: 20px; margin-bottom: 8px; }
+.tutorial-card .tutorial-title {
+  font-family: 'Fraunces', Georgia, serif; font-weight: 500; font-size: 20px;
+  letter-spacing: -0.01em; color: var(--heading); margin: 0 0 8px;
+}
 .tutorial-body { font-size: 14px; line-height: 1.6; color: var(--ink-muted); margin: 0 0 16px; }
 .tutorial-actions { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
-.ledger-root .tutorial-btn {
+.tutorial-card .tutorial-btn {
   font-family: inherit; font-size: 13.5px; font-weight: 600; padding: 8px 14px;
   border-radius: var(--radius); cursor: pointer;
 }
-.ledger-root .tutorial-btn-primary { background: var(--accent); color: #fff; border: 1px solid var(--accent); }
-.ledger-root .tutorial-btn-primary:hover { background: var(--accent-hover); }
-.ledger-root .tutorial-btn-secondary { background: var(--panel); color: var(--ink); border: 1px solid var(--border); }
+.tutorial-card .tutorial-btn-primary { background: var(--accent); color: #fff; border: 1px solid var(--accent); }
+.tutorial-card .tutorial-btn-primary:hover { background: var(--accent-hover); }
+.tutorial-card .tutorial-btn-secondary { background: var(--panel); color: var(--ink); border: 1px solid var(--border); }
 /* The dark theme's accent is a light blue, where white text is hard to read. */
-:root[data-theme^="dark-"] .ledger-root .tutorial-btn-primary { color: #10131B; }
+:root[data-theme^="dark-"] .tutorial-card .tutorial-btn-primary { color: #10131B; }
 
 .mobile-topbar { display: none; }
 .sidebar-backdrop { display: none; }
@@ -6225,7 +6231,10 @@ function TutorialDialog({ step, onBack, onNext, onSkip, onFinish, onUpload, show
     return () => window.removeEventListener("keydown", onKey);
   }, [onSkip]);
 
-  return (
+  // Drawn at the top level of the page (a React "portal"), outside the
+  // app's own layer, so it sits in front of everything, including the
+  // Settings button, which lives outside the app in householdGate.jsx.
+  return createPortal(
     <div className="tutorial-scrim">
       <div className="tutorial-card" role="dialog" aria-modal="true" aria-labelledby="tutorial-title">
         <div className="tutorial-top">
@@ -6270,7 +6279,8 @@ function TutorialDialog({ step, onBack, onNext, onSkip, onFinish, onUpload, show
           )}
         </div>
       </div>
-    </div>
+    </div>,
+    document.body
   );
 }
 
