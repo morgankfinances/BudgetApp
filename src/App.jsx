@@ -817,6 +817,50 @@ function buildTransactions(rows, mapping, accountId, accountName, uploadBatchId)
 /* Full backup: export everything to one CSV, and rebuild from one     */
 /* ------------------------------------------------------------------ */
 
+/* ------------------------------------------------------------------ */
+/* CSV formula-injection protection                                     */
+/*                                                                      */
+/* Spreadsheet programs run a cell as a formula if it starts with =, +, */
+/* -, or @ (or a tab or carriage return), and a crafted formula can do  */
+/* real harm when someone opens a backup. Transaction descriptions come */
+/* from bank files and other household members, so every exported text */
+/* cell that starts that way gets an apostrophe in front, which makes   */
+/* spreadsheets show it as plain text. Restoring a backup removes       */
+/* exactly that one apostrophe again, so data round-trips unchanged.    */
+/* ------------------------------------------------------------------ */
+
+// Starts with a formula character, possibly after apostrophes we added.
+const FORMULA_START = /^'*[=+\-@\t\r]/;
+// Plain numbers (e.g. "-50", "1,100.00") are safe and stay numbers.
+const PLAIN_NUMBER = /^[-+]?[\d,]*\.?\d+$/;
+
+function protectCsvCell(value) {
+  if (typeof value !== "string") return value; // real numbers, blanks
+  if (PLAIN_NUMBER.test(value)) return value;
+  return FORMULA_START.test(value) ? "'" + value : value;
+}
+
+function unprotectCsvCell(value) {
+  if (typeof value !== "string") return value;
+  return /^'+[=+\-@\t\r]/.test(value) ? value.slice(1) : value;
+}
+
+function protectCsvRows(rows) {
+  return rows.map((row) => {
+    const out = {};
+    for (const key of Object.keys(row)) out[key] = protectCsvCell(row[key]);
+    return out;
+  });
+}
+
+function unprotectCsvRows(rows) {
+  return rows.map((row) => {
+    const out = {};
+    for (const key of Object.keys(row)) out[key] = unprotectCsvCell(row[key]);
+    return out;
+  });
+}
+
 const BACKUP_COLUMNS = [
   "Account",
   "Date",
@@ -858,7 +902,7 @@ function exportBackupCSV(accounts, transactions, categories) {
     };
   });
 
-  const csv = Papa.unparse(rows, { columns: BACKUP_COLUMNS });
+  const csv = Papa.unparse(protectCsvRows(rows), { columns: BACKUP_COLUMNS });
   const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
   const url = URL.createObjectURL(blob);
   const a = document.createElement("a");
@@ -871,6 +915,7 @@ function exportBackupCSV(accounts, transactions, categories) {
 }
 
 function buildFromBackupRows(rows) {
+  rows = unprotectCsvRows(rows); // undo export-time formula protection
   const accountsByName = {};
   const categoriesByName = {};
   const transactions = [];
@@ -1079,7 +1124,7 @@ function exportBudgetCSV(categories, budgetGroups, plannedIncome) {
   categories.forEach((c) => pushOverrides(c, "Category"));
   budgetGroups.forEach((g) => pushOverrides(g, "Group"));
 
-  const csv = Papa.unparse(rows, { columns: BUDGET_BACKUP_COLUMNS });
+  const csv = Papa.unparse(protectCsvRows(rows), { columns: BUDGET_BACKUP_COLUMNS });
   const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
   const url = URL.createObjectURL(blob);
   const a = document.createElement("a");
@@ -1092,6 +1137,7 @@ function exportBudgetCSV(categories, budgetGroups, plannedIncome) {
 }
 
 function buildBudgetFromRows(rows, currentCategories, currentBudgetGroups) {
+  rows = unprotectCsvRows(rows); // undo export-time formula protection
   let plannedIncome = null;
   const categoryUpdates = {};
   const groupDefs = {};
