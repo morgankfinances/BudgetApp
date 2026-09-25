@@ -15,7 +15,7 @@
 
 import React, { useState, useEffect } from "react";
 import { supabase } from "./supabaseClient.js";
-import { applySavedTheme } from "./HouseholdGate.jsx";
+import { applySavedTheme } from "./householdGate.jsx";
 
 const MIN_PASSWORD_LENGTH = 12;
 
