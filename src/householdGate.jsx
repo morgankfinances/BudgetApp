@@ -236,6 +236,154 @@ function formatRelativeTime(iso) {
   return `${days} day${days === 1 ? "" : "s"} ago`;
 }
 
+// Set or change the signed-in user's password. The password goes
+// straight to Supabase Auth (stored only as a salted bcrypt hash) and
+// never touches this app's own tables.
+//
+// If "Secure password change" is turned on in Supabase and the last
+// sign-in wasn't recent, Supabase refuses the change until the user
+// proves it's really them. In that case this asks Supabase to email a
+// short code, then retries with that code. Supabase enforces this on its
+// servers, so this UI can't be used to skip it.
+const MIN_PASSWORD_LENGTH = 12;
+
+function PasswordSection() {
+  const [open, setOpen] = useState(false);
+  const [password, setPassword] = useState("");
+  const [confirm, setConfirm] = useState("");
+  const [nonce, setNonce] = useState("");
+  const [needsCode, setNeedsCode] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState(null);
+  const [notice, setNotice] = useState(null);
+  const [done, setDone] = useState(false);
+
+  function reset() {
+    setOpen(false);
+    setPassword("");
+    setConfirm("");
+    setNonce("");
+    setNeedsCode(false);
+    setError(null);
+    setNotice(null);
+  }
+
+  async function handleSave() {
+    setError(null);
+    if (password.length < MIN_PASSWORD_LENGTH) {
+      setError(`Use at least ${MIN_PASSWORD_LENGTH} characters. A few random words strung together works well.`);
+      return;
+    }
+    if (password !== confirm) {
+      setError("Those two passwords don't match.");
+      return;
+    }
+    if (needsCode && !nonce.trim()) {
+      setError("Enter the code from your email.");
+      return;
+    }
+
+    setBusy(true);
+    const { error } = await supabase.auth.updateUser(
+      needsCode ? { password, nonce: nonce.trim() } : { password }
+    );
+
+    if (error) {
+      const needsReauth = error.code === "reauthentication_needed" || /reauthenticat/i.test(error.message || "");
+      if (needsReauth && !needsCode) {
+        const { error: reauthError } = await supabase.auth.reauthenticate();
+        setBusy(false);
+        if (reauthError) {
+          setError(reauthError.message);
+          return;
+        }
+        setNeedsCode(true);
+        setNotice("To confirm it's you, we emailed you a verification code. Enter it below, then save again.");
+        return;
+      }
+      setBusy(false);
+      setError(error.message);
+      return;
+    }
+
+    // Sign this account out on every other device.
+    await supabase.auth.signOut({ scope: "others" });
+    setBusy(false);
+    reset();
+    setDone(true);
+  }
+
+  const fieldStyle = { ...inputStyle, marginBottom: 8 };
+
+  return (
+    <>
+      <div style={sectionLabelStyle}>Password</div>
+      {!open ? (
+        <>
+          {done && (
+            <p style={{ fontSize: 12.5, color: "var(--income)", marginBottom: 8 }}>
+              Password saved. You're still signed in here; any other devices were signed out.
+            </p>
+          )}
+          <p style={{ fontSize: 12.5, color: "var(--ink-muted)", marginBottom: 8 }}>
+            Optional. Lets you sign in with your email and a password instead of waiting for an email link.
+            Email links keep working either way.
+          </p>
+          <button
+            style={{ ...buttonStyle, marginBottom: 8 }}
+            onClick={() => {
+              setDone(false);
+              setOpen(true);
+            }}
+          >
+            Set or change password
+          </button>
+        </>
+      ) : (
+        <div style={{ marginBottom: 8 }}>
+          <input
+            type="password"
+            autoComplete="new-password"
+            placeholder={`New password (at least ${MIN_PASSWORD_LENGTH} characters)`}
+            value={password}
+            onChange={(e) => setPassword(e.target.value)}
+            style={fieldStyle}
+          />
+          <input
+            type="password"
+            autoComplete="new-password"
+            placeholder="Confirm new password"
+            value={confirm}
+            onChange={(e) => setConfirm(e.target.value)}
+            style={fieldStyle}
+          />
+          {needsCode && (
+            <input
+              type="text"
+              inputMode="numeric"
+              autoComplete="one-time-code"
+              placeholder="Code from your email"
+              value={nonce}
+              onChange={(e) => setNonce(e.target.value)}
+              style={fieldStyle}
+            />
+          )}
+          {notice && <p style={{ fontSize: 12.5, color: "var(--ink-muted)", marginBottom: 8 }}>{notice}</p>}
+          <div style={{ display: "flex", gap: 8 }}>
+            <button style={buttonStyle} onClick={handleSave} disabled={busy}>
+              {busy ? "Saving…" : "Save password"}
+            </button>
+            <button style={buttonStyle} onClick={reset} disabled={busy}>
+              Cancel
+            </button>
+          </div>
+          {error && <p style={{ color: "var(--danger)", fontSize: 13, marginTop: 8 }}>{error}</p>}
+        </div>
+      )}
+    </>
+  );
+}
+
 function HistorySection() {
   const [open, setOpen] = useState(false);
   const [entries, setEntries] = useState([]);
@@ -763,6 +911,8 @@ function HouseholdPanel({ onClose, onDataChanged, theme, onThemeChange }) {
 
         <div style={sectionLabelStyle}>Appearance</div>
         <ThemePicker theme={theme} onChange={onThemeChange} />
+
+        <PasswordSection />
 
         <div style={sectionLabelStyle}>Account</div>
         {leaveConfirming ? (
