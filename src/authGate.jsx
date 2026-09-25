@@ -64,12 +64,16 @@ const AUTH_STYLES = `
 .auth-root * { box-sizing: border-box; }
 .auth-column { width: min(380px, 100%); position: relative; z-index: 1; }
 
-/* Faint gold ring behind the card: decoration only. */
+/* Faint gold ring behind the card: decoration only. Sized by the
+   window's height so it nearly fills the screen top to bottom and
+   circles the sign-in content instead of sitting behind it. To make it
+   bigger or smaller, change the middle number (94vh = 94% of the
+   window's height). */
 .auth-deco-ring {
   position: absolute;
   top: 50%;
   left: 50%;
-  width: min(760px, 150vw);
+  width: clamp(640px, 94vh, 1150px);
   height: auto;
   transform: translate(-50%, -50%);
   opacity: 0.12;
@@ -77,6 +81,11 @@ const AUTH_STYLES = `
   z-index: 0;
 }
 :root[data-theme^="dark-"] .auth-deco-ring { opacity: 0.18; }
+/* On phones the card already fills the width, so the ring runs wider
+   than the screen and shows as arcs at the edges. */
+@media (max-width: 600px) {
+  .auth-deco-ring { width: 170vw; }
+}
 .auth-column.wide { width: min(520px, 100%); }
 
 .auth-body { font-size: 14px; line-height: 1.6; color: var(--ink-muted, #62685E); }
