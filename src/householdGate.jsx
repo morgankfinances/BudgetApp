@@ -108,7 +108,37 @@ const THEME_VARS_CSS = `
 .theme-swatch-light-sage { background: linear-gradient(135deg, #F5F6F1 50%, #C2661E 50%); }
 .theme-swatch-light-slate { background: linear-gradient(135deg, #F3F5F8 50%, #2B6CB0 50%); }
 .theme-swatch-dark-midnight { background: linear-gradient(135deg, #10131B 50%, #7B9EE0 50%); }
+
+/* Themed logo: every logo spot holds both images, and only the one that
+   matches the current theme shows. Any theme whose id starts with
+   "dark-" gets the gold coin, so a future dark theme is covered too. */
+.logo-dark { display: none; }
+:root[data-theme^="dark-"] .logo-light { display: none; }
+:root[data-theme^="dark-"] .logo-dark { display: inline-block; }
 `;
+
+// Logo images, both in public/. File names are case-sensitive on
+// Vercel, so these must match the files exactly.
+export const LOGO_LIGHT_SRC = "/Black_Coin.svg";
+export const LOGO_DARK_SRC = "/Gold_Coin.svg";
+
+// If a logo file is ever missing, hide it instead of showing a broken-
+// image icon. (An inline style wins over the theme rules above.)
+function hideMissingLogo(e) {
+  e.currentTarget.style.display = "none";
+}
+
+// The app's logo, switching automatically with the theme: the black coin
+// on the light themes, the gold coin on the dark theme. Used by the
+// sidebar, the mobile top bar, and the sign-in and disclosure screens.
+export function ThemedLogo({ className = "" }) {
+  return (
+    <>
+      <img className={`${className} logo-light`} src={LOGO_LIGHT_SRC} alt="" onError={hideMissingLogo} />
+      <img className={`${className} logo-dark`} src={LOGO_DARK_SRC} alt="" onError={hideMissingLogo} />
+    </>
+  );
+}
 
 // Applies this device's saved theme right away. The sign-in screen
 // (authGate.jsx) renders before this file's component mounts, so it calls this

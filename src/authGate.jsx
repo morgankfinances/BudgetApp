@@ -15,13 +15,9 @@
 
 import React, { useState, useEffect } from "react";
 import { supabase } from "./supabaseClient.js";
-import { applySavedTheme } from "./householdGate.jsx";
+import { applySavedTheme, ThemedLogo } from "./householdGate.jsx";
 
 const MIN_PASSWORD_LENGTH = 12;
-
-// The logo shown above the sign-in card. Same file as the browser-tab
-// icon (it lives in public/), so replacing that one file updates both.
-const LOGO_SRC = "/favicon.svg";
 
 // The password-reset email links back here with ?reset=1 added. That's
 // a marker we control, so it works the same regardless of how Supabase
@@ -89,7 +85,6 @@ const AUTH_STYLES = `
   width: 40px;
   height: 40px;
   object-fit: contain;
-  display: block;
 }
 .auth-tagline {
   text-align: center;
@@ -222,14 +217,7 @@ export function AuthShell({ children, tagline = "Your household's money, organiz
       <style>{AUTH_STYLES}</style>
       <div className={"auth-column" + (wide ? " wide" : "")}>
         <div className="auth-brand">
-          <img
-            className="auth-logo"
-            src={LOGO_SRC}
-            alt=""
-            onError={(e) => {
-              e.currentTarget.style.display = "none";
-            }}
-          />
+          <ThemedLogo className="auth-logo" />
           Coinrose
         </div>
         {tagline ? <p className="auth-tagline">{tagline}</p> : <div style={{ height: 22 }} />}

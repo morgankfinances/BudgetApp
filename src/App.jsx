@@ -2,23 +2,13 @@ import React, { useState, useEffect, useMemo, useCallback, useRef } from "react"
 import Papa from "papaparse";
 import * as XLSX from "xlsx";
 import { BarChart, Bar, PieChart, Pie, Cell, ReferenceLine, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from "recharts";
+import { ThemedLogo } from "./householdGate.jsx";
 
 /* ------------------------------------------------------------------ */
 /* Storage                                                             */
 /* ------------------------------------------------------------------ */
 
 const STORAGE_KEY = "ledger-data-v1";
-
-// The logo shown in the sidebar brand and the mobile top bar. Same file
-// as the browser-tab icon (it lives in public/), so replacing that one
-// file updates every spot at once.
-const LOGO_SRC = "/favicon.svg";
-
-// If the logo file is ever missing, hide it instead of showing a
-// broken-image icon.
-function hideIfMissing(e) {
-  e.currentTarget.style.display = "none";
-}
 
 const VIEW_TITLES = {
   overview: "Overview",
@@ -6653,13 +6643,13 @@ function App({ householdName } = {}) {
           <span />
         </button>
         <h2>{VIEW_TITLES[view] || "Ledger"}</h2>
-        <img className="mobile-topbar-logo" src={LOGO_SRC} alt="" onError={hideIfMissing} />
+        <ThemedLogo className="mobile-topbar-logo" />
       </div>
       <div className={"sidebar-backdrop" + (mobileMenuOpen ? " visible" : "")} onClick={() => setMobileMenuOpen(false)} />
       <div className="app-shell">
         <div className={"sidebar" + (mobileMenuOpen ? " mobile-open" : "")}>
           <div className="sidebar-brand">
-            <img className="sidebar-brand-logo" src={LOGO_SRC} alt="" onError={hideIfMissing} />
+            <ThemedLogo className="sidebar-brand-logo" />
             {householdName ? `${householdName} Ledger` : "Ledger"}
           </div>
           <div className="sidebar-nav" onClick={() => setMobileMenuOpen(false)}>
