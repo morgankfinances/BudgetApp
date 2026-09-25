@@ -1969,15 +1969,22 @@ const STYLES = `
   .overview-grid { grid-template-columns: 1fr !important; }
 
   /* The pivot-style tables (Reports' category table, Budget's history
-     tables) pin their first column with position: sticky so it stays
-     visible while scrolling the rest sideways — but with no width cap,
-     a long category name could make that pinned column eat most of a
-     narrow screen permanently, leaving little room for anything else.
-     Cap it and let the name wrap instead of forcing the column wider. */
+     tables) pin their first column so it stays visible while the amount
+     columns scroll sideways. On phones that pinned name column gets a
+     fixed width of about a third of the screen: as a floor, so the
+     amounts scroll instead of squeezing it, and as a ceiling, so a long
+     name can't take over the screen. Names wrap only between words
+     (overflow-wrap, unlike word-break, never splits a word that fits);
+     a single word too long for the column is the only thing that breaks. */
+  .pivot-table th, .pivot-table td { padding: 7px 10px; font-size: 12.5px; }
+  .pivot-table thead th { font-size: 10.5px; }
   .pivot-table th:first-child, .pivot-table td:first-child {
-    max-width: 33vw;
+    width: 34vw;
+    min-width: 34vw;
+    max-width: 34vw;
     white-space: normal;
-    word-break: break-word;
+    overflow-wrap: break-word;
+    line-height: 1.3;
   }
 
   /* Account and category rows: stack instead of squeezing into one line */
