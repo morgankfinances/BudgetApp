@@ -2,7 +2,7 @@ import React, { useState, useEffect, useMemo, useCallback, useRef } from "react"
 import Papa from "papaparse";
 import * as XLSX from "xlsx";
 import { BarChart, Bar, PieChart, Pie, Cell, ReferenceLine, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from "recharts";
-import { ThemedLogo, ThemedStar, LoadingIndicator } from "./householdGate.jsx";
+import { ThemedLogo, ThemedStar, LoadingIndicator, DecoRing } from "./householdGate.jsx";
 
 /* ------------------------------------------------------------------ */
 /* Storage                                                             */
@@ -1444,6 +1444,7 @@ const STYLES = `
 }
 
 .ledger-root {
+  isolation: isolate;
   font-family: 'Work Sans', -apple-system, sans-serif;
   color: var(--ink);
   background: var(--bg);
@@ -1809,6 +1810,7 @@ const STYLES = `
 .pivot-table tfoot td { border-top: 2px solid var(--border); border-bottom: none; background: var(--subtle-bg); font-weight: 700; }
 .pivot-table tbody tr:last-child td { border-bottom: none; }
 .pivot-row-label { font-weight: 500; }
+.pivot-row-budget { font-weight: 400; font-size: 12px; color: var(--ink-muted); margin-top: 2px; }
 .pivot-total-col { font-weight: 600; }
 
 .excluded-note {
@@ -1910,6 +1912,11 @@ const STYLES = `
   display: flex; align-items: center; justify-content: center; min-height: 100vh; color: var(--ink-muted); font-size: 14px;
 }
 
+/* Center the background ring on the content area, to the right of the
+   216px sidebar. On phones the sidebar is hidden, so it centers on the
+   screen (see the mobile rules below). */
+.coinrose-bg-ring.beside-sidebar { left: calc(216px + (100vw - 216px) / 2); }
+
 .mobile-topbar { display: none; }
 .sidebar-backdrop { display: none; }
 .mobile-expand-toggle { display: none; }
@@ -1986,6 +1993,12 @@ const STYLES = `
     overflow-wrap: break-word;
     line-height: 1.3;
   }
+
+  /* Budget progress cards use the full width on phones instead of
+     stopping at their desktop maximum and leaving an empty strip. */
+  .budget-card { max-width: none; flex-basis: 100%; }
+
+  .coinrose-bg-ring.beside-sidebar { left: 50%; }
 
   /* Account and category rows: stack instead of squeezing into one line */
   .account-card { flex-direction: column; align-items: flex-start; gap: 10px; }
@@ -4699,19 +4712,13 @@ function BudgetHistoryTable({ budgeted, periods, spendMap, periodLabelFn }) {
           {budgeted.map((c) => (
             <tr key={c.id}>
               <td className="pivot-row-label">
-                {c.name}
-                {c.isGroup && <span className="budget-group-tag">group</span>}
-                {c.isUnassignedPseudo ? (
-                  <span className="muted-cell" style={{ fontWeight: 400 }}>
-                    {" "}
-                    (no budget)
-                  </span>
-                ) : (
-                  <span className="muted-cell" style={{ fontWeight: 400 }}>
-                    {" "}
-                    / {formatMoney(c.budgetAmount)}
-                  </span>
-                )}
+                <div>
+                  {c.name}
+                  {c.isGroup && <span className="budget-group-tag">group</span>}
+                </div>
+                <div className="pivot-row-budget">
+                  {c.isUnassignedPseudo ? "No budget" : `Budget: ${formatMoney(c.budgetAmount)}`}
+                </div>
               </td>
               {periods.map((p) => {
                 const spent = spendMap[c.id]?.[p] || 0;
@@ -6650,6 +6657,7 @@ function App({ householdName } = {}) {
   return (
     <div className="ledger-root">
       <style>{STYLES}</style>
+      <DecoRing className="coinrose-bg-ring beside-sidebar" />
       <div className="mobile-topbar">
         <button
           className="hamburger-btn"

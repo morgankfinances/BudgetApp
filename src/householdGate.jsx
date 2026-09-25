@@ -124,6 +124,27 @@ const THEME_VARS_CSS = `
 .coinrose-loading-label { font-family: 'Work Sans', -apple-system, sans-serif; font-size: 14px; color: var(--ink-muted); }
 @keyframes coinrose-spin { to { transform: rotate(360deg); } }
 @media (prefers-reduced-motion: reduce) { .coinrose-loading-star { animation: none; } }
+
+/* Background ring: the same faint gold ring as the sign-in screen, fixed
+   in place while the page scrolls. z-index -1 puts it behind every
+   panel, table, and chart; the screen that holds it sets
+   "isolation: isolate" so the ring still draws above that screen's own
+   background color. */
+.coinrose-bg-ring {
+  position: fixed;
+  top: 50%;
+  left: 50%;
+  width: clamp(850px, 125vh, 1530px);
+  height: auto;
+  transform: translate(-50%, -50%);
+  opacity: 0.12;
+  pointer-events: none;
+  z-index: -1;
+}
+:root[data-theme^="dark-"] .coinrose-bg-ring { opacity: 0.18; }
+@media (max-width: 600px) {
+  .coinrose-bg-ring { width: 225vw; }
+}
 `;
 
 // Brand images, all in public/. File names are case-sensitive on Vercel,
@@ -216,6 +237,7 @@ function ThemePicker({ theme, onChange }) {
 }
 
 const boxStyle = {
+  isolation: "isolate",
   display: "flex",
   minHeight: "100vh",
   alignItems: "center",
@@ -1226,6 +1248,7 @@ export default function HouseholdGate({ children }) {
   if (status === "checking") {
     return (
       <div style={boxStyle}>
+        <DecoRing className="coinrose-bg-ring" />
         <LoadingIndicator />
       </div>
     );
@@ -1234,6 +1257,7 @@ export default function HouseholdGate({ children }) {
   if (status === "pending") {
     return (
       <div style={boxStyle}>
+        <DecoRing className="coinrose-bg-ring" />
         <div style={{ width: "min(360px, 92vw)", textAlign: "center", boxSizing: "border-box" }}>
           <h2 style={{ marginBottom: 4 }}>Waiting for approval</h2>
           <p style={{ fontSize: 14, color: "var(--ink-muted)" }}>
@@ -1251,6 +1275,7 @@ export default function HouseholdGate({ children }) {
   if (status === "denied") {
     return (
       <div style={boxStyle}>
+        <DecoRing className="coinrose-bg-ring" />
         <div style={{ width: "min(360px, 92vw)", textAlign: "center", boxSizing: "border-box" }}>
           <h2 style={{ marginBottom: 4 }}>Request not approved</h2>
           <p style={{ fontSize: 14, color: "var(--ink-muted)", marginBottom: 16 }}>
@@ -1271,6 +1296,7 @@ export default function HouseholdGate({ children }) {
     if (createdCode) {
       return (
         <div style={boxStyle}>
+          <DecoRing className="coinrose-bg-ring" />
           <div style={{ width: "min(360px, 92vw)", boxSizing: "border-box" }}>
             <h2 style={{ marginBottom: 4 }}>Household created</h2>
             <p style={{ fontSize: 14, color: "var(--ink)" }}>
@@ -1303,6 +1329,7 @@ export default function HouseholdGate({ children }) {
 
     return (
       <div style={boxStyle}>
+        <DecoRing className="coinrose-bg-ring" />
         <div style={{ width: "min(360px, 92vw)", boxSizing: "border-box" }}>
           <h2 style={{ marginBottom: 4 }}>Set up your household</h2>
           <p style={{ fontSize: 14, color: "var(--ink-muted)" }}>
