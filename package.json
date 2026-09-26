@@ -12,6 +12,7 @@
     "coverage": "vitest run --coverage"
   },
   "dependencies": {
+    "@sentry/react": "^11.0.0",
     "@supabase/supabase-js": "^2.114.0",
     "papaparse": "^5.7.0",
     "react": "^19.2.8",

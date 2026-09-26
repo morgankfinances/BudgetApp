@@ -13,7 +13,7 @@
 // Import "./storageAdapter.js" separately (once, at app startup) before
 // this renders App, so window.storage is ready when App loads data.
 
-import React, { useState, useEffect, useLayoutEffect } from "react";
+import React, { useState, useEffect, useLayoutEffect, useRef } from "react";
 import { supabase } from "./supabaseClient.js";
 import { applySavedTheme, ThemedLogo, DecoRing, LoadingIndicator } from "./householdGate.jsx";
 
@@ -225,6 +225,9 @@ const AUTH_STYLES = `
   margin-top: 14px;
 }
 
+.auth-captcha { margin-top: 14px; display: flex; justify-content: center; }
+.auth-captcha:empty { display: none; }
+
 .auth-footnote {
   text-align: center;
   font-size: 12.5px;
@@ -330,6 +333,75 @@ function SetNewPasswordForm({ onDone }) {
   );
 }
 
+/* ------------------------------------------------------------------ */
+/* Bot protection (Cloudflare Turnstile)                               */
+/*                                                                      */
+/* With CAPTCHA protection on in Supabase, every sign-in, sign-in-link, */
+/* and password-reset request must carry a Turnstile token. The widget  */
+/* only shows itself when Cloudflare wants a person to prove they're    */
+/* human; most people never see it. Tokens work once, so the widget     */
+/* resets after every attempt. Without a site key set (for example,     */
+/* running locally), it's skipped entirely.                             */
+/* ------------------------------------------------------------------ */
+const TURNSTILE_SITE_KEY = import.meta.env?.VITE_TURNSTILE_SITE_KEY || "";
+
+let turnstileScript = null;
+function loadTurnstile() {
+  if (window.turnstile) return Promise.resolve();
+  if (!turnstileScript) {
+    turnstileScript = new Promise((resolve, reject) => {
+      const el = document.createElement("script");
+      el.src = "https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit";
+      el.async = true;
+      el.onload = () => resolve();
+      el.onerror = () => {
+        turnstileScript = null;
+        reject(new Error("Couldn't load the security check"));
+      };
+      document.head.appendChild(el);
+    });
+  }
+  return turnstileScript;
+}
+
+function TurnstileWidget({ onToken, resetKey }) {
+  const box = useRef(null);
+  const widgetId = useRef(null);
+
+  useEffect(() => {
+    if (!TURNSTILE_SITE_KEY) return undefined;
+    let cancelled = false;
+    loadTurnstile()
+      .then(() => {
+        if (cancelled || !box.current) return;
+        widgetId.current = window.turnstile.render(box.current, {
+          sitekey: TURNSTILE_SITE_KEY,
+          appearance: "interaction-only",
+          theme: (document.documentElement.getAttribute("data-theme") || "").startsWith("dark") ? "dark" : "light",
+          callback: (token) => onToken(token),
+          "expired-callback": () => onToken(null),
+          "error-callback": () => onToken(null),
+        });
+      })
+      .catch(() => onToken(null));
+    return () => {
+      cancelled = true;
+      if (widgetId.current !== null && window.turnstile) window.turnstile.remove(widgetId.current);
+      widgetId.current = null;
+    };
+  }, []);
+
+  // After each attempt, get a fresh token (each one works only once).
+  useEffect(() => {
+    if (resetKey > 0 && widgetId.current !== null && window.turnstile) {
+      onToken(null);
+      window.turnstile.reset(widgetId.current);
+    }
+  }, [resetKey]);
+
+  return TURNSTILE_SITE_KEY ? <div ref={box} className="auth-captcha" /> : null;
+}
+
 export default function AuthGate({ children }) {
   const [session, setSession] = useState(undefined); // undefined = checking, null = signed out
   const [recovering, setRecovering] = useState(urlHasResetMarker);
@@ -339,6 +411,22 @@ export default function AuthGate({ children }) {
   const [sent, setSent] = useState(false); // magic link or reset email sent
   const [error, setError] = useState(null);
   const [busy, setBusy] = useState(false);
+  const [captchaToken, setCaptchaToken] = useState(null);
+  const [captchaResetKey, setCaptchaResetKey] = useState(0);
+
+  // Returns the extra options a sign-in request needs, or null (with an
+  // error shown) if the security check hasn't finished yet.
+  function captchaOptionsOrWait() {
+    if (!TURNSTILE_SITE_KEY) return {};
+    if (!captchaToken) {
+      setError("One moment: a quick security check is still finishing. Please try again.");
+      return null;
+    }
+    return { captchaToken };
+  }
+  function freshCaptcha() {
+    setCaptchaResetKey((k) => k + 1);
+  }
 
   // Apply the saved theme before the first frame is drawn, so only the
   // matching version of each themed image ever appears.
@@ -376,12 +464,15 @@ export default function AuthGate({ children }) {
   async function handleSendLink(e) {
     e.preventDefault();
     setError(null);
+    const captcha = captchaOptionsOrWait();
+    if (!captcha) return;
     setBusy(true);
     const { error } = await supabase.auth.signInWithOtp({
       email,
-      options: { emailRedirectTo: window.location.origin },
+      options: { emailRedirectTo: window.location.origin, ...captcha },
     });
     setBusy(false);
+    freshCaptcha();
     if (error) setError(error.message);
     else setSent(true);
   }
@@ -389,9 +480,12 @@ export default function AuthGate({ children }) {
   async function handlePasswordSignIn(e) {
     e.preventDefault();
     setError(null);
+    const captcha = captchaOptionsOrWait();
+    if (!captcha) return;
     setBusy(true);
-    const { error } = await supabase.auth.signInWithPassword({ email, password });
+    const { error } = await supabase.auth.signInWithPassword({ email, password, options: captcha });
     setBusy(false);
+    freshCaptcha();
     if (error) {
       // Same message whether the email has no account, has no password
       // yet, or the password is wrong. Anything more specific would tell
@@ -407,14 +501,19 @@ export default function AuthGate({ children }) {
   async function handleForgot(e) {
     e.preventDefault();
     setError(null);
+    const captcha = captchaOptionsOrWait();
+    if (!captcha) return;
     setBusy(true);
     const { error } = await supabase.auth.resetPasswordForEmail(email, {
       redirectTo: `${window.location.origin}/?reset=1`,
+      ...captcha,
     });
     setBusy(false);
+    freshCaptcha();
     // Deliberately the same confirmation whether or not the email has an
-    // account. Only rate-limit errors are shown.
-    if (error && /rate limit|too many/i.test(error.message)) setError(error.message);
+    // account. Only rate-limit and security-check errors are shown (a
+    // failed check means nothing was sent, so saying "sent" would mislead).
+    if (error && /rate limit|too many|captcha/i.test(error.message)) setError(error.message);
     else setSent(true);
   }
 
@@ -552,6 +651,7 @@ export default function AuthGate({ children }) {
             <ErrorMessage text={error} />
           </>
         )}
+        <TurnstileWidget onToken={setCaptchaToken} resetKey={captchaResetKey} />
       </div>
       <p className="auth-footnote">
         New here? Use <strong>Email link</strong> to create your account. You can add a password afterward in
