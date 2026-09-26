@@ -70,6 +70,7 @@ const THEME_VARS_CSS = `
   --border: #DAD9CC;
   --accent: #C2661E;
   --accent-hover: #9C4F15;
+  --accent-button: #A8561A; --accent-button-hover: #8A4613; --on-accent: #FFFFFF; --on-danger: #FFFFFF;
   --accent-tint: #F7E9DC;
   --income: #3F7D5C;
   --expense: #AC4A2C;
@@ -85,6 +86,7 @@ const THEME_VARS_CSS = `
 :root[data-theme="light-slate"] {
   --heading: #1C2430; --bg: #F3F5F8; --panel: #FFFFFF; --ink: #1C2430; --ink-muted: #5B6675;
   --border: #D6DCE3; --accent: #2B6CB0; --accent-hover: #1E5490; --accent-tint: #E7EFF8;
+  --accent-button: #2B6CB0; --accent-button-hover: #1E5490; --on-accent: #FFFFFF; --on-danger: #FFFFFF;
   --income: #2F8F6F; --expense: #C1502F; --warn-bg: #FCF3D9; --warn-border: #DDAE3E;
   --warn-ink: #7A5A0D; --danger: #B0402E; --danger-tint-bg: #FBEAE6; --danger-tint-border: #E0AA98;
   --subtle-bg: #EDF0F4;
@@ -92,6 +94,7 @@ const THEME_VARS_CSS = `
 :root[data-theme="dark-midnight"] {
   --heading: #C8CDD8; --bg: #10131B; --panel: #1B2030; --ink: #E7E9F1; --ink-muted: #9BA3B5;
   --border: #2C3346; --accent: #7B9EE0; --accent-hover: #9AB6EA; --accent-tint: #232A42;
+  --accent-button: #7B9EE0; --accent-button-hover: #9AB6EA; --on-accent: #10131B; --on-danger: #10131B;
   --income: #6FCB9A; --expense: #E2896A; --warn-bg: #3B301A; --warn-border: #C99A3E;
   --warn-ink: #EAC581; --danger: #E2685A; --danger-tint-bg: #3A2420; --danger-tint-border: #7A4038;
   --subtle-bg: #242A3D;

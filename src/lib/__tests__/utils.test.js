@@ -79,3 +79,16 @@ describe("formatting", () => {
     expect(formatDateDisplay("")).toBe("—");
   });
 });
+
+import { findNameClash } from "../utils.js";
+describe("findNameClash", () => {
+  const items = [{ id: "a", name: "Groceries" }, { id: "b", name: " Rent " }];
+  it("finds an existing name ignoring capitalization and spaces, but not the item itself", () => {
+    expect(findNameClash(items, "GROCERIES")).toBe(items[0]);
+    expect(findNameClash(items, "rent")).toBe(items[1]);
+    expect(findNameClash(items, "rent", "b")).toBeNull();
+    expect(findNameClash(items, "Pets")).toBeNull();
+    expect(findNameClash(items, "   ")).toBeNull();
+    expect(findNameClash(null, "x")).toBeNull();
+  });
+});

@@ -73,6 +73,16 @@ export function parseMoney(value) {
 }
 
 
+// Names of categories and budget groups must be unique, ignoring
+// capitalization and surrounding spaces: budget backups and household
+// merges match them by name, and duplicates are confusing in every list.
+// Returns the existing item with that name, if any (other than exceptId).
+export function findNameClash(items, name, exceptId = null) {
+  const wanted = String(name || "").trim().toLowerCase();
+  if (!wanted) return null;
+  return (items || []).find((i) => i.id !== exceptId && String(i.name || "").trim().toLowerCase() === wanted) || null;
+}
+
 export function formatMoney(n) {
   if (n == null) return "—";
   return n.toLocaleString("en-US", { style: "currency", currency: "USD" });

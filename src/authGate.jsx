@@ -154,7 +154,7 @@ const AUTH_STYLES = `
   cursor: pointer;
 }
 .auth-tab + .auth-tab { border-left: 1px solid var(--border, #DAD9CC); }
-.auth-tab.active { background: var(--accent, #C2661E); color: #fff; }
+.auth-tab.active { background: var(--accent-button, #A8561A); color: var(--on-accent, #fff); }
 
 .auth-field { display: flex; flex-direction: column; gap: 5px; margin-bottom: 14px; }
 .auth-field-top { display: flex; justify-content: space-between; align-items: baseline; }
@@ -181,17 +181,13 @@ const AUTH_STYLES = `
   font-weight: 600;
   border: none;
   border-radius: 6px;
-  background: var(--accent, #C2661E);
-  color: #fff;
+  background: var(--accent-button, #A8561A);
+  color: var(--on-accent, #fff);
   cursor: pointer;
   transition: background 0.12s ease, opacity 0.12s ease;
 }
-.auth-primary:hover:not(:disabled) { background: var(--accent-hover, #9C4F15); }
+.auth-primary:hover:not(:disabled) { background: var(--accent-button-hover, #8A4613); }
 .auth-primary:disabled { opacity: 0.55; cursor: not-allowed; }
-/* The dark theme's accent is a light blue, where white text is hard to
-   read. Dark text on it has strong contrast instead. */
-:root[data-theme="dark-midnight"] .auth-primary,
-:root[data-theme="dark-midnight"] .auth-tab.active { color: #10131B; }
 
 .auth-link {
   background: none;
