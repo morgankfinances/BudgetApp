@@ -202,17 +202,17 @@ export default function HomePage({ onSignIn, onGetStarted }) {
           <div className="home-wrap home-about">
             <h2 id="about-title">About Coinrose</h2>
             <p>
-            Coinrose is a personal project by Morgan Keller. 
-            It started as my household budget spreadsheet, with a separate sheet for every account. 
-            It worked, but it was time-consuming to keep up and never pleasant to look at. 
-            The budgeting apps I tried cost more than I wanted to pay, wanted to connect directly to my bank accounts, 
-            or weren't clear about what they did with my data.
-
-            Coinrose is what that spreadsheet wanted to be: one place for the whole household, 
-            with budgets that fit how you're actually paid, and data that's never sold and never used for ads.
+              Coinrose is a personal project by Morgan Keller. It started as my household budget spreadsheet, with a
+              separate sheet for every account. It worked, but it was time-consuming to keep up and never pleasant to
+              look at. The budgeting apps I tried cost more than I wanted to pay, wanted to connect directly to my bank
+              accounts, or weren't clear about what they did with my data.
             </p>
             <p>
-              It's free to use, it has no ads, and it isn't a bank or financial institution. Questions or ideas? Email{" "}
+              Coinrose is what that spreadsheet wanted to be: one place for the whole household, with budgets that fit
+              how you're actually paid, and data that's never sold and never used for ads.
+            </p>
+            <p>
+              It's free to use, and it isn't a bank or financial institution. Questions or ideas? Email{" "}
               <a href={`mailto:${CONTACT_EMAIL}`}>{CONTACT_EMAIL}</a>.
             </p>
           </div>
@@ -261,6 +261,7 @@ const HOME_STYLES = `
   font-family: 'Coinrose Body', -apple-system, 'Segoe UI', sans-serif;
   font-size: 16px;
   line-height: 1.6;
+  text-align: left; /* set here so no outside stylesheet can re-center the page */
 }
 .home-root *, .home-root *::before, .home-root *::after { box-sizing: border-box; }
 .home-wrap { max-width: 1120px; margin: 0 auto; padding: 0 24px; }
@@ -336,7 +337,10 @@ const HOME_STYLES = `
 .home-screen figcaption p { color: var(--ink-muted); margin: 0; }
 .home-root .home-note { margin: 28px 0 0; font-size: 13px; color: var(--ink-muted); }
 
-.home-privacy > *, .home-about > * { max-width: 760px; }
+/* The last two sections: a centered column with a centered heading. The
+   text itself stays left-aligned, which is much easier to read. */
+.home-wrap.home-privacy, .home-wrap.home-about { max-width: 808px; }
+.home-privacy h2, .home-about h2 { text-align: center; }
 .home-checks { margin-bottom: 18px; }
 .home-checks li { position: relative; padding-left: 32px; margin-bottom: 14px; }
 .home-checks li::before {

@@ -116,7 +116,7 @@ h1, h2, h3 { color: var(--heading); }
 .theme-swatch-btn {
   display: flex; align-items: center; gap: 8px;
   padding: 6px 8px; border-radius: 6px; border: 1px solid transparent;
-  background: none; font-family: sans-serif; font-size: 13px; color: var(--ink);
+  background: none; font-family: 'Coinrose Body', -apple-system, 'Segoe UI', sans-serif; font-size: 13px; color: var(--ink);
   cursor: pointer; text-align: left; width: 100%;
 }
 .theme-swatch-btn:hover { background: var(--subtle-bg); }
@@ -259,12 +259,13 @@ const boxStyle = {
   minHeight: "100vh",
   alignItems: "center",
   justifyContent: "center",
-  fontFamily: "sans-serif",
+  fontFamily: "'Coinrose Body', -apple-system, 'Segoe UI', sans-serif",
   background: "var(--bg)",
   color: "var(--ink)",
 };
 
 const inputStyle = {
+  fontFamily: "inherit",
   width: "100%",
   padding: 10,
   marginBottom: 8,
@@ -277,6 +278,7 @@ const inputStyle = {
 };
 
 const buttonStyle = {
+  fontFamily: "inherit",
   width: "100%",
   padding: 10,
   fontSize: 14,
@@ -295,7 +297,7 @@ const overlayStyle = {
   alignItems: "center",
   justifyContent: "center",
   zIndex: 100,
-  fontFamily: "sans-serif",
+  fontFamily: "'Coinrose Body', -apple-system, 'Segoe UI', sans-serif",
 };
 
 const cardStyle = {
@@ -330,6 +332,7 @@ const rowStyle = {
 };
 
 const smallBtnStyle = {
+  fontFamily: "inherit",
   padding: "5px 10px",
   fontSize: 12,
   cursor: "pointer",
@@ -1674,7 +1677,7 @@ export default function HouseholdGate({ children }) {
           right: 16,
           padding: "8px 14px",
           fontSize: 12.5,
-          fontFamily: "sans-serif",
+          fontFamily: "'Coinrose Body', -apple-system, 'Segoe UI', sans-serif",
           background: "var(--panel)",
           color: "var(--ink)",
           border: "1px solid var(--border)",
