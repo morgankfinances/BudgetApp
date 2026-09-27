@@ -1,5 +1,4 @@
 import Papa from "papaparse";
-import * as XLSX from "xlsx";
 import { parseDateISO, parseMoney, uid } from "./utils.js";
 
 
@@ -13,6 +12,9 @@ export async function readFileAsRows(file) {
     return { headers, rows: result.data };
   } else if (name.endsWith(".xlsx") || name.endsWith(".xls")) {
     const buf = await file.arrayBuffer();
+    // The Excel reader is large and most visits never need it, so it's
+    // downloaded only when someone actually uploads an Excel file.
+    const XLSX = await import("xlsx");
     const wb = XLSX.read(buf, { type: "array", cellDates: true });
     const sheetName = wb.SheetNames[0];
     const sheet = wb.Sheets[sheetName];

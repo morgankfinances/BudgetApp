@@ -2,11 +2,43 @@
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
-    <link rel="icon" type="image/svg+xml" href="/Black_Coin.svg" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Coinrose</title>
+    <meta
+      name="description"
+      content="Coinrose is a household budgeting app. Upload your bank and card statements, categorize spending, set budgets that match how you're paid, and share it all with the people you live with."
+    />
+    <link rel="icon" type="image/svg+xml" href="/Black_Coin.svg" />
+    <link rel="canonical" href="https://coinrose.io/" />
+    <meta name="theme-color" content="#F3F5F8" />
+
+    <!-- Start downloading the two main fonts right away, before the app's
+         code runs, so text appears in the right typeface sooner. -->
+    <link rel="preload" href="/fonts/archivo-latin.woff2" as="font" type="font/woff2" crossorigin />
+    <link rel="preload" href="/fonts/ibm-plex-sans-latin.woff2" as="font" type="font/woff2" crossorigin />
+    <link rel="stylesheet" href="/fonts/fonts.css" />
+
+    <!-- Link previews (messages, Slack, social media) -->
+    <meta property="og:type" content="website" />
+    <meta property="og:site_name" content="Coinrose" />
+    <meta property="og:title" content="Coinrose: your household's money, organized together" />
+    <meta
+      property="og:description"
+      content="Upload your statements, categorize spending, set budgets that match how you're paid, and share it all with your household. No bank logins required."
+    />
+    <meta property="og:url" content="https://coinrose.io/" />
+    <meta property="og:image" content="https://coinrose.io/og-image.png" />
+    <meta property="og:image:width" content="1200" />
+    <meta property="og:image:height" content="630" />
+    <meta property="og:image:alt" content="Coinrose: your household's money, organized together." />
+    <meta name="twitter:card" content="summary_large_image" />
   </head>
   <body>
+    <noscript>
+      <p style="font-family: sans-serif; padding: 24px; max-width: 520px; margin: 40px auto; line-height: 1.5">
+        Coinrose needs JavaScript to run. Please turn it on in your browser's settings and reload this page.
+      </p>
+    </noscript>
     <div id="root"></div>
     <script type="module" src="/src/main.jsx"></script>
   </body>
