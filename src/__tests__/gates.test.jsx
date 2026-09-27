@@ -26,7 +26,13 @@ const partner = { user_id: "u2", email: "partner@example.com", role: "member" };
 beforeEach(() => { fake.reset(); reloads.count = 0; window.history.replaceState({}, "", "/"); document.documentElement.removeAttribute("data-theme"); });
 
 describe("sign-in", () => {
-  const signedOut = async () => { render(<AuthGate><div>the app</div></AuthGate>); await screen.findByText("Welcome back"); };
+  // Signed-out visitors land on the home page; "Sign in" opens the form.
+  const signedOut = async () => {
+    render(<AuthGate><div>the app</div></AuthGate>);
+    await screen.findByRole("heading", { name: "Your money. Organized by you." });
+    fireEvent.click(screen.getAllByRole("button", { name: "Sign in" })[0]);
+    await screen.findByText("Welcome back");
+  };
 
   it("signed-in people go straight to the app", async () => {
     fake.state.session = { user: { id: "u1" } };
@@ -365,6 +371,7 @@ describe("crash screen", () => {
 describe("legal links", () => {
   it("the sign-in page, the notice, and Settings all link to the Privacy Policy and Terms of Use", async () => {
     const hrefs = () => [...document.querySelectorAll("a")].map((a) => a.getAttribute("href"));
+    window.history.replaceState({}, "", "/#signin"); // straight to the sign-in form
     render(<AuthGate><div>app</div></AuthGate>);
     await screen.findByText("Welcome back");
     expect(hrefs()).toEqual(expect.arrayContaining(["/terms.html", "/privacy.html"]));
@@ -423,5 +430,47 @@ describe("keyboard focus stays inside Settings", () => {
     expect(document.activeElement).toBe(focusable[1]);
     fireEvent.keyDown(focusable[1], { key: "a" });          // other keys are ignored
     expect(screen.getByRole("dialog")).toBeTruthy();
+  });
+});
+
+
+describe("home page", () => {
+  it("signed-out visitors see the home page, with its sections, screenshots, and legal links", async () => {
+    render(<AuthGate><div>the app</div></AuthGate>);
+    expect(await screen.findByRole("heading", { level: 1, name: "Your money. Organized by you." })).toBeTruthy();
+    expect(document.title).toBe("Coinrose: Household Budgeting");
+    for (const name of ["How it works", "What it does", "A look inside", "Built to know as little as possible", "About Coinrose"]) {
+      expect(screen.getByRole("heading", { level: 2, name })).toBeTruthy();
+    }
+    const images = [...document.querySelectorAll("img")].filter((i) => i.getAttribute("src").startsWith("/home/"));
+    expect(images).toHaveLength(4);
+    expect(images.every((i) => i.alt.length > 20)).toBe(true); // every screenshot is described
+    const hrefs = [...document.querySelectorAll("a")].map((a) => a.getAttribute("href"));
+    expect(hrefs).toEqual(expect.arrayContaining(["/privacy.html", "/terms.html", "mailto:morgankfinances@gmail.com"]));
+  });
+  it("'Get started' opens the sign-in form on the email-link tab, which creates accounts", async () => {
+    render(<AuthGate><div>the app</div></AuthGate>);
+    fireEvent.click((await screen.findAllByRole("button", { name: /Get started/ }))[0]);
+    expect(await screen.findByText("Welcome back")).toBeTruthy();
+    expect(screen.getByRole("tab", { name: "Email link" }).getAttribute("aria-selected")).toBe("true");
+    expect(document.title).toBe("Sign In | Coinrose");
+  });
+  it("'Sign in' opens the password tab, and 'Back to home' returns", async () => {
+    render(<AuthGate><div>the app</div></AuthGate>);
+    fireEvent.click((await screen.findAllByRole("button", { name: "Sign in" }))[0]);
+    expect(screen.getByRole("tab", { name: "Password" }).getAttribute("aria-selected")).toBe("true");
+    fireEvent.click(screen.getByRole("button", { name: /Back to home/ }));
+    expect(screen.getByRole("heading", { level: 1 }).textContent).toMatch(/Organized by you/);
+  });
+  it("coinrose.io/#signin goes straight to the sign-in form", async () => {
+    window.history.replaceState({}, "", "/#signin");
+    render(<AuthGate><div>the app</div></AuthGate>);
+    expect(await screen.findByText("Welcome back")).toBeTruthy();
+  });
+  it("signed-in visitors never see the home page", async () => {
+    fake.state.session = { user: { id: "u1" } };
+    render(<AuthGate><div>the app</div></AuthGate>);
+    expect(await screen.findByText("the app")).toBeTruthy();
+    expect(screen.queryByText(/Organized by you/)).toBeNull();
   });
 });

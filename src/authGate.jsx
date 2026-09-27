@@ -16,6 +16,7 @@
 import React, { useState, useEffect, useLayoutEffect, useRef } from "react";
 import { supabase } from "./supabaseClient.js";
 import { applySavedTheme, ThemedLogo, DecoRing, LoadingIndicator } from "./householdGate.jsx";
+import HomePage from "./components/HomePage.jsx";
 
 const MIN_PASSWORD_LENGTH = 12;
 
@@ -222,6 +223,8 @@ const AUTH_STYLES = `
 }
 
 .auth-legal { margin-top: 8px; font-size: 12px; }
+.auth-back { align-self: flex-start; background: none; border: none; padding: 4px 0; margin: 0 0 10px; font: inherit; font-size: 14px; font-weight: 600; color: var(--accent, #2B6CB0); cursor: pointer; }
+.auth-back:hover { text-decoration: underline; }
 .auth-footnote a { color: var(--accent, #2B6CB0); font-weight: 600; }
 .auth-captcha { margin-top: 14px; display: flex; justify-content: center; }
 .auth-captcha:empty { display: none; }
@@ -404,6 +407,9 @@ export default function AuthGate({ children }) {
   const [session, setSession] = useState(undefined); // undefined = checking, null = signed out
   const [recovering, setRecovering] = useState(urlHasResetMarker);
   const [mode, setMode] = useState("password"); // "password" | "link" | "forgot"
+  // Signed-out visitors see the home page first, unless the address asks
+  // for the sign-in form directly (coinrose.io/#signin).
+  const [showHome, setShowHome] = useState(() => !/(^|[#?&])signin\b/i.test(window.location.hash + window.location.search));
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [sent, setSent] = useState(false); // magic link or reset email sent
@@ -448,9 +454,20 @@ export default function AuthGate({ children }) {
     if (session && !recovering) return;
     let page = null; // still checking the session
     if (session && recovering) page = "Choose a New Password";
-    else if (session === null) page = mode === "forgot" ? "Reset Password" : "Sign In";
+    else if (session === null && showHome) {
+      document.title = "Coinrose: Household Budgeting";
+      return;
+    } else if (session === null) page = mode === "forgot" ? "Reset Password" : "Sign In";
     document.title = page ? `${page} | Coinrose` : "Coinrose";
-  }, [session, recovering, mode]);
+  }, [session, recovering, mode, showHome]);
+
+  // From the home page: open the sign-in form, on the password tab ("Sign
+  // in") or the email-link tab, which creates new accounts ("Get started").
+  function openSignIn(next) {
+    switchMode(next);
+    setShowHome(false);
+    window.scrollTo(0, 0);
+  }
 
   function switchMode(next) {
     setMode(next);
@@ -537,6 +554,8 @@ export default function AuthGate({ children }) {
 
   if (session) return children;
 
+  if (showHome) return <HomePage onSignIn={() => openSignIn("password")} onGetStarted={() => openSignIn("link")} />;
+
   const emailField = (
     <div className="auth-field">
       <label htmlFor="auth-email">Email</label>
@@ -554,6 +573,9 @@ export default function AuthGate({ children }) {
 
   return (
     <AuthShell>
+      <button type="button" className="auth-back" onClick={() => setShowHome(true)}>
+        ← Back to home
+      </button>
       <div className="auth-card">
         {mode === "forgot" ? (
           <>
