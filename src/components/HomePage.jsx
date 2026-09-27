@@ -4,7 +4,7 @@
 // theme colors and fonts, and loads none of the app's own code.
 
 import React from "react";
-import { ThemedLogo } from "../householdGate.jsx";
+import { ThemedLogo, DecoRing } from "../householdGate.jsx";
 
 const CONTACT_EMAIL = "morgankfinances@gmail.com";
 
@@ -81,6 +81,9 @@ export default function HomePage({ onSignIn, onGetStarted }) {
   return (
     <div className="home-root">
       <style>{HOME_STYLES}</style>
+      {/* The same faint ring as the app's pages: fixed in the background,
+          behind all content. Decorative, so screen readers skip it. */}
+      <DecoRing className="coinrose-bg-ring" />
 
       <header className="home-header">
         <div className="home-wrap home-header-row">
@@ -262,6 +265,10 @@ const HOME_STYLES = `
   font-size: 16px;
   line-height: 1.6;
   text-align: left; /* set here so no outside stylesheet can re-center the page */
+  /* Lets the background ring (z-index -1) draw above this page's own
+     background color but behind everything else. */
+  position: relative;
+  isolation: isolate;
 }
 .home-root *, .home-root *::before, .home-root *::after { box-sizing: border-box; }
 .home-wrap { max-width: 1120px; margin: 0 auto; padding: 0 24px; }
