@@ -19,6 +19,9 @@ import { PlanningView } from "./views/PlanningView.jsx";
 import { ReportsView } from "./views/ReportsView.jsx";
 import { PostUploadCategorizeView, TransactionsView } from "./views/TransactionsView.jsx";
 import { UploadView } from "./views/UploadView.jsx";
+import { reloadPage } from "./lib/browser.js";
+
+const SIDEBAR_KEY = "coinrose-sidebar-collapsed-v1";
 
 function App({ householdName } = {}) {
   const [loaded, setLoaded] = useState(false);
@@ -39,6 +42,26 @@ function App({ householdName } = {}) {
   const [syncing, setSyncing] = useState(false);
   const [activeUploadBatch, setActiveUploadBatch] = useState(null); // { batchId, accountName }
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+  // Desktop only: the sidebar can be hidden, remembered on this device.
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(() => {
+    try {
+      return localStorage.getItem(SIDEBAR_KEY) === "true";
+    } catch (e) {
+      return false;
+    }
+  });
+  const collapseBtnRef = useRef(null);
+  const expandBtnRef = useRef(null);
+  const toggleSidebar = useCallback((collapsed) => {
+    setSidebarCollapsed(collapsed);
+    try {
+      localStorage.setItem(SIDEBAR_KEY, String(collapsed));
+    } catch (e) {
+      /* not remembered, but still works */
+    }
+    // Keep keyboard focus on the control that just appeared.
+    setTimeout(() => (collapsed ? expandBtnRef.current : collapseBtnRef.current)?.focus(), 0);
+  }, []);
   const [tutorialStep, setTutorialStep] = useState(null); // null = tour not showing
   const baseSnapshotRef = useRef(null);
   const savingRef = useRef(false);
@@ -643,7 +666,7 @@ function App({ householdName } = {}) {
         <div className="loading-screen">
           <div style={{ textAlign: "center" }}>
             <p style={{ marginBottom: 14 }}>Couldn't load your ledger. Check your connection and try again.</p>
-            <button className="btn btn-secondary" onClick={() => window.location.reload()}>
+            <button className="btn btn-secondary" onClick={reloadPage}>
               Try again
             </button>
           </div>
@@ -668,7 +691,7 @@ function App({ householdName } = {}) {
   return (
     <div className="ledger-root">
       <style>{STYLES}</style>
-      <DecoRing className="coinrose-bg-ring beside-sidebar" />
+      <DecoRing className={"coinrose-bg-ring" + (sidebarCollapsed ? "" : " beside-sidebar")} />
       <div className="mobile-topbar">
         <button
           className="hamburger-btn"
@@ -683,8 +706,34 @@ function App({ householdName } = {}) {
         <ThemedLogo className="mobile-topbar-logo" />
       </div>
       <div className={"sidebar-backdrop" + (mobileMenuOpen ? " visible" : "")} onClick={() => setMobileMenuOpen(false)} />
-      <div className="app-shell">
-        <div className={"sidebar" + (mobileMenuOpen ? " mobile-open" : "")}>
+      <div className={"app-shell" + (sidebarCollapsed ? " sidebar-collapsed" : "")}>
+        {sidebarCollapsed && (
+          <button
+            ref={expandBtnRef}
+            type="button"
+            className="sidebar-expand-btn"
+            onClick={() => toggleSidebar(false)}
+            aria-label="Show sidebar"
+            aria-expanded="false"
+            aria-controls="app-sidebar"
+            title="Show sidebar"
+          >
+            <svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true" focusable="false"><path d="m6 3 5 5-5 5" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" /></svg>
+          </button>
+        )}
+        <nav id="app-sidebar" aria-label="Main" className={"sidebar" + (mobileMenuOpen ? " mobile-open" : "")}>
+          <button
+            ref={collapseBtnRef}
+            type="button"
+            className="sidebar-collapse-btn"
+            onClick={() => toggleSidebar(true)}
+            aria-label="Hide sidebar"
+            aria-expanded="true"
+            aria-controls="app-sidebar"
+            title="Hide sidebar"
+          >
+            <svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true" focusable="false"><path d="M10 3 5 8l5 5" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" /></svg>
+          </button>
           <div className="sidebar-brand">
             <ThemedLogo className="sidebar-brand-logo" />
             {householdName ? `${householdName} Ledger` : "Ledger"}
@@ -772,7 +821,7 @@ function App({ householdName } = {}) {
               <span>{formatMoney(totalNet)}</span>
             </div>
           </div>
-        </div>
+        </nav>
 
         <div className="main">
           {saveError && <div className="error-banner">{saveError}</div>}

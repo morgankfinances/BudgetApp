@@ -132,7 +132,7 @@ export function AccountCard({ account, txCount, totalIn, totalOut, sampleRaw, on
               <div className="form-grid">
                 <div className="field">
                   <label>Date column</label>
-                  <select
+                  <select aria-label="Date column"
                     value={settingsForm.dateCol}
                     onChange={(e) => setSettingsForm({ ...settingsForm, dateCol: e.target.value })}
                   >
@@ -146,7 +146,7 @@ export function AccountCard({ account, txCount, totalIn, totalOut, sampleRaw, on
                 </div>
                 <div className="field">
                   <label>Description column</label>
-                  <select
+                  <select aria-label="Description column"
                     value={settingsForm.descriptionCol}
                     onChange={(e) => setSettingsForm({ ...settingsForm, descriptionCol: e.target.value })}
                   >
@@ -160,7 +160,7 @@ export function AccountCard({ account, txCount, totalIn, totalOut, sampleRaw, on
                 </div>
                 <div className="field">
                   <label>Money out column</label>
-                  <select
+                  <select aria-label="Money out column"
                     value={settingsForm.outCol}
                     onChange={(e) => setSettingsForm({ ...settingsForm, outCol: e.target.value })}
                   >
@@ -174,7 +174,7 @@ export function AccountCard({ account, txCount, totalIn, totalOut, sampleRaw, on
                 </div>
                 <div className="field">
                   <label>Money in column</label>
-                  <select
+                  <select aria-label="Money in column"
                     value={settingsForm.inCol}
                     onChange={(e) => setSettingsForm({ ...settingsForm, inCol: e.target.value })}
                   >

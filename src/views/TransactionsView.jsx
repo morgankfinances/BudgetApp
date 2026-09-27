@@ -181,7 +181,7 @@ export function TransactionRow({ t, duplicateInfo, expanded, onToggleExpand, all
             const isSuggestion = !t.categoryId && suggestedCategoryId;
             return (
               <div className="category-cell">
-                <select
+                <select aria-label={`Category for ${t.description || "transaction"}`}
                   className={isSuggestion ? "category-select suggested" : "category-select"}
                   value={t.categoryId || (isSuggestion ? suggestedCategoryId : "")}
                   onChange={(e) => onUpdate(t.id, { categoryId: e.target.value || null })}
@@ -365,7 +365,7 @@ export function TransactionsView({ transactions, accounts, categories, duplicate
       </div>
 
       <div className="filter-bar">
-        <select value={filterAccount} onChange={(e) => setFilterAccount(e.target.value)}>
+        <select aria-label="Filter by account" value={filterAccount} onChange={(e) => setFilterAccount(e.target.value)}>
           <option value="all">All accounts</option>
           {accounts.map((a) => (
             <option key={a.id} value={a.id}>
@@ -373,7 +373,7 @@ export function TransactionsView({ transactions, accounts, categories, duplicate
             </option>
           ))}
         </select>
-        <select value={filterCategory} onChange={(e) => setFilterCategory(e.target.value)}>
+        <select aria-label="Filter by category" value={filterCategory} onChange={(e) => setFilterCategory(e.target.value)}>
           <option value="all">All categories</option>
           <option value="uncategorized">Uncategorized</option>
           {categories.map((c) => (
@@ -383,7 +383,7 @@ export function TransactionsView({ transactions, accounts, categories, duplicate
           ))}
         </select>
         {recentBatches.length > 0 && (
-          <select value={filterBatchId} onChange={(e) => setFilterBatchId(e.target.value)}>
+          <select aria-label="Filter by upload" value={filterBatchId} onChange={(e) => setFilterBatchId(e.target.value)}>
             <option value="all">All transactions</option>
             {recentBatches.map((b) => (
               <option key={b.batchId} value={b.batchId}>

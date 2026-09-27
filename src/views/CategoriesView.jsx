@@ -130,7 +130,7 @@ export function CategoryCard({ category, categories, txCount, transactions, onRe
             </span>
           ) : (
             <span className="row-actions">
-              <select value={mergeTargetId} onChange={(e) => setMergeTargetId(e.target.value)}>
+              <select aria-label={`Merge ${category.name} into`} value={mergeTargetId} onChange={(e) => setMergeTargetId(e.target.value)}>
                 {otherCategories.map((c) => (
                   <option key={c.id} value={c.id}>
                     {c.name}

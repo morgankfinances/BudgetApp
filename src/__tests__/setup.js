@@ -18,11 +18,18 @@ if (typeof File !== "undefined" && !File.prototype.text) {
 // window.scrollTo doesn't exist. Both are harmless here; keep them from
 // burying real problems in the test output.
 if (typeof window !== "undefined") window.scrollTo = () => {};
-const CHART_SIZE_WARNING = "of chart should be greater than 0";
+// The test browser also can't reload pages; the app does that on purpose
+// after a restore or leaving a household, so its "not implemented" notice
+// is expected here.
+const HARMLESS = ["of chart should be greater than 0", "Not implemented: navigation"];
+const isHarmless = (arg) => {
+  const text = typeof arg === "string" ? arg : arg && typeof arg.message === "string" ? arg.message : "";
+  return HARMLESS.some((h) => text.includes(h));
+};
 for (const level of ["warn", "error"]) {
   const original = console[level];
   console[level] = (...args) => {
-    if (typeof args[0] === "string" && args[0].includes(CHART_SIZE_WARNING)) return;
+    if (isHarmless(args[0])) return;
     original(...args);
   };
 }

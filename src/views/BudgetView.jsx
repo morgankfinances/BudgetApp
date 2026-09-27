@@ -244,7 +244,7 @@ export function FundBalanceSection({ item, cumulativeSaved, transactions, onAdju
 
 export function BudgetHistoryTable({ budgeted, periods, spendMap, periodLabelFn }) {
   return (
-    <div className="panel" style={{ padding: 0, overflowX: "auto" }}>
+    <div className="panel" style={{ padding: 0, overflowX: "auto" }} tabIndex={0} role="region" aria-label="Budget history table (scrolls sideways)">
       <table className="pivot-table">
         <thead>
           <tr>
@@ -339,7 +339,7 @@ export function BudgetPerformanceChart({ title, periods, budgeted, spendMap, per
               wrapperStyle={{ zIndex: 100 }}
               contentStyle={{
                 fontSize: 12.5,
-                fontFamily: "'Work Sans', sans-serif",
+                fontFamily: "'Coinrose Body', -apple-system, 'Segoe UI', sans-serif",
                 border: "1px solid var(--border)",
                 borderRadius: 6,
                 background: "var(--panel)",

@@ -19,9 +19,10 @@
 // render before App ever mounts at all, so nothing App injects can be
 // relied on yet either. Applying theme globally sidesteps both problems.
 
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useRef } from "react";
 import { supabase } from "./supabaseClient.js";
 import { resetHouseholdCache } from "./storageAdapter.js";
+import { reloadPage } from "./lib/browser.js";
 
 /* ------------------------------------------------------------------ */
 /* Theme                                                                */
@@ -37,10 +38,11 @@ import { resetHouseholdCache } from "./storageAdapter.js";
 const THEME_KEY = "ledger-theme-v1";
 
 const THEMES = [
-  { id: "light-sage", label: "Default - Natural" },
-  { id: "light-slate", label: "Light — Slate" },
+  { id: "light-slate", label: "Default — Slate" },
+  { id: "light-sage", label: "Light — Natural" },
   { id: "dark-midnight", label: "Dark — Midnight" },
 ];
+const DEFAULT_THEME = "light-slate";
 
 function loadTheme() {
   try {
@@ -49,7 +51,7 @@ function loadTheme() {
   } catch (e) {
     /* ignore */
   }
-  return "light-sage";
+  return DEFAULT_THEME;
 }
 
 function saveTheme(themeId) {
@@ -62,17 +64,26 @@ function saveTheme(themeId) {
 
 const THEME_VARS_CSS = `
 :root {
+  --heading: #1C2430; --bg: #F3F5F8; --panel: #FFFFFF; --ink: #1C2430; --ink-muted: #5B6675;
+  --border: #D6DCE3; --accent: #2B6CB0; --accent-hover: #1E5490; --accent-tint: #E7EFF8;
+  --accent-button: #2B6CB0; --accent-button-hover: #1E5490; --on-accent: #FFFFFF; --on-danger: #FFFFFF;
+  --income: #28795E; --expense: #B44B2C; --warn-bg: #FCF3D9; --warn-border: #DDAE3E;
+  --warn-ink: #7A5A0D; --danger: #B0402E; --danger-tint-bg: #FBEAE6; --danger-tint-border: #E0AA98;
+  --subtle-bg: #EDF0F4;
+  --radius: 6px;
+}
+:root[data-theme="light-sage"] {
   --heading: #1E241F;
   --bg: #F5F6F1;
   --panel: #FFFFFF;
   --ink: #1E241F;
   --ink-muted: #62685E;
   --border: #DAD9CC;
-  --accent: #C2661E;
-  --accent-hover: #9C4F15;
+  --accent: #A15519;
+  --accent-hover: #86440F;
   --accent-button: #A8561A; --accent-button-hover: #8A4613; --on-accent: #FFFFFF; --on-danger: #FFFFFF;
   --accent-tint: #F7E9DC;
-  --income: #3F7D5C;
+  --income: #3C7858;
   --expense: #AC4A2C;
   --warn-bg: #FBF1DA;
   --warn-border: #E3B558;
@@ -81,13 +92,12 @@ const THEME_VARS_CSS = `
   --danger-tint-bg: #FBEAE6;
   --danger-tint-border: #E3A190;
   --subtle-bg: #F2F1E9;
-  --radius: 6px;
 }
 :root[data-theme="light-slate"] {
   --heading: #1C2430; --bg: #F3F5F8; --panel: #FFFFFF; --ink: #1C2430; --ink-muted: #5B6675;
   --border: #D6DCE3; --accent: #2B6CB0; --accent-hover: #1E5490; --accent-tint: #E7EFF8;
   --accent-button: #2B6CB0; --accent-button-hover: #1E5490; --on-accent: #FFFFFF; --on-danger: #FFFFFF;
-  --income: #2F8F6F; --expense: #C1502F; --warn-bg: #FCF3D9; --warn-border: #DDAE3E;
+  --income: #28795E; --expense: #B44B2C; --warn-bg: #FCF3D9; --warn-border: #DDAE3E;
   --warn-ink: #7A5A0D; --danger: #B0402E; --danger-tint-bg: #FBEAE6; --danger-tint-border: #E0AA98;
   --subtle-bg: #EDF0F4;
 }
@@ -96,7 +106,7 @@ const THEME_VARS_CSS = `
   --border: #2C3346; --accent: #7B9EE0; --accent-hover: #9AB6EA; --accent-tint: #232A42;
   --accent-button: #7B9EE0; --accent-button-hover: #9AB6EA; --on-accent: #10131B; --on-danger: #10131B;
   --income: #6FCB9A; --expense: #E2896A; --warn-bg: #3B301A; --warn-border: #C99A3E;
-  --warn-ink: #EAC581; --danger: #E2685A; --danger-tint-bg: #3A2420; --danger-tint-border: #7A4038;
+  --warn-ink: #EAC581; --danger: #E47063; --danger-tint-bg: #3A2420; --danger-tint-border: #7A4038;
   --subtle-bg: #242A3D;
 }
 /* Every heading gets an explicit theme color, so no outside stylesheet
@@ -128,7 +138,7 @@ h1, h2, h3 { color: var(--heading); }
    anyone whose device is set to reduce motion. */
 .coinrose-loading { display: flex; flex-direction: column; align-items: center; gap: 12px; }
 .coinrose-loading-star { width: 44px; height: 44px; animation: coinrose-spin 8s linear infinite; }
-.coinrose-loading-label { font-family: 'Work Sans', -apple-system, sans-serif; font-size: 14px; color: var(--ink-muted); }
+.coinrose-loading-label { font-family: 'Coinrose Body', -apple-system, 'Segoe UI', sans-serif; font-size: 14px; color: var(--ink-muted); }
 @keyframes coinrose-spin { to { transform: rotate(360deg); } }
 @media (prefers-reduced-motion: reduce) { .coinrose-loading-star { animation: none; } }
 
@@ -537,7 +547,7 @@ function HistorySection() {
     }
     // The live data changed out from under the already-loaded app, so
     // reload to pick up the restored version cleanly.
-    window.location.reload();
+    reloadPage();
   }
 
   return (
@@ -788,6 +798,43 @@ function HouseholdPanel({ onClose, onDataChanged, onRoleKnown, theme, onThemeCha
     load();
   }, []);
 
+  // Dialog behavior: focus moves into the panel, Tab stays inside it, and
+  // Escape closes it (the Settings button gets focus back; see HouseholdGate).
+  const dialogRef = useRef(null);
+  useEffect(() => {
+    dialogRef.current?.focus();
+    // Escape anywhere closes Settings, unless something inside already
+    // handled it (like cancelling a rename).
+    function onKey(e) {
+      if (e.key === "Escape" && !e.defaultPrevented) onClose();
+    }
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, []);
+  function handleDialogKeyDown(e) {
+    if (e.key !== "Tab" || !dialogRef.current) return;
+    const focusable = [...dialogRef.current.querySelectorAll(
+      'button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea, a[href], [tabindex]:not([tabindex="-1"])'
+    )];
+    if (focusable.length === 0) return;
+    const first = focusable[0], last = focusable[focusable.length - 1];
+    if (e.shiftKey && (document.activeElement === first || document.activeElement === dialogRef.current)) {
+      e.preventDefault();
+      last.focus();
+    } else if (!e.shiftKey && document.activeElement === last) {
+      e.preventDefault();
+      first.focus();
+    }
+  }
+  const dialogProps = {
+    ref: dialogRef,
+    role: "dialog",
+    "aria-modal": "true",
+    "aria-labelledby": "settings-title",
+    tabIndex: -1,
+    onKeyDown: handleDialogKeyDown,
+  };
+
   // Let the Settings button know whether to show the join-request badge.
   useEffect(() => {
     if (members.length > 0) onRoleKnown?.(viewerIsOwner);
@@ -875,7 +922,7 @@ function HouseholdPanel({ onClose, onDataChanged, onRoleKnown, theme, onThemeCha
       setLeaveError(error.message);
       return;
     }
-    window.location.reload();
+    reloadPage();
   }
 
   async function handleSignOut() {
@@ -961,8 +1008,8 @@ function HouseholdPanel({ onClose, onDataChanged, onRoleKnown, theme, onThemeCha
   if (loading) {
     return (
       <div style={overlayStyle} onClick={onClose}>
-        <div style={cardStyle} onClick={(e) => e.stopPropagation()}>
-          <h2 style={{ marginTop: 0, marginBottom: 4, fontSize: 18 }}>Settings</h2>
+        <div style={{ ...cardStyle, outline: "none" }} onClick={(e) => e.stopPropagation()} {...dialogProps}>
+          <h2 id="settings-title" style={{ marginTop: 0, marginBottom: 4, fontSize: 18 }}>Settings</h2>
           <div style={{ padding: "36px 0 28px", display: "flex", justifyContent: "center" }}>
             <LoadingIndicator label="Loading settings…" />
           </div>
@@ -976,8 +1023,8 @@ function HouseholdPanel({ onClose, onDataChanged, onRoleKnown, theme, onThemeCha
 
   return (
     <div style={overlayStyle} onClick={onClose}>
-      <div style={cardStyle} onClick={(e) => e.stopPropagation()}>
-        <h2 style={{ marginTop: 0, marginBottom: 4, fontSize: 18 }}>Settings</h2>
+      <div style={{ ...cardStyle, outline: "none" }} onClick={(e) => e.stopPropagation()} {...dialogProps}>
+        <h2 id="settings-title" style={{ marginTop: 0, marginBottom: 4, fontSize: 18 }}>Settings</h2>
 
         {loading ? (
           <p style={{ fontSize: 14, color: "var(--ink-muted)" }}>Loading…</p>
@@ -1001,7 +1048,11 @@ function HouseholdPanel({ onClose, onDataChanged, onRoleKnown, theme, onThemeCha
                   }}
                   onKeyDown={(e) => {
                     if (e.key === "Enter") handleSaveName();
-                    if (e.key === "Escape") setEditingName(false);
+                    if (e.key === "Escape") {
+                      e.preventDefault(); // cancel the rename, but keep Settings open
+                      setEditingName(false);
+                      dialogRef.current?.focus();
+                    }
                   }}
                 />
                 <button style={smallBtnStyle} onClick={handleSaveName} disabled={renaming}>
@@ -1206,6 +1257,11 @@ function HouseholdPanel({ onClose, onDataChanged, onRoleKnown, theme, onThemeCha
         >
           View disclosure
         </button>
+        <p style={{ fontSize: 12.5, color: "var(--ink-muted)", margin: "0 0 8px", textAlign: "center" }}>
+          <a href="/privacy.html" target="_blank" rel="noopener" style={{ color: "var(--accent)" }}>Privacy Policy</a>
+          {" · "}
+          <a href="/terms.html" target="_blank" rel="noopener" style={{ color: "var(--accent)" }}>Terms of Use</a>
+        </p>
 
         <div style={sectionLabelStyle}>Account</div>
         {leaveConfirming ? (
@@ -1319,7 +1375,8 @@ export default function HouseholdGate({ children }) {
   const [busy, setBusy] = useState(false);
   const [panelOpen, setPanelOpen] = useState(false);
   const [pendingCount, setPendingCount] = useState(0);
-  const [isOwner, setIsOwner] = useState(false); // only owners can act on join requests, so only they see the badge
+  const [isOwner, setIsOwner] = useState(false);
+  const settingsButtonRef = useRef(null); // only owners can act on join requests, so only they see the badge
   const [theme, setTheme] = useState(loadTheme);
 
   // Injects the theme CSS variables into <head> once, regardless of
@@ -1609,6 +1666,7 @@ export default function HouseholdGate({ children }) {
     <>
       {React.cloneElement(children, { householdName: activeHouseholdName })}
       <button
+        ref={settingsButtonRef}
         onClick={() => setPanelOpen(true)}
         style={{
           position: "fixed",
@@ -1649,7 +1707,10 @@ export default function HouseholdGate({ children }) {
       </button>
       {panelOpen && (
         <HouseholdPanel
-          onClose={() => setPanelOpen(false)}
+          onClose={() => {
+            setPanelOpen(false);
+            setTimeout(() => settingsButtonRef.current?.focus(), 0);
+          }}
           onDataChanged={checkMembership}
           onRoleKnown={setIsOwner}
           theme={theme}

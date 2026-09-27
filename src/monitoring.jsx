@@ -9,6 +9,7 @@
 import React from "react";
 import * as Sentry from "@sentry/react";
 import { scrubEvent, scrubBreadcrumb } from "./lib/monitoring.js";
+import { reloadPage } from "./lib/browser.js";
 
 const DSN = import.meta.env?.VITE_SENTRY_DSN || "";
 
@@ -38,28 +39,28 @@ function CrashScreen() {
         justifyContent: "center",
         padding: 24,
         textAlign: "center",
-        fontFamily: "'Work Sans', -apple-system, sans-serif",
-        background: "var(--bg, #F5F6F1)",
-        color: "var(--ink, #1E241F)",
+        fontFamily: "'Coinrose Body', -apple-system, 'Segoe UI', sans-serif",
+        background: "var(--bg, #F3F5F8)",
+        color: "var(--ink, #1C2430)",
       }}
     >
       <div style={{ maxWidth: 380 }}>
-        <h2 style={{ fontFamily: "'Fraunces', Georgia, serif", fontWeight: 500, marginBottom: 8 }}>
+        <h2 style={{ fontFamily: "'Coinrose Heading', -apple-system, 'Segoe UI', sans-serif", fontWeight: 500, marginBottom: 8 }}>
           Something went wrong
         </h2>
-        <p style={{ color: "var(--ink-muted, #62685E)", marginBottom: 18, lineHeight: 1.5 }}>
+        <p style={{ color: "var(--ink-muted, #5B6675)", marginBottom: 18, lineHeight: 1.5 }}>
           Your saved data is safe. Reloading the page usually fixes this. If it keeps happening,
           email morgankfinances@gmail.com.
         </p>
         <button
-          onClick={() => window.location.reload()}
+          onClick={reloadPage}
           style={{
             padding: "10px 18px",
             fontSize: 14,
             fontWeight: 600,
             border: "none",
             borderRadius: 6,
-            background: "var(--accent, #C2661E)",
+            background: "var(--accent, #2B6CB0)",
             color: "#fff",
             cursor: "pointer",
           }}

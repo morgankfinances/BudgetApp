@@ -151,7 +151,7 @@ export function BudgetGroupCard({ group, allGroups = [], allCategories, transact
 
       {availableCategories.length > 0 && (
         <div style={{ display: "flex", gap: 8, marginBottom: 16 }}>
-          <select value={addCategoryId} onChange={(e) => setAddCategoryId(e.target.value)}>
+          <select aria-label={`Add a category to ${group.name}`} value={addCategoryId} onChange={(e) => setAddCategoryId(e.target.value)}>
             <option value="">Add a category…</option>
             {availableCategories.map((c) => (
               <option key={c.id} value={c.id}>
@@ -174,11 +174,11 @@ export function BudgetGroupCard({ group, allGroups = [], allCategories, transact
           value={budgetAmountDraft}
           onChange={(e) => setBudgetAmountDraft(e.target.value)}
         />
-        <select value={budgetPeriodDraft} onChange={(e) => setBudgetPeriodDraft(e.target.value)}>
+        <select aria-label={`Budget period for ${group.name}`} value={budgetPeriodDraft} onChange={(e) => setBudgetPeriodDraft(e.target.value)}>
           <option value="weekly">per week</option>
           <option value="monthly">per month</option>
         </select>
-        <select value={budgetTypeDraft} onChange={(e) => setBudgetTypeDraft(e.target.value)}>
+        <select aria-label={`Budget type for ${group.name}`} value={budgetTypeDraft} onChange={(e) => setBudgetTypeDraft(e.target.value)}>
           <option value="spend">Spend</option>
           <option value="accumulate">Accumulate</option>
         </select>

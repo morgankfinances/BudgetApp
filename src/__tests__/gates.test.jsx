@@ -6,6 +6,8 @@ import { makeFakeSupabase } from "./fakeSupabase.js";
 const sb = vi.hoisted(() => ({ current: null }));
 vi.mock("../supabaseClient.js", () => ({ get supabase() { return sb.current.client; } }));
 vi.mock("../storageAdapter.js", () => ({ resetHouseholdCache: () => {} }));
+const reloads = vi.hoisted(() => ({ count: 0 }));
+vi.mock("../lib/browser.js", () => ({ reloadPage: () => { reloads.count += 1; } }));
 sb.current = makeFakeSupabase();
 const fake = sb.current;
 const { default: AuthGate } = await import("../authGate.jsx");
@@ -14,11 +16,14 @@ const { default: HouseholdGate } = await import("../householdGate.jsx");
 const { AppErrorBoundary } = await import("../monitoring.jsx");
 
 const flush = () => act(async () => { await new Promise((r) => setTimeout(r, 0)); });
+// Stand-in for <App>. It's a component (not a bare <div>) because the
+// household screen passes the household's name to whatever it wraps.
+function TheApp() { return <div>the app</div>; }
 const future = new Date(Date.UTC(2026, 9, 1)).toISOString();
 const household = { id: "h1", name: "Alchemist Household", invite_code: "B9FD74DD", invite_code_expires_at: future };
 const owner = { user_id: "u1", email: "morgan@example.com", role: "owner" };
 const partner = { user_id: "u2", email: "partner@example.com", role: "member" };
-beforeEach(() => { fake.reset(); window.history.replaceState({}, "", "/"); document.documentElement.removeAttribute("data-theme"); });
+beforeEach(() => { fake.reset(); reloads.count = 0; window.history.replaceState({}, "", "/"); document.documentElement.removeAttribute("data-theme"); });
 
 describe("sign-in", () => {
   const signedOut = async () => { render(<AuthGate><div>the app</div></AuthGate>); await screen.findByText("Welcome back"); };
@@ -143,7 +148,7 @@ describe("disclosure notice", () => {
 
 describe("household setup", () => {
   it("someone new creates a household and gets its invite code", async () => {
-    render(<HouseholdGate><div>the app</div></HouseholdGate>);
+    render(<HouseholdGate><TheApp /></HouseholdGate>);
     await screen.findByText("Set up your household");
     expect(document.title).toBe("Set Up Your Household | Coinrose");
     fireEvent.change(screen.getByPlaceholderText("Household name (optional)"), { target: { value: "The Keller House" } });
@@ -155,7 +160,7 @@ describe("household setup", () => {
     expect(await screen.findByText("the app")).toBeTruthy();
   });
   it("joining with a code waits for approval; a declined request can try another code", async () => {
-    render(<HouseholdGate><div>the app</div></HouseholdGate>);
+    render(<HouseholdGate><TheApp /></HouseholdGate>);
     await screen.findByText("Set up your household");
     fake.state.myRequest = { id: "r1", status: "pending" };
     fireEvent.change(screen.getByPlaceholderText("Enter invite code"), { target: { value: " b9fd74dd " } });
@@ -165,14 +170,14 @@ describe("household setup", () => {
   });
   it("a declined request can start over", async () => {
     fake.state.myRequest = { id: "r1", status: "denied" };
-    render(<HouseholdGate><div>the app</div></HouseholdGate>);
+    render(<HouseholdGate><TheApp /></HouseholdGate>);
     await screen.findByText("Request not approved");
     fireEvent.click(screen.getByRole("button", { name: "Try a different code" }));
     expect(screen.getByText("Set up your household")).toBeTruthy();
   });
   it("a bad invite code shows why", async () => {
     fake.state.rpc.request_join_household = { error: { message: "Invalid invite code" } };
-    render(<HouseholdGate><div>the app</div></HouseholdGate>);
+    render(<HouseholdGate><TheApp /></HouseholdGate>);
     await screen.findByText("Set up your household");
     fireEvent.change(screen.getByPlaceholderText("Enter invite code"), { target: { value: "NOPE" } });
     fireEvent.click(screen.getByRole("button", { name: "Request to join" }));
@@ -184,7 +189,7 @@ describe("Settings", () => {
   async function openSettings(members = [owner, partner], extra = {}) {
     fake.reset({ membership: { household_id: "h1", role: members.find((m) => m.user_id === "u1").role, households: household },
                  members, requests: [{ id: "r9", requester_email: "new@example.com", created_at: future }], ...extra });
-    render(<HouseholdGate><div>the app</div></HouseholdGate>);
+    render(<HouseholdGate><TheApp /></HouseholdGate>);
     await screen.findByText("the app");
     fireEvent.click(screen.getByRole("button", { name: /^Settings/ }));
     await screen.findByText("Members");
@@ -247,6 +252,14 @@ describe("Settings", () => {
     expect(screen.queryByText("B9FD74DD")).toBeNull();
     expect(screen.getByRole("button", { name: /^Settings$/ })).toBeTruthy(); // no badge
   });
+  it("leaving reloads into your own copy of the household", async () => {
+    await openSettings([owner, { ...partner, role: "owner" }]);
+    fireEvent.click(screen.getByRole("button", { name: "Leave this household" }));
+    fireEvent.click(screen.getByRole("button", { name: "Confirm leave" }));
+    await flush();
+    expect(fake.called("rpc:leave_household")).toHaveLength(1);
+    expect(reloads.count).toBe(1);
+  });
   it("leaving asks first; a refusal is shown", async () => {
     await openSettings([owner, partner], { rpc: { leave_household: { error: { message: "You're the only owner." } } } });
     fireEvent.click(screen.getByRole("button", { name: "Leave this household" }));
@@ -296,6 +309,7 @@ describe("Settings", () => {
     fireEvent.click(screen.getByRole("button", { name: "Confirm" }));
     await flush();
     expect(fake.called("rpc:restore_ledger_to")[0].args).toEqual({ p_change_set_id: 41 });
+    expect(reloads.count).toBe(1); // the page reloads to show the restored data
   });
   it("choosing a theme applies it and remembers it on this device", async () => {
     await openSettings();
@@ -342,7 +356,72 @@ describe("crash screen", () => {
     function Broken() { throw new Error("boom"); }
     render(<AppErrorBoundary><Broken /></AppErrorBoundary>);
     expect(screen.getByRole("alert").textContent).toMatch(/Something went wrong.*saved data is safe/);
-    expect(screen.getByRole("button", { name: "Reload" })).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Reload" }));
+    expect(reloads.count).toBe(1);
     spy.mockRestore();
+  });
+});
+
+describe("legal links", () => {
+  it("the sign-in page, the notice, and Settings all link to the Privacy Policy and Terms of Use", async () => {
+    const hrefs = () => [...document.querySelectorAll("a")].map((a) => a.getAttribute("href"));
+    render(<AuthGate><div>app</div></AuthGate>);
+    await screen.findByText("Welcome back");
+    expect(hrefs()).toEqual(expect.arrayContaining(["/terms.html", "/privacy.html"]));
+    expect(document.body.textContent).toMatch(/By continuing, you agree to the Terms of Use/);
+  });
+  it("the disclosure notice links to both", () => {
+    render(<DisclosureGate><div>app</div></DisclosureGate>);
+    const links = [...document.querySelectorAll("a")].map((a) => a.getAttribute("href"));
+    expect(links).toEqual(expect.arrayContaining(["/terms.html", "/privacy.html"]));
+  });
+});
+
+describe("appearance and the Settings dialog", () => {
+  it("new visitors get the Slate theme, which leads the list", async () => {
+    localStorage.removeItem("ledger-theme-v1");
+    fake.reset({ membership: { household_id: "h1", role: "owner", households: household }, members: [owner] });
+    render(<HouseholdGate><TheApp /></HouseholdGate>);
+    await screen.findByText("the app");
+    expect(document.documentElement.getAttribute("data-theme")).toBe("light-slate");
+    fireEvent.click(screen.getByRole("button", { name: /^Settings/ }));
+    await screen.findByText("Members");
+    const themeButtons = screen.getAllByRole("button").filter((b) => /Slate|Natural|Midnight/.test(b.textContent)).map((b) => b.textContent.trim());
+    expect(themeButtons[0]).toMatch(/Default — Slate/);
+  });
+  it("Settings is a labeled dialog that takes focus, and Escape closes it and returns focus", async () => {
+    fake.reset({ membership: { household_id: "h1", role: "owner", households: household }, members: [owner] });
+    render(<HouseholdGate><TheApp /></HouseholdGate>);
+    await screen.findByText("the app");
+    fireEvent.click(screen.getByRole("button", { name: /^Settings/ }));
+    const dialog = await screen.findByRole("dialog", { name: "Settings" });
+    await screen.findByText("Members");
+    expect(dialog.contains(document.activeElement)).toBe(true);
+    fireEvent.keyDown(window, { key: "Escape" });
+    expect(screen.queryByRole("dialog")).toBeNull();
+    await waitFor(() => expect(document.activeElement.textContent).toMatch(/^Settings/));
+  });
+});
+
+describe("keyboard focus stays inside Settings", () => {
+  it("Tab from the last control wraps to the first, and Shift+Tab from the first wraps to the last", async () => {
+    fake.reset({ membership: { household_id: "h1", role: "owner", households: household }, members: [owner] });
+    render(<HouseholdGate><TheApp /></HouseholdGate>);
+    await screen.findByText("the app");
+    fireEvent.click(screen.getByRole("button", { name: /^Settings/ }));
+    const dialog = await screen.findByRole("dialog", { name: "Settings" });
+    await screen.findByText("Members");
+    const focusable = [...dialog.querySelectorAll('button:not([disabled]), input:not([disabled]), select:not([disabled]), a[href]')];
+    const first = focusable[0], last = focusable[focusable.length - 1];
+    last.focus();
+    fireEvent.keyDown(last, { key: "Tab" });
+    expect(document.activeElement).toBe(first);
+    fireEvent.keyDown(first, { key: "Tab", shiftKey: true });
+    expect(document.activeElement).toBe(last);
+    focusable[1].focus();
+    fireEvent.keyDown(focusable[1], { key: "Tab" });        // in the middle: the browser moves focus normally
+    expect(document.activeElement).toBe(focusable[1]);
+    fireEvent.keyDown(focusable[1], { key: "a" });          // other keys are ignored
+    expect(screen.getByRole("dialog")).toBeTruthy();
   });
 });

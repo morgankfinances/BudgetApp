@@ -46,7 +46,7 @@ function clearResetMarker() {
 // scoped under .auth-root. Every color has a fallback matching the
 // default theme, in case the theme hasn't been applied yet.
 const AUTH_STYLES = `
-@import url('https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,500;9..144,600&family=Work+Sans:wght@400;500;600;700&display=swap');
+@import url('/fonts/fonts.css'); /* self-hosted: see public/fonts */
 
 .auth-root {
   position: relative;
@@ -57,9 +57,9 @@ const AUTH_STYLES = `
   justify-content: center;
   padding: 32px 16px;
   box-sizing: border-box;
-  background: var(--bg, #F5F6F1);
-  color: var(--ink, #1E241F);
-  font-family: 'Work Sans', -apple-system, sans-serif;
+  background: var(--bg, #F3F5F8);
+  color: var(--ink, #1C2430);
+  font-family: 'Coinrose Body', -apple-system, 'Segoe UI', sans-serif;
 }
 .auth-root * { box-sizing: border-box; }
 .auth-column { width: min(380px, 100%); position: relative; z-index: 1; }
@@ -88,16 +88,16 @@ const AUTH_STYLES = `
 }
 .auth-column.wide { width: min(520px, 100%); }
 
-.auth-body { font-size: 14px; line-height: 1.6; color: var(--ink-muted, #62685E); }
+.auth-body { font-size: 14px; line-height: 1.6; color: var(--ink-muted, #5B6675); }
 .auth-body p { margin: 0 0 14px; }
 .auth-list { padding-left: 18px; margin: 0 0 20px; }
 .auth-list li { margin-bottom: 12px; }
 .auth-list li:last-child { margin-bottom: 0; }
-.auth-list strong { color: var(--ink, #1E241F); font-weight: 600; }
-.auth-body a { color: var(--accent, #C2661E); font-weight: 600; }
+.auth-list strong { color: var(--ink, #1C2430); font-weight: 600; }
+.auth-body a { color: var(--accent, #2B6CB0); font-weight: 600; }
 
 .auth-brand {
-  font-family: 'Fraunces', Georgia, serif;
+  font-family: 'Coinrose Heading', -apple-system, 'Segoe UI', sans-serif;
   font-size: 30px;
   font-weight: 600;
   letter-spacing: -0.01em;
@@ -113,31 +113,31 @@ const AUTH_STYLES = `
 }
 .auth-tagline {
   text-align: center;
-  color: var(--ink-muted, #62685E);
+  color: var(--ink-muted, #5B6675);
   font-size: 14px;
   margin: 6px 0 22px;
 }
 
 .auth-card {
   background: var(--panel, #FFFFFF);
-  border: 1px solid var(--border, #DAD9CC);
+  border: 1px solid var(--border, #D6DCE3);
   border-radius: 10px;
   padding: 26px 24px;
   box-shadow: 0 6px 24px rgba(0, 0, 0, 0.06);
 }
 .auth-card h2 {
-  color: var(--heading, #1E241F);
-  font-family: 'Fraunces', Georgia, serif;
+  color: var(--heading, #1C2430);
+  font-family: 'Coinrose Heading', -apple-system, 'Segoe UI', sans-serif;
   font-weight: 500;
   font-size: 21px;
   letter-spacing: -0.01em;
   margin: 0 0 4px;
 }
-.auth-sub { color: var(--ink-muted, #62685E); font-size: 13.5px; margin: 0 0 18px; line-height: 1.45; }
+.auth-sub { color: var(--ink-muted, #5B6675); font-size: 13.5px; margin: 0 0 18px; line-height: 1.45; }
 
 .auth-tabs {
   display: flex;
-  border: 1px solid var(--border, #DAD9CC);
+  border: 1px solid var(--border, #D6DCE3);
   border-radius: 6px;
   overflow: hidden;
   margin-bottom: 20px;
@@ -150,27 +150,27 @@ const AUTH_STYLES = `
   font-weight: 600;
   border: none;
   background: var(--panel, #FFFFFF);
-  color: var(--ink-muted, #62685E);
+  color: var(--ink-muted, #5B6675);
   cursor: pointer;
 }
-.auth-tab + .auth-tab { border-left: 1px solid var(--border, #DAD9CC); }
-.auth-tab.active { background: var(--accent-button, #A8561A); color: var(--on-accent, #fff); }
+.auth-tab + .auth-tab { border-left: 1px solid var(--border, #D6DCE3); }
+.auth-tab.active { background: var(--accent-button, #2B6CB0); color: var(--on-accent, #fff); }
 
 .auth-field { display: flex; flex-direction: column; gap: 5px; margin-bottom: 14px; }
 .auth-field-top { display: flex; justify-content: space-between; align-items: baseline; }
-.auth-field label { font-size: 13px; font-weight: 600; color: var(--ink, #1E241F); }
+.auth-field label { font-size: 13px; font-weight: 600; color: var(--ink, #1C2430); }
 .auth-field input {
   font-family: inherit;
   font-size: 14.5px;
   padding: 10px 12px;
-  border: 1px solid var(--border, #DAD9CC);
+  border: 1px solid var(--border, #D6DCE3);
   border-radius: 6px;
   background: var(--panel, #FFFFFF);
-  color: var(--ink, #1E241F);
+  color: var(--ink, #1C2430);
   width: 100%;
 }
-.auth-field input:focus { outline: 2px solid var(--accent, #C2661E); outline-offset: 1px; }
-.auth-hint { font-size: 12px; color: var(--ink-muted, #62685E); }
+.auth-field input:focus { outline: 2px solid var(--accent, #2B6CB0); outline-offset: 1px; }
+.auth-hint { font-size: 12px; color: var(--ink-muted, #5B6675); }
 
 .auth-primary {
   width: 100%;
@@ -181,12 +181,12 @@ const AUTH_STYLES = `
   font-weight: 600;
   border: none;
   border-radius: 6px;
-  background: var(--accent-button, #A8561A);
+  background: var(--accent-button, #2B6CB0);
   color: var(--on-accent, #fff);
   cursor: pointer;
   transition: background 0.12s ease, opacity 0.12s ease;
 }
-.auth-primary:hover:not(:disabled) { background: var(--accent-button-hover, #8A4613); }
+.auth-primary:hover:not(:disabled) { background: var(--accent-button-hover, #1E5490); }
 .auth-primary:disabled { opacity: 0.55; cursor: not-allowed; }
 
 .auth-link {
@@ -196,7 +196,7 @@ const AUTH_STYLES = `
   font-family: inherit;
   font-size: 12.5px;
   font-weight: 600;
-  color: var(--accent, #C2661E);
+  color: var(--accent, #2B6CB0);
   cursor: pointer;
 }
 .auth-link:hover { text-decoration: underline; }
@@ -211,8 +211,8 @@ const AUTH_STYLES = `
 }
 .auth-message.success {
   background: var(--accent-tint, #F7E9DC);
-  color: var(--ink, #1E241F);
-  border: 1px solid var(--border, #DAD9CC);
+  color: var(--ink, #1C2430);
+  border: 1px solid var(--border, #D6DCE3);
 }
 .auth-message.error {
   background: var(--danger-tint-bg, #FBEAE6);
@@ -221,13 +221,15 @@ const AUTH_STYLES = `
   margin-top: 14px;
 }
 
+.auth-legal { margin-top: 8px; font-size: 12px; }
+.auth-footnote a { color: var(--accent, #2B6CB0); font-weight: 600; }
 .auth-captcha { margin-top: 14px; display: flex; justify-content: center; }
 .auth-captcha:empty { display: none; }
 
 .auth-footnote {
   text-align: center;
   font-size: 12.5px;
-  color: var(--ink-muted, #62685E);
+  color: var(--ink-muted, #5B6675);
   margin: 18px 4px 0;
   line-height: 1.5;
 }
@@ -652,6 +654,9 @@ export default function AuthGate({ children }) {
       <p className="auth-footnote">
         New here? Use <strong>Email link</strong> to create your account. You can add a password afterward in
         Settings.
+      </p>
+      <p className="auth-footnote auth-legal">
+        By continuing, you agree to the <a href="/terms.html" target="_blank" rel="noopener">Terms of Use</a> and acknowledge the <a href="/privacy.html" target="_blank" rel="noopener">Privacy Policy</a>.
       </p>
     </AuthShell>
   );

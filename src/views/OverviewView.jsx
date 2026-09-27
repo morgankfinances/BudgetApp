@@ -190,7 +190,7 @@ export function OverviewView({ transactions, categories, budgetGroups, onNavigat
                       formatter={(value) => formatMoney(value)}
                       contentStyle={{
                         fontSize: 12,
-                        fontFamily: "'Work Sans', sans-serif",
+                        fontFamily: "'Coinrose Body', -apple-system, 'Segoe UI', sans-serif",
                         border: "1px solid var(--border)",
                         borderRadius: 6,
                         background: "var(--panel)",

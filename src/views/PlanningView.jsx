@@ -60,11 +60,11 @@ export function PlanningCategoryRow({ category, groupName, onSetBudget }) {
             value={budgetAmountDraft}
             onChange={(e) => setBudgetAmountDraft(e.target.value)}
           />
-          <select value={budgetPeriodDraft} onChange={(e) => setBudgetPeriodDraft(e.target.value)}>
+          <select aria-label={`Budget period for ${category.name}`} value={budgetPeriodDraft} onChange={(e) => setBudgetPeriodDraft(e.target.value)}>
             <option value="weekly">per week</option>
             <option value="monthly">per month</option>
           </select>
-          <select value={budgetTypeDraft} onChange={(e) => setBudgetTypeDraft(e.target.value)}>
+          <select aria-label={`Budget type for ${category.name}`} value={budgetTypeDraft} onChange={(e) => setBudgetTypeDraft(e.target.value)}>
             <option value="spend">Spend</option>
             <option value="accumulate">Accumulate</option>
           </select>
@@ -249,7 +249,7 @@ export function PlanningView({
           </div>
         ) : (
           <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-            <span style={{ fontFamily: "'Fraunces', serif", fontSize: 22 }}>{formatMoney(plannedIncome)}</span>
+            <span style={{ fontFamily: "'Coinrose Heading', -apple-system, 'Segoe UI', sans-serif", fontSize: 22 }}>{formatMoney(plannedIncome)}</span>
             <button
               className="btn btn-ghost btn-sm"
               onClick={() => {

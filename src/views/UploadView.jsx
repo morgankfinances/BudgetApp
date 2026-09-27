@@ -145,7 +145,7 @@ export function UploadView({ accounts, prefill, onImport }) {
           {mode === "append" && accounts.length > 0 && (
             <div className="field" style={{ maxWidth: 320 }}>
               <label>Account</label>
-              <select value={targetAccountId} onChange={(e) => setTargetAccountId(e.target.value)}>
+              <select aria-label="Account" value={targetAccountId} onChange={(e) => setTargetAccountId(e.target.value)}>
                 {accounts.map((a) => (
                   <option key={a.id} value={a.id}>
                     {a.name}
@@ -190,7 +190,7 @@ export function UploadView({ accounts, prefill, onImport }) {
               </div>
               <div className="field">
                 <label>Date column</label>
-                <select
+                <select aria-label="Date column"
                   value={form.dateCol}
                   onChange={(e) => setForm({ ...form, dateCol: e.target.value })}
                   required
@@ -206,7 +206,7 @@ export function UploadView({ accounts, prefill, onImport }) {
               </div>
               <div className="field">
                 <label>Description column</label>
-                <select
+                <select aria-label="Description column"
                   value={form.descriptionCol}
                   onChange={(e) => setForm({ ...form, descriptionCol: e.target.value })}
                 >
@@ -221,7 +221,7 @@ export function UploadView({ accounts, prefill, onImport }) {
               </div>
               <div className="field">
                 <label>Money out (expenses)</label>
-                <select
+                <select aria-label="Money out (expenses) column"
                   value={form.outCol}
                   onChange={(e) => setForm({ ...form, outCol: e.target.value })}
                 >
@@ -235,7 +235,7 @@ export function UploadView({ accounts, prefill, onImport }) {
               </div>
               <div className="field">
                 <label>Money in (income)</label>
-                <select
+                <select aria-label="Money in (income) column"
                   value={form.inCol}
                   onChange={(e) => setForm({ ...form, inCol: e.target.value })}
                 >

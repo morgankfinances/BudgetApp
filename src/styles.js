@@ -3,7 +3,7 @@
 /* ------------------------------------------------------------------ */
 
 export const STYLES = `
-@import url('https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,500;9..144,600&family=Work+Sans:wght@400;500;600;700&display=swap');
+@import url('/fonts/fonts.css'); /* self-hosted: see public/fonts */
 
 /* Neutralizes the default Vite template's #root centering (max-width /
    margin: 0 auto / padding), which otherwise boxes this whole app into a
@@ -25,17 +25,48 @@ export const STYLES = `
    this file only needs to read the resulting variables. */
 
 :root {
+  --heading: #1C2430;
+  --bg: #F3F5F8;
+  --panel: #FFFFFF;
+  --ink: #1C2430;
+  --ink-muted: #5B6675;
+  --border: #D6DCE3;
+  --accent: #2B6CB0;
+  --accent-hover: #1E5490;
+  --accent-button: #2B6CB0; --accent-button-hover: #1E5490; --on-accent: #FFFFFF; --on-danger: #FFFFFF;
+  --accent-tint: #E7EFF8;
+  --income: #28795E;
+  --expense: #B44B2C;
+  --warn-bg: #FCF3D9;
+  --warn-border: #DDAE3E;
+  --warn-ink: #7A5A0D;
+  --danger: #B0402E;
+  --danger-tint-bg: #FBEAE6;
+  --danger-tint-border: #E0AA98;
+  --subtle-bg: #EDF0F4;
+  --chart-1: #2B6CB0;
+  --chart-2: #2F8F6F;
+  --chart-3: #C1502F;
+  --chart-4: #9C7A1E;
+  --chart-5: #6857A0;
+  --chart-6: #2593A0;
+  --chart-7: #A84B78;
+  --chart-other: #8890A0;
+  --radius: 6px;
+}
+
+:root[data-theme="light-sage"] {
   --heading: #1E241F;
   --bg: #F5F6F1;
   --panel: #FFFFFF;
   --ink: #1E241F;
   --ink-muted: #62685E;
   --border: #DAD9CC;
-  --accent: #C2661E;
-  --accent-hover: #9C4F15;
+  --accent: #A15519;
+  --accent-hover: #86440F;
   --accent-button: #A8561A; --accent-button-hover: #8A4613; --on-accent: #FFFFFF; --on-danger: #FFFFFF;
   --accent-tint: #F7E9DC;
-  --income: #3F7D5C;
+  --income: #3C7858;
   --expense: #AC4A2C;
   --warn-bg: #FBF1DA;
   --warn-border: #E3B558;
@@ -52,7 +83,6 @@ export const STYLES = `
   --chart-6: #2E8B8B;
   --chart-7: #9C4F6E;
   --chart-other: #8C8C86;
-  --radius: 6px;
 }
 
 :root[data-theme="light-slate"] {
@@ -66,8 +96,8 @@ export const STYLES = `
   --accent-hover: #1E5490;
   --accent-button: #2B6CB0; --accent-button-hover: #1E5490; --on-accent: #FFFFFF; --on-danger: #FFFFFF;
   --accent-tint: #E7EFF8;
-  --income: #2F8F6F;
-  --expense: #C1502F;
+  --income: #28795E;
+  --expense: #B44B2C;
   --warn-bg: #FCF3D9;
   --warn-border: #DDAE3E;
   --warn-ink: #7A5A0D;
@@ -101,7 +131,7 @@ export const STYLES = `
   --warn-bg: #3B301A;
   --warn-border: #C99A3E;
   --warn-ink: #EAC581;
-  --danger: #E2685A;
+  --danger: #E47063;
   --danger-tint-bg: #3A2420;
   --danger-tint-border: #7A4038;
   --subtle-bg: #242A3D;
@@ -117,7 +147,7 @@ export const STYLES = `
 
 .ledger-root {
   isolation: isolate;
-  font-family: 'Work Sans', -apple-system, sans-serif;
+  font-family: 'Coinrose Body', -apple-system, 'Segoe UI', sans-serif;
   color: var(--ink);
   background: var(--bg);
   min-height: 100vh;
@@ -145,7 +175,7 @@ export const STYLES = `
    can turn them dark on the dark theme. */
 .ledger-root h1, .ledger-root h2, .ledger-root h3 {
   color: var(--heading);
-  font-family: 'Fraunces', Georgia, serif;
+  font-family: 'Coinrose Heading', -apple-system, 'Segoe UI', sans-serif;
   font-weight: 500;
   margin: 0;
   letter-spacing: -0.01em;
@@ -158,6 +188,7 @@ export const STYLES = `
 }
 
 .sidebar {
+  position: relative;
   background: var(--panel);
   border-right: 1px solid var(--border);
   padding: 20px 16px;
@@ -167,7 +198,7 @@ export const STYLES = `
 }
 
 .sidebar-brand {
-  font-family: 'Fraunces', Georgia, serif;
+  font-family: 'Coinrose Heading', -apple-system, 'Segoe UI', sans-serif;
   font-size: 19px;
   font-weight: 600;
   display: flex;
@@ -393,7 +424,7 @@ export const STYLES = `
 .preview-table th { background: var(--subtle-bg); color: var(--ink-muted); font-weight: 600; }
 
 .summary-row { display: flex; gap: 22px; flex-wrap: wrap; margin-bottom: 18px; }
-.summary-stat .num { font-family: 'Fraunces', serif; font-size: 22px; font-weight: 500; }
+.summary-stat .num { font-family: 'Coinrose Heading', -apple-system, 'Segoe UI', sans-serif; font-size: 22px; font-weight: 500; }
 .summary-stat .label { font-size: 12px; color: var(--ink-muted); text-transform: uppercase; letter-spacing: 0.04em; }
 
 .invalid-list { max-height: 220px; overflow-y: auto; border: 1px solid var(--border); border-radius: var(--radius); }
@@ -572,7 +603,7 @@ export const STYLES = `
 .account-card .name { font-weight: 600; font-size: 15px; display: flex; align-items: center; gap: 8px; }
 .account-card .meta { font-size: 12.5px; color: var(--ink-muted); margin-top: 2px; }
 .account-card .figures { text-align: right; margin-right: 18px; min-width: 150px; flex-shrink: 0; }
-.account-card .figures .net { font-family: 'Fraunces', serif; font-size: 17px; }
+.account-card .figures .net { font-family: 'Coinrose Heading', -apple-system, 'Segoe UI', sans-serif; font-size: 17px; }
 
 .account-card-wrap { border-bottom: 1px solid var(--border); }
 .account-card-wrap:last-child { border-bottom: none; }
@@ -596,6 +627,27 @@ export const STYLES = `
    screen (see the mobile rules below). */
 .coinrose-bg-ring.beside-sidebar { left: calc(216px + (100vw - 216px) / 2); }
 
+/* Checkboxes and radio buttons: big enough to tap (WCAG target size). */
+.ledger-root input[type="checkbox"], .ledger-root input[type="radio"] { width: 18px; height: 18px; margin: 3px 6px 3px 0; flex-shrink: 0; accent-color: var(--accent-button); }
+
+/* Desktop: hide/show the sidebar. (Phones use the ☰ menu instead.) */
+.ledger-root .sidebar-collapse-btn,
+.ledger-root .sidebar-expand-btn {
+  display: flex; align-items: center; justify-content: center;
+  width: 30px; height: 30px; padding: 0;
+  border: 1px solid var(--border); border-radius: var(--radius);
+  background: var(--panel); color: var(--ink-muted); cursor: pointer;
+}
+.ledger-root .sidebar-collapse-btn:hover,
+.ledger-root .sidebar-expand-btn:hover { color: var(--ink); background: var(--subtle-bg); }
+.sidebar-collapse-btn { position: absolute; top: 12px; right: 10px; }
+.sidebar-expand-btn { position: fixed; top: 16px; left: 12px; z-index: 20; }
+@media (min-width: 761px) {
+  .app-shell.sidebar-collapsed { grid-template-columns: minmax(0, 1fr); }
+  .app-shell.sidebar-collapsed .sidebar { display: none; }
+  .app-shell.sidebar-collapsed .main { padding-left: 64px; }
+}
+
 /* Tutorial: a dialog card near the bottom of the screen with a light
    dimming layer, so the page it's describing stays visible behind it. */
 .tutorial-scrim {
@@ -616,7 +668,7 @@ export const STYLES = `
   border-radius: 12px;
   padding: 18px 20px 16px;
   box-shadow: 0 16px 40px rgba(0, 0, 0, 0.25);
-  font-family: 'Work Sans', -apple-system, sans-serif;
+  font-family: 'Coinrose Body', -apple-system, 'Segoe UI', sans-serif;
   box-sizing: border-box;
 }
 .tutorial-top { display: flex; justify-content: space-between; align-items: baseline; }
@@ -628,7 +680,7 @@ export const STYLES = `
 .tutorial-progress { height: 4px; border-radius: 999px; background: var(--subtle-bg); overflow: hidden; margin: 10px 0 14px; }
 .tutorial-progress-fill { height: 100%; background: var(--accent); border-radius: 999px; transition: width 0.2s ease; }
 .tutorial-card .tutorial-title {
-  font-family: 'Fraunces', Georgia, serif; font-weight: 500; font-size: 20px;
+  font-family: 'Coinrose Heading', -apple-system, 'Segoe UI', sans-serif; font-weight: 500; font-size: 20px;
   letter-spacing: -0.01em; color: var(--heading); margin: 0 0 8px;
 }
 .tutorial-body { font-size: 14px; line-height: 1.6; color: var(--ink-muted); margin: 0 0 16px; }
@@ -659,7 +711,7 @@ export const STYLES = `
     background: var(--panel);
     border-bottom: 1px solid var(--border);
   }
-  .mobile-topbar h2 { margin: 0; font-size: 16px; font-family: 'Fraunces', serif; color: var(--heading); flex: 1; }
+  .mobile-topbar h2 { margin: 0; font-size: 16px; font-family: 'Coinrose Heading', -apple-system, 'Segoe UI', sans-serif; color: var(--heading); flex: 1; }
   .mobile-topbar-logo { width: 28px; height: 28px; object-fit: contain; flex-shrink: 0; }
   .hamburger-btn {
     background: none; border: 1px solid var(--border); border-radius: var(--radius);
@@ -726,6 +778,7 @@ export const STYLES = `
   .budget-card { max-width: none; flex-basis: 100%; }
 
   .coinrose-bg-ring.beside-sidebar { left: 50%; }
+  .ledger-root .sidebar-collapse-btn, .ledger-root .sidebar-expand-btn { display: none; }
   .tutorial-card { left: 50%; bottom: 16px; }
 
   /* Account and category rows: stack instead of squeezing into one line */

@@ -145,6 +145,9 @@ function DisclosureNotice({ heading, buttonLabel, onButton }) {
               <a href={`mailto:${CONTACT_EMAIL}`}>{CONTACT_EMAIL}</a>.
             </li>
           </ul>
+          <p>
+            The full details are in the <a href="/privacy.html" target="_blank" rel="noopener">Privacy Policy</a> and <a href="/terms.html" target="_blank" rel="noopener">Terms of Use</a>.
+          </p>
         </div>
         <button type="button" className="auth-primary" onClick={onButton}>
           {buttonLabel}

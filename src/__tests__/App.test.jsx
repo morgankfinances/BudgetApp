@@ -338,3 +338,21 @@ describe("the app's actions each save exactly what changed", () => {
     expect(screen.getByRole("heading", { name: "Transactions" })).toBeTruthy();
   });
 });
+
+describe("the desktop sidebar can be hidden", () => {
+  it("hides and shows, is remembered on this device, and keeps keyboard focus on the toggle", async () => {
+    localStorage.removeItem("coinrose-sidebar-collapsed-v1");
+    const first = await openApp();
+    expect(first.container.querySelector(".app-shell").className).not.toMatch(/sidebar-collapsed/);
+    fireEvent.click(screen.getByRole("button", { name: "Hide sidebar" }));
+    expect(first.container.querySelector(".app-shell").className).toMatch(/sidebar-collapsed/);
+    await waitFor(() => expect(document.activeElement.getAttribute("aria-label")).toBe("Show sidebar"));
+    expect(localStorage.getItem("coinrose-sidebar-collapsed-v1")).toBe("true");
+    first.unmount();
+    const second = await openApp();
+    expect(second.container.querySelector(".app-shell").className).toMatch(/sidebar-collapsed/);
+    fireEvent.click(screen.getByRole("button", { name: "Show sidebar" }));
+    expect(second.container.querySelector(".app-shell").className).not.toMatch(/sidebar-collapsed/);
+    await waitFor(() => expect(document.activeElement.getAttribute("aria-label")).toBe("Hide sidebar"));
+  });
+});

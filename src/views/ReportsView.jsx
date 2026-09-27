@@ -17,7 +17,7 @@ export function ReportsTooltip({ active, payload, label }) {
     <div
       style={{
         fontSize: 12.5,
-        fontFamily: "'Work Sans', sans-serif",
+        fontFamily: "'Coinrose Body', -apple-system, 'Segoe UI', sans-serif",
         border: "1px solid var(--border)",
         borderRadius: 6,
         background: "var(--panel)",
@@ -61,7 +61,7 @@ export function ReportsDonutTooltip({ active, payload }) {
     <div
       style={{
         fontSize: 12,
-        fontFamily: "'Work Sans', sans-serif",
+        fontFamily: "'Coinrose Body', -apple-system, 'Segoe UI', sans-serif",
         border: "1px solid var(--border)",
         borderRadius: 6,
         background: "var(--panel)",
@@ -410,7 +410,7 @@ export function ReportsView({ transactions, accounts, categories, onGoCategories
             Donut chart
           </button>
         </div>
-        <select value={filterAccount} onChange={(e) => setFilterAccount(e.target.value)}>
+        <select aria-label="Filter by account" value={filterAccount} onChange={(e) => setFilterAccount(e.target.value)}>
           <option value="all">All accounts</option>
           {accounts.map((a) => (
             <option key={a.id} value={a.id}>
