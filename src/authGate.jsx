@@ -237,7 +237,7 @@ const AUTH_STYLES = `
 
 // The page layout shared by the sign-in screens and disclosureGate.jsx:
 // logo, wordmark, optional tagline, then whatever card goes below.
-export function AuthShell({ children, tagline = "Your household's money, organized together.", wide = false }) {
+export function AuthShell({ children, tagline = "Your money. Organized by you.", wide = false }) {
   return (
     <div className="auth-root">
       <style>{AUTH_STYLES}</style>
