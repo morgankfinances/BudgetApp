@@ -455,3 +455,41 @@ function CategoriesViewForSwitch(props) {
   return <CategoriesView categories={F.categories} transactions={F.transactions} onAdd={vi.fn()} onRename={vi.fn()} onDelete={vi.fn()}
     onToggleExcluded={vi.fn()} onToggleIsIncome={vi.fn()} onMerge={vi.fn()} autoApplySuggestions={true} {...props} />;
 }
+
+describe("Overview: periods", () => {
+  const open = (transactions = F.transactions) =>
+    render(<OverviewView transactions={transactions} categories={F.categories} budgetGroups={F.budgetGroups} onNavigate={vi.fn()} />);
+  const stats = () => [...document.querySelectorAll(".summary-stat")].map((s) => s.textContent);
+
+  it("steps back to earlier periods and returns to the current one", () => {
+    open();
+    expect(screen.getByText("Sep 2026 (current)")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Show the previous period, Aug 2026" }));
+    expect(stats()).toEqual(["$0.00Money in", "$420.00Money out", "-$420.00Net"]);
+    expect(screen.getByRole("button", { name: /Show the next period, Sep 2026/ }).disabled).toBe(false);
+    fireEvent.click(screen.getByRole("button", { name: "Back to the current period" }));
+    expect(screen.getByText("Sep 2026 (current)")).toBeTruthy();
+    expect(screen.getByRole("button", { name: /Show the next period/ }).disabled).toBe(true);
+  });
+  it("the next button walks forward one period at a time", () => {
+    open();
+    fireEvent.click(screen.getByRole("button", { name: "Show the previous period, Aug 2026" }));
+    fireEvent.click(screen.getByRole("button", { name: "Show the previous period, Jul 2026" }));
+    fireEvent.click(screen.getByRole("button", { name: /Show the next period, Aug 2026/ }));
+    expect(screen.getByText("Aug 2026")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: /Show the next period, Sep 2026/ }));
+    expect(screen.getByText("Sep 2026 (current)")).toBeTruthy();
+  });
+  it("when the current period has nothing yet, it says so and offers the latest period with activity", () => {
+    open(F.transactions.filter((t) => t.date < "2026-09-01"));
+    expect(stats()).toEqual(["$0.00Money in", "$0.00Money out", "$0.00Net"]);
+    expect(screen.getByRole("status").textContent).toMatch(/Nothing recorded for Sep 2026 yet\. Your most recent transaction is from Aug 3, 2026\./);
+    fireEvent.click(screen.getByRole("button", { name: "Show Aug 2026" }));
+    expect(stats()[1]).toBe("$420.00Money out");
+  });
+  it("late on the last evening of the month, it's still that month", () => {
+    vi.setSystemTime(new Date(2026, 8, 30, 22, 45));
+    open();
+    expect(screen.getByText("Sep 2026 (current)")).toBeTruthy();
+  });
+});

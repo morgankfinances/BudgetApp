@@ -1,3 +1,5 @@
+import { todayISO } from "./utils.js";
+
 
 export function getWeekStartISO(dateISO) {
   const [y, m, d] = dateISO.split("-").map(Number);
@@ -59,7 +61,7 @@ export function defaultReportPeriodConfig() {
   return {
     mode: "monthly", // "weekly" | "monthly" | "interval" | "semimonthly"
     intervalDays: 14,
-    anchorDate: new Date().toISOString().slice(0, 10),
+    anchorDate: todayISO(),
     semiMonthlyDay1: 1,
     semiMonthlyDay2: 15,
     chartType: "bar", // "bar" | "donut"

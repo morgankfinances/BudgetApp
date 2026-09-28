@@ -1,5 +1,5 @@
 import Papa from "papaparse";
-import { parseDateISO, parseMoney, uid } from "./utils.js";
+import { parseDateISO, parseMoney, todayISO, uid } from "./utils.js";
 
 
 /* ------------------------------------------------------------------ */
@@ -117,7 +117,7 @@ export function buildBackupCSV(accounts, transactions, categories) {
 
 // Downloads the ledger backup file.
 export function exportBackupCSV(accounts, transactions, categories) {
-  downloadCSV(buildBackupCSV(accounts, transactions, categories), `ledger-backup-${new Date().toISOString().slice(0, 10)}.csv`);
+  downloadCSV(buildBackupCSV(accounts, transactions, categories), `ledger-backup-${todayISO()}.csv`);
 }
 
 
@@ -339,7 +339,7 @@ export function buildBudgetCSV(categories, budgetGroups, plannedIncome) {
 
 // Downloads the budget backup file.
 export function exportBudgetCSV(categories, budgetGroups, plannedIncome) {
-  downloadCSV(buildBudgetCSV(categories, budgetGroups, plannedIncome), `budget-backup-${new Date().toISOString().slice(0, 10)}.csv`);
+  downloadCSV(buildBudgetCSV(categories, budgetGroups, plannedIncome), `budget-backup-${todayISO()}.csv`);
 }
 
 

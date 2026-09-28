@@ -2,7 +2,7 @@ import React, { useMemo, useState } from "react";
 import { StatBlock } from "../components/common.jsx";
 import { buildBudgetItems, getUnassignedCategoryIds } from "../lib/budget.js";
 import { getMonthStartISO, monthlyEquivalent } from "../lib/periods.js";
-import { formatMoney, parseMoney } from "../lib/utils.js";
+import { formatMoney, parseMoney, todayISO } from "../lib/utils.js";
 
 /* ------------------------------------------------------------------ */
 /* Planning view                                                        */
@@ -18,7 +18,7 @@ export function PlanningCategoryRow({ category, groupName, onSetBudget }) {
     category.accumulateTarget != null ? String(category.accumulateTarget) : ""
   );
   const [startDateDraft, setStartDateDraft] = useState(
-    category.createdAt ? category.createdAt.slice(0, 10) : new Date().toISOString().slice(0, 10)
+    category.createdAt ? category.createdAt.slice(0, 10) : todayISO()
   );
 
   function handleSave() {
@@ -144,7 +144,7 @@ export function PlanningView({
 
   const unassignedSpendThisMonth = useMemo(() => {
     const ids = new Set(unassignedCategories.map((c) => c.id));
-    const thisMonth = getMonthStartISO(new Date().toISOString().slice(0, 10));
+    const thisMonth = getMonthStartISO(todayISO());
     let total = 0;
     transactions.forEach((t) => {
       if (!t.categoryId || !ids.has(t.categoryId) || !t.date) return;
@@ -187,7 +187,7 @@ export function PlanningView({
     return earliest ? getMonthStartISO(earliest) : null;
   }, [transactions]);
 
-  const currentMonthKey = getMonthStartISO(new Date().toISOString().slice(0, 10));
+  const currentMonthKey = getMonthStartISO(todayISO());
   const completeMonths = Object.keys(monthlyActualIncome)
     .filter((k) => k < currentMonthKey && k !== earliestDataMonthKey)
     .sort();

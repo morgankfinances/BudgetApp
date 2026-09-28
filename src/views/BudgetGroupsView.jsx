@@ -1,6 +1,6 @@
 import React, { useState } from "react";
 import { computeItemFundBalance } from "../lib/budget.js";
-import { findNameClash, formatMoney, parseMoney } from "../lib/utils.js";
+import { findNameClash, formatMoney, parseMoney, todayISO } from "../lib/utils.js";
 
 /* ------------------------------------------------------------------ */
 /* Budget groups view                                                   */
@@ -20,7 +20,7 @@ export function BudgetGroupCard({ group, allGroups = [], allCategories, transact
     group.accumulateTarget != null ? String(group.accumulateTarget) : ""
   );
   const [startDateDraft, setStartDateDraft] = useState(
-    group.createdAt ? group.createdAt.slice(0, 10) : new Date().toISOString().slice(0, 10)
+    group.createdAt ? group.createdAt.slice(0, 10) : todayISO()
   );
   const [addCategoryId, setAddCategoryId] = useState("");
 

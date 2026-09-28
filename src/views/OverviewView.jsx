@@ -1,11 +1,11 @@
-import React, { useMemo } from "react";
+import React, { useMemo, useState } from "react";
 import { Cell, Pie, PieChart, ResponsiveContainer, Tooltip } from "recharts";
 import { StatBlock } from "../components/common.jsx";
 import { CHART_PALETTE } from "../constants.js";
 import { ThemedStar } from "../householdGate.jsx";
 import { buildBudgetItems, computeBudgetPeriodData, flagForBudgetItem } from "../lib/budget.js";
-import { loadReportPeriodConfig, periodFnsForConfig } from "../lib/periods.js";
-import { formatMoney } from "../lib/utils.js";
+import { addDaysISO, loadReportPeriodConfig, periodFnsForConfig } from "../lib/periods.js";
+import { formatDateDisplay, formatMoney, todayISO } from "../lib/utils.js";
 import { isUnconfirmedSuggestion } from "../lib/analysis.js";
 
 export function OverviewView({ transactions, categories, budgetGroups, onNavigate }) {
@@ -17,17 +17,32 @@ export function OverviewView({ transactions, categories, budgetGroups, onNavigat
     [categories]
   );
 
+  // Which period is shown: the current one, unless someone steps back.
+  const currentKey = periodKeyFn(todayISO());
+  const [shownKey, setShownKey] = useState(null);
+  const viewKey = shownKey || currentKey;
+  const previousKey = periodKeyFn(addDaysISO(viewKey, -1));
+  const nextKey = useMemo(() => {
+    let day = viewKey;
+    for (let i = 0; i < 40 && periodKeyFn(day) === viewKey; i += 1) day = addDaysISO(day, 1);
+    return periodKeyFn(day);
+  }, [viewKey, periodKeyFn]);
+  const latestDate = useMemo(
+    () => transactions.reduce((latest, t) => (t.date && t.date > latest ? t.date : latest), ""),
+    [transactions]
+  );
+
   const periodSummary = useMemo(() => {
-    const todayISO = new Date().toISOString().slice(0, 10);
-    const currentKey = periodKeyFn(todayISO);
     const rowMap = {};
     const catLabel = {};
     let sumIn = 0;
     let sumOut = 0;
+    let count = 0;
     transactions.forEach((t) => {
       if (!t.date) return;
       if (t.categoryId && !trackedIds.has(t.categoryId)) return;
-      if (periodKeyFn(t.date) !== currentKey) return;
+      if (periodKeyFn(t.date) !== viewKey) return;
+      count += 1;
       const key = t.categoryId || "uncategorized";
       if (!(key in rowMap)) {
         rowMap[key] = 0;
@@ -40,8 +55,10 @@ export function OverviewView({ transactions, categories, budgetGroups, onNavigat
     const rows = Object.keys(rowMap)
       .map((k) => ({ key: k, label: catLabel[k], value: rowMap[k] }))
       .filter((r) => r.value !== 0);
-    return { currentKey, sumIn, sumOut, net: sumIn - sumOut, rows };
-  }, [transactions, categories, trackedIds, periodKeyFn]);
+    return { sumIn, sumOut, net: sumIn - sumOut, rows, count };
+  }, [transactions, categories, trackedIds, periodKeyFn, viewKey]);
+  const latestKey = latestDate ? periodKeyFn(latestDate) : null;
+  const showEmptyHint = periodSummary.count === 0 && latestKey && latestKey < viewKey;
 
   const topSpending = useMemo(
     () =>
@@ -103,10 +120,48 @@ export function OverviewView({ transactions, categories, budgetGroups, onNavigat
       <div className="view-header">
         <h1>Overview</h1>
         <p>
-          A snapshot of {periodLabelFn(periodSummary.currentKey)} — the period length and chart style here
-          follow whatever you've set in Reports.
+          A snapshot of {periodLabelFn(viewKey)} — the period length and chart style here follow whatever you've set in
+          Reports.
         </p>
       </div>
+
+      <div className="period-stepper">
+        <button type="button" className="btn btn-secondary btn-sm" onClick={() => setShownKey(previousKey)} aria-label={`Show the previous period, ${periodLabelFn(previousKey)}`}>
+          ‹ {periodLabelFn(previousKey)}
+        </button>
+        <span className="period-stepper-current" aria-live="polite">
+          {periodLabelFn(viewKey)}
+          {viewKey === currentKey ? " (current)" : ""}
+        </span>
+        <button
+          type="button"
+          className="btn btn-secondary btn-sm"
+          onClick={() => setShownKey(nextKey >= currentKey ? null : nextKey)}
+          disabled={viewKey >= currentKey}
+          aria-label={`Show the next period, ${periodLabelFn(nextKey)}`}
+        >
+          {periodLabelFn(nextKey)} ›
+        </button>
+        {viewKey !== currentKey && (
+          <button type="button" className="btn btn-ghost btn-sm" onClick={() => setShownKey(null)}>
+            Back to the current period
+          </button>
+        )}
+      </div>
+
+      {showEmptyHint && (
+        <div className="suggest-banner" role="status">
+          <div className="suggest-banner-row">
+            <span>
+              Nothing recorded for {periodLabelFn(viewKey)} yet. Your most recent transaction is from{" "}
+              {formatDateDisplay(latestDate)}.
+            </span>
+            <button type="button" className="btn btn-secondary btn-sm" onClick={() => setShownKey(latestKey)}>
+              Show {periodLabelFn(latestKey)}
+            </button>
+          </div>
+        </div>
+      )}
 
       <div className="summary-row">
         <StatBlock value={formatMoney(periodSummary.sumIn)} label="Money in" />
@@ -191,7 +246,7 @@ export function OverviewView({ transactions, categories, budgetGroups, onNavigat
         <div className="panel">
           <h3 style={{ marginTop: 0, marginBottom: 4, fontSize: 15 }}>Top spending this period</h3>
           {topSpending.length === 0 ? (
-            <p className="hint">No spending recorded yet for {periodLabelFn(periodSummary.currentKey)}.</p>
+            <p className="hint">No spending recorded yet for {periodLabelFn(viewKey)}.</p>
           ) : (
             <div style={{ display: "flex", gap: 16, alignItems: "center", marginTop: 8 }}>
               <div style={{ width: 120, height: 120, flexShrink: 0 }}>

@@ -1,4 +1,5 @@
 import { enumeratePeriodsBetween, getMonthStartISO, getWeekStartISO } from "./periods.js";
+import { todayISO } from "./utils.js";
 
 
 export function computeBudgetPeriodData(transactions, budgetItems, periodType) {
@@ -10,7 +11,7 @@ export function computeBudgetPeriodData(transactions, budgetItems, periodType) {
   });
   if (budgeted.length === 0) return null;
 
-  const currentKey = periodKeyFn(new Date().toISOString().slice(0, 10));
+  const currentKey = periodKeyFn(todayISO());
   const spendMap = {};
   const periodSet = new Set([currentKey]);
 
@@ -123,7 +124,7 @@ export function computeAccumulateContributionTotal(item) {
   if (item.budgetType !== "accumulate" || !item.budgetAmount) return 0;
   const periodType = item.budgetPeriod || "monthly";
   const periodKeyFn = periodType === "weekly" ? getWeekStartISO : getMonthStartISO;
-  const currentKey = periodKeyFn(new Date().toISOString().slice(0, 10));
+  const currentKey = periodKeyFn(todayISO());
   const startKey = item.createdAt ? periodKeyFn(item.createdAt.slice(0, 10)) : currentKey;
   const periods = enumeratePeriodsBetween(startKey, currentKey, periodType);
   Object.keys(item.accumulateActuals || {}).forEach((k) => {

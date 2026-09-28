@@ -92,3 +92,12 @@ describe("findNameClash", () => {
     expect(findNameClash(null, "x")).toBeNull();
   });
 });
+
+import { todayISO } from "../utils.js";
+describe("todayISO", () => {
+  it("gives the local date, even late in the evening (never tomorrow's UTC date)", () => {
+    expect(todayISO(new Date(2026, 8, 30, 23, 30))).toBe("2026-09-30");
+    expect(todayISO(new Date(2026, 0, 1, 0, 5))).toBe("2026-01-01");
+    expect(todayISO()).toMatch(/^\d{4}-\d{2}-\d{2}$/);
+  });
+});

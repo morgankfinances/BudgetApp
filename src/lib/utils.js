@@ -83,6 +83,15 @@ export function findNameClash(items, name, exceptId = null) {
   return (items || []).find((i) => i.id !== exceptId && String(i.name || "").trim().toLowerCase() === wanted) || null;
 }
 
+// Today's date as YYYY-MM-DD in the person's own time zone. (Not
+// toISOString(), which gives the UTC date: in Utah that's already
+// "tomorrow" from late afternoon on, which pushed the app into the next
+// period every evening.)
+export function todayISO(now = new Date()) {
+  const pad = (n) => String(n).padStart(2, "0");
+  return `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}`;
+}
+
 export function formatMoney(n) {
   if (n == null) return "—";
   return n.toLocaleString("en-US", { style: "currency", currency: "USD" });

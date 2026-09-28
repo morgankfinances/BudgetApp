@@ -628,6 +628,10 @@ export const STYLES = `
    screen (see the mobile rules below). */
 .coinrose-bg-ring.beside-sidebar { left: calc(216px + (100vw - 216px) / 2); }
 
+/* Overview: step between periods. */
+.period-stepper { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin: -6px 0 16px; }
+.period-stepper-current { font-weight: 600; min-width: 9em; text-align: center; }
+
 /* Upload: the account being uploaded to, front and center. */
 .upload-target {
   border: 1px solid var(--border); border-left: 4px solid var(--accent-button); border-radius: var(--radius);
