@@ -42,7 +42,7 @@ describe("sign-in", () => {
   it("password sign-in; a wrong password gets a message that doesn't reveal whether the account exists", async () => {
     fake.state.auth.signInWithPassword = { error: { message: "Invalid login credentials" } };
     await signedOut();
-    expect(document.title).toBe("Sign In | Coinrose");
+    await waitFor(() => expect(document.title).toBe("Sign In | Coinrose"));
     fireEvent.change(document.getElementById("auth-email"), { target: { value: "me@example.com" } });
     fireEvent.change(document.getElementById("auth-password"), { target: { value: "wrong password" } });
     fireEvent.click(screen.getByRole("button", { name: "Sign in" }));
@@ -76,7 +76,7 @@ describe("sign-in", () => {
   it("'forgot password' gives the same answer whether or not the account exists, but shows rate limits", async () => {
     await signedOut();
     fireEvent.click(screen.getByRole("button", { name: "Forgot password?" }));
-    expect(document.title).toBe("Reset Password | Coinrose");
+    await waitFor(() => expect(document.title).toBe("Reset Password | Coinrose"));
     fireEvent.change(document.getElementById("auth-email"), { target: { value: "nobody@example.com" } });
     fireEvent.click(screen.getByRole("button", { name: "Send reset link" }));
     expect(await screen.findByText(/If an account with a password exists/)).toBeTruthy();
@@ -93,7 +93,7 @@ describe("sign-in", () => {
     fake.state.session = { user: { id: "u1" } };
     render(<AuthGate><div>the app</div></AuthGate>);
     await screen.findByText("Choose a new password");
-    expect(document.title).toBe("Choose a New Password | Coinrose");
+    await waitFor(() => expect(document.title).toBe("Choose a New Password | Coinrose"));
     const save = () => fireEvent.click(screen.getByRole("button", { name: "Save password" }));
     fireEvent.change(document.getElementById("auth-new-password"), { target: { value: "short" } });
     fireEvent.change(document.getElementById("auth-confirm-password"), { target: { value: "short" } });
@@ -131,16 +131,16 @@ describe("disclosure notice", () => {
   it("shows once, then the app; it can be reopened from Settings and closed again", async () => {
     render(<DisclosureGate><div>the app</div></DisclosureGate>);
     expect(screen.getByText("Before you get started")).toBeTruthy();
-    expect(document.title).toBe("Before You Get Started | Coinrose");
+    await waitFor(() => expect(document.title).toBe("Before You Get Started | Coinrose"));
     fireEvent.click(screen.getByRole("button", { name: "I understand, continue" }));
     expect(screen.getByText("the app")).toBeTruthy();
     document.title = "Budget | Coinrose";
     act(() => window.dispatchEvent(new Event("coinrose:show-disclosure")));
     expect(screen.getByText("About this app")).toBeTruthy();
-    expect(document.title).toBe("About This App | Coinrose");
+    await waitFor(() => expect(document.title).toBe("About This App | Coinrose"));
     fireEvent.click(screen.getByRole("button", { name: "Close" }));
     expect(screen.queryByText("About this app")).toBeNull();
-    expect(document.title).toBe("Budget | Coinrose");
+    await waitFor(() => expect(document.title).toBe("Budget | Coinrose"));
     act(() => window.dispatchEvent(new Event("coinrose:show-disclosure")));
     fireEvent.keyDown(window, { key: "Escape" });
     expect(screen.queryByText("About this app")).toBeNull();
@@ -156,7 +156,7 @@ describe("household setup", () => {
   it("someone new creates a household and gets its invite code", async () => {
     render(<HouseholdGate><TheApp /></HouseholdGate>);
     await screen.findByText("Set up your household");
-    expect(document.title).toBe("Set Up Your Household | Coinrose");
+    await waitFor(() => expect(document.title).toBe("Set Up Your Household | Coinrose"));
     fireEvent.change(screen.getByPlaceholderText("Household name (optional)"), { target: { value: "The Keller House" } });
     fireEvent.click(screen.getByRole("button", { name: "Create a new household" }));
     expect(await screen.findByText("NEWCODE1")).toBeTruthy();
@@ -438,7 +438,7 @@ describe("home page", () => {
   it("signed-out visitors see the home page, with its sections, screenshots, and legal links", async () => {
     render(<AuthGate><div>the app</div></AuthGate>);
     expect(await screen.findByRole("heading", { level: 1, name: "Your money. Organized by you." })).toBeTruthy();
-    expect(document.title).toBe("Coinrose: Household Budgeting");
+    await waitFor(() => expect(document.title).toBe("Coinrose: Household Budgeting"));
     for (const name of ["How it works", "What it does", "A look inside", "Built to know as little as possible", "About Coinrose"]) {
       expect(screen.getByRole("heading", { level: 2, name })).toBeTruthy();
     }
@@ -453,7 +453,7 @@ describe("home page", () => {
     fireEvent.click((await screen.findAllByRole("button", { name: /Get started/ }))[0]);
     expect(await screen.findByText("Welcome back")).toBeTruthy();
     expect(screen.getByRole("tab", { name: "Email link" }).getAttribute("aria-selected")).toBe("true");
-    expect(document.title).toBe("Sign In | Coinrose");
+    await waitFor(() => expect(document.title).toBe("Sign In | Coinrose"));
   });
   it("'Sign in' opens the password tab, and 'Back to home' returns", async () => {
     render(<AuthGate><div>the app</div></AuthGate>);
@@ -472,5 +472,34 @@ describe("home page", () => {
     render(<AuthGate><div>the app</div></AuthGate>);
     expect(await screen.findByText("the app")).toBeTruthy();
     expect(screen.queryByText(/Organized by you/)).toBeNull();
+  });
+});
+
+describe("demo mode", () => {
+  it("'Try the demo' opens the app with sample data, and 'Exit demo' returns home", async () => {
+    render(<AuthGate><div>the app</div></AuthGate>);
+    fireEvent.click((await screen.findAllByRole("button", { name: "Try the demo" }))[0]);
+    expect(await screen.findByText(/You're exploring a demo/, {}, { timeout: 4000 })).toBeTruthy();
+    expect(await screen.findByText("Sample Household Ledger", {}, { timeout: 4000 })).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Exit demo" }));
+    expect(screen.getByRole("heading", { level: 1 }).textContent).toMatch(/Organized by you/);
+    const { isDemo } = await import("../ledgerStore.js");
+    expect(isDemo()).toBe(false);
+  });
+  it("coinrose.io/#demo opens it directly, and 'Create your account' goes to sign-up", async () => {
+    window.history.replaceState({}, "", "/#demo");
+    render(<AuthGate><div>the app</div></AuthGate>);
+    fireEvent.click(await screen.findByRole("button", { name: "Create your account" }, { timeout: 4000 }));
+    expect(await screen.findByText("Welcome back")).toBeTruthy();
+    expect(screen.getByRole("tab", { name: "Email link" }).getAttribute("aria-selected")).toBe("true");
+    expect(window.location.hash).toBe("");
+  });
+  it("signing in switches the data layer back to the real database", async () => {
+    const { startDemo, isDemo } = await import("../ledgerStore.js");
+    startDemo({ accounts: [] });
+    fake.state.session = { user: { id: "u1" } };
+    render(<AuthGate><div>the app</div></AuthGate>);
+    await screen.findByText("the app");
+    expect(isDemo()).toBe(false);
   });
 });

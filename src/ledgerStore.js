@@ -151,7 +151,25 @@ async function fetchAll(table, columns, orderBy) {
 //   settingsSaved  false for a household that has never saved anything
 //   version        the household's change counter at load time
 // Security rules limit every query to the signed-in person's household.
+/* ------------------------------------------------------------------ */
+/* Demo mode                                                            */
+/* ------------------------------------------------------------------ */
+// While the demo is open (coinrose.io/#demo), the app reads made-up data
+// from memory and its saves go nowhere: nothing touches the database.
+let demoSession = null;
+
+export function startDemo(data) {
+  if (!demoSession) demoSession = { data, version: 1 };
+}
+export function stopDemo() {
+  demoSession = null;
+}
+export function isDemo() {
+  return !!demoSession;
+}
+
 export async function loadLedger() {
+  if (demoSession) return { data: demoSession.data, settingsSaved: true, version: demoSession.version };
   const [accounts, categories, groups, links, transactions, settingsRes, versionRes] = await Promise.all([
     fetchAll("accounts", "id, name, sort_order, props", ["sort_order", "id"]),
     fetchAll("categories", "id, name, excluded, is_income, sort_order, props", ["sort_order", "id"]),
@@ -177,6 +195,7 @@ export async function loadLedger() {
 
 // Just the change counter: a cheap way to ask "has anything changed?"
 export async function fetchLedgerVersion() {
+  if (demoSession) return demoSession.version;
   const { data, error } = await supabase.from("households").select("data_version").maybeSingle();
   if (error) throw error;
   return data ? data.data_version : null;
@@ -252,6 +271,10 @@ export function hasChanges(changes) {
 // Sends the changes; returns the household's new change counter.
 // Everything in one call succeeds or fails together.
 export async function saveLedgerChanges(changes) {
+  if (demoSession) {
+    demoSession.version += 1;
+    return demoSession.version;
+  }
   const { data, error } = await supabase.rpc("apply_ledger_changes", { p_changes: changes });
   if (error) throw error;
   return data;

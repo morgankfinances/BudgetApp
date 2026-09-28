@@ -77,7 +77,7 @@ const SCREENS = [
   },
 ];
 
-export default function HomePage({ onSignIn, onGetStarted }) {
+export default function HomePage({ onSignIn, onGetStarted, onTryDemo }) {
   return (
     <div className="home-root">
       <style>{HOME_STYLES}</style>
@@ -115,8 +115,8 @@ export default function HomePage({ onSignIn, onGetStarted }) {
                 <button type="button" className="home-btn home-btn-primary home-btn-large" onClick={onGetStarted}>
                   Get started free
                 </button>
-                <button type="button" className="home-btn home-btn-secondary home-btn-large" onClick={onSignIn}>
-                  Sign in
+                <button type="button" className="home-btn home-btn-secondary home-btn-large" onClick={onTryDemo}>
+                  Try the demo
                 </button>
               </div>
               <p className="home-reassure">No bank logins · No ads · Delete anytime</p>
@@ -228,10 +228,11 @@ export default function HomePage({ onSignIn, onGetStarted }) {
               <button type="button" className="home-btn home-btn-primary home-btn-large" onClick={onGetStarted}>
                 Get started free
               </button>
-              <button type="button" className="home-btn home-btn-secondary home-btn-large" onClick={onSignIn}>
-                Sign in
+              <button type="button" className="home-btn home-btn-secondary home-btn-large" onClick={onTryDemo}>
+                Try the demo
               </button>
             </div>
+            <p className="home-note home-note-center">The demo uses made-up data and needs no account.</p>
           </div>
         </section>
       </main>
@@ -343,6 +344,7 @@ const HOME_STYLES = `
 .home-screen:nth-child(even) img { order: 2; }
 .home-screen figcaption p { color: var(--ink-muted); margin: 0; }
 .home-root .home-note { margin: 28px 0 0; font-size: 13px; color: var(--ink-muted); }
+.home-root .home-note-center { margin-top: 16px; text-align: center; }
 
 /* The last two sections: a centered column with a centered heading. The
    text itself stays left-aligned, which is much easier to read. */

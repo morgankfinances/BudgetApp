@@ -188,3 +188,19 @@ describe("saveLedgerChanges", () => {
     await expect(saveLedgerChanges({})).rejects.toThrow("network down");
   });
 });
+
+describe("demo mode", () => {
+  it("reads sample data from memory and saves nowhere", async () => {
+    const { startDemo, stopDemo, isDemo } = await import("../../ledgerStore.js");
+    const sample = { accounts: [{ id: "a" }], transactions: [], categories: [], budgetGroups: [] };
+    startDemo(sample);
+    startDemo({ accounts: [] }); // a second start keeps the first
+    expect(isDemo()).toBe(true);
+    const loaded = await loadLedger();
+    expect(loaded).toEqual({ data: sample, settingsSaved: true, version: 1 });
+    expect(await saveLedgerChanges({ upserts: { accounts: [{ id: "a" }] } })).toBe(2);
+    expect(await fetchLedgerVersion()).toBe(2);
+    stopDemo();
+    expect(isDemo()).toBe(false);
+  });
+});

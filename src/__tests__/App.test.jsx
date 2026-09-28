@@ -60,16 +60,16 @@ describe("the app", () => {
     fireEvent.click(await screen.findByRole("button", { name: "Start the tour" }));
     fireEvent.click(screen.getByRole("button", { name: "Next" }));
     fireEvent.click(screen.getByRole("button", { name: "Next" }));
-    expect(document.title).toBe("Upload | Coinrose");
+    await waitFor(() => expect(document.title).toBe("Upload | Coinrose"));
   });
 
   it("navigating shows each page and updates the tab title", async () => {
     const { nav } = await openApp();
     nav("Transactions");
     expect(screen.getByRole("heading", { name: "Transactions" })).toBeTruthy();
-    expect(document.title).toBe("Transactions | Coinrose");
+    await waitFor(() => expect(document.title).toBe("Transactions | Coinrose"));
     nav("Budget");
-    expect(document.title).toBe("Budget | Coinrose");
+    await waitFor(() => expect(document.title).toBe("Budget | Coinrose"));
   });
 
   it("changing one transaction's category saves just that one row", async () => {
@@ -312,7 +312,7 @@ describe("the app's actions each save exactly what changed", () => {
     await flush();
     expect(lastSave().deletes.transactions).toHaveLength(10);
     expect(lastSave().upserts.transactions).toEqual([expect.objectContaining({ description: "Only row" })]);
-    expect(document.title).toBe("Transactions | Coinrose");
+    await waitFor(() => expect(document.title).toBe("Transactions | Coinrose"));
   });
 
   it("the phone menu opens and closes, and Settings can replay the tour from any page", async () => {
@@ -324,7 +324,7 @@ describe("the app's actions each save exactly what changed", () => {
     nav("Reports");
     act(() => window.dispatchEvent(new Event("coinrose:start-tutorial")));
     expect(await screen.findByText(/Step 1 of/)).toBeTruthy();
-    expect(document.title).toBe("Overview | Coinrose");
+    await waitFor(() => expect(document.title).toBe("Overview | Coinrose"));
   });
 
   it("the categorize-your-import screen can be skipped", async () => {

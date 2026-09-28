@@ -13,10 +13,14 @@
 // Import "./storageAdapter.js" separately (once, at app startup) before
 // this renders App, so window.storage is ready when App loads data.
 
-import React, { useState, useEffect, useLayoutEffect, useRef } from "react";
+import React, { Suspense, lazy, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { supabase } from "./supabaseClient.js";
 import { applySavedTheme, ThemedLogo, DecoRing, LoadingIndicator } from "./householdGate.jsx";
 import HomePage from "./components/HomePage.jsx";
+import { stopDemo } from "./ledgerStore.js";
+
+// The demo's code (and the app's) loads only when someone opens it.
+const DemoMode = lazy(() => import("./components/DemoMode.jsx"));
 
 const MIN_PASSWORD_LENGTH = 12;
 
@@ -240,7 +244,7 @@ const AUTH_STYLES = `
 
 // The page layout shared by the sign-in screens and disclosureGate.jsx:
 // logo, wordmark, optional tagline, then whatever card goes below.
-export function AuthShell({ children, tagline = "Your money. Organized by you.", wide = false }) {
+export function AuthShell({ children, tagline = "Your household's money, organized together.", wide = false }) {
   return (
     <div className="auth-root">
       <style>{AUTH_STYLES}</style>
@@ -410,6 +414,8 @@ export default function AuthGate({ children }) {
   // Signed-out visitors see the home page first, unless the address asks
   // for the sign-in form directly (coinrose.io/#signin).
   const [showHome, setShowHome] = useState(() => !/(^|[#?&])signin\b/i.test(window.location.hash + window.location.search));
+  // The demo: coinrose.io/#demo, or "Try the demo" on the home page.
+  const [demo, setDemo] = useState(() => /(^|[#?&])demo\b/i.test(window.location.hash + window.location.search));
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [sent, setSent] = useState(false); // magic link or reset email sent
@@ -454,12 +460,26 @@ export default function AuthGate({ children }) {
     if (session && !recovering) return;
     let page = null; // still checking the session
     if (session && recovering) page = "Choose a New Password";
-    else if (session === null && showHome) {
+    else if (session === null && demo) {
+      document.title = "Demo | Coinrose";
+      return;
+    } else if (session === null && showHome) {
       document.title = "Coinrose: Household Budgeting";
       return;
     } else if (session === null) page = mode === "forgot" ? "Reset Password" : "Sign In";
     document.title = page ? `${page} | Coinrose` : "Coinrose";
-  }, [session, recovering, mode, showHome]);
+  }, [session, recovering, mode, showHome, demo]);
+
+  // Leaving the demo, or signing in, puts the data layer back on the real
+  // database.
+  function closeDemo() {
+    stopDemo();
+    setDemo(false);
+    if (/demo/i.test(window.location.hash)) window.history.replaceState(null, "", window.location.pathname + window.location.search);
+  }
+  useEffect(() => {
+    if (session) stopDemo();
+  }, [session]);
 
   // From the home page: open the sign-in form, on the password tab ("Sign
   // in") or the email-link tab, which creates new accounts ("Get started").
@@ -554,7 +574,43 @@ export default function AuthGate({ children }) {
 
   if (session) return children;
 
-  if (showHome) return <HomePage onSignIn={() => openSignIn("password")} onGetStarted={() => openSignIn("link")} />;
+  if (demo) {
+    return (
+      <Suspense
+        fallback={
+          <div className="auth-root">
+            <style>{AUTH_STYLES}</style>
+            <LoadingIndicator label="Loading the demo…" />
+          </div>
+        }
+      >
+        <DemoMode
+          onExit={() => {
+            closeDemo();
+            setShowHome(true);
+            window.scrollTo(0, 0);
+          }}
+          onGetStarted={() => {
+            closeDemo();
+            openSignIn("link");
+          }}
+        />
+      </Suspense>
+    );
+  }
+
+  if (showHome) {
+    return (
+      <HomePage
+        onSignIn={() => openSignIn("password")}
+        onGetStarted={() => openSignIn("link")}
+        onTryDemo={() => {
+          setDemo(true);
+          window.scrollTo(0, 0);
+        }}
+      />
+    );
+  }
 
   const emailField = (
     <div className="auth-field">
