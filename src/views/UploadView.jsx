@@ -7,17 +7,46 @@ import { guessHeader, uid } from "../lib/utils.js";
 /* Upload wizard                                                       */
 /* ------------------------------------------------------------------ */
 
-export function UploadView({ accounts, prefill, onImport }) {
-  const [mode, setMode] = useState(() => {
-    if (prefill && prefill.mode === "append") return "append";
-    // Existing account is the common case after initial setup — default
-    // to it whenever there's something to append to, rather than making
-    // "create a new account" the default every time.
-    return accounts.length > 0 ? "append" : "new";
-  });
-  const [targetAccountId, setTargetAccountId] = useState(
-    (prefill && prefill.accountId) || (accounts[0] && accounts[0].id) || ""
+const NEW_ACCOUNT = "__new__";
+
+// Words too common in account names to identify one ("Chase Credit Card").
+const GENERIC_ACCOUNT_WORDS = new Set([
+  "account", "accounts", "bank", "banking", "card", "cards", "credit", "debit", "checking", "savings", "saving",
+  "joint", "personal", "business", "rewards", "reward", "visa", "mastercard", "amex", "discover", "statement",
+  "transactions", "export", "download", "federal", "union", "trust", "national", "financial", "reserve", "money",
+  "market", "high", "yield",
+]);
+
+// Picks the account a file clearly belongs to, or null. A match needs to be
+// unambiguous: exactly one account named in the file name, or exactly one
+// account whose saved columns all appear in the file.
+export function matchAccountToFile(accounts, headers, fileName) {
+  // By name: the file name contains one of the account name's distinctive
+  // words ("Griffon" in "griffon-reserve-aug.csv"), ignoring generic ones
+  // that many account names share.
+  const words = (text) => String(text || "").toLowerCase().split(/[^a-z0-9]+/).filter(Boolean);
+  const base = words(fileName.replace(/\.(csv|xlsx|xls)$/i, "")).join(" ");
+  const byName = accounts.filter((a) =>
+    words(a.name).some((w) => w.length >= 4 && !GENERIC_ACCOUNT_WORDS.has(w) && base.includes(w))
   );
+  if (byName.length === 1) return { id: byName[0].id, reason: "name" };
+  const byColumns = accounts.filter((a) => {
+    const cols = [a.dateCol, a.descriptionCol, a.outCol, a.inCol].filter(Boolean);
+    return cols.length >= 2 && cols.every((c) => headers.includes(c));
+  });
+  if (byColumns.length === 1) return { id: byColumns[0].id, reason: "columns" };
+  return null;
+}
+
+export function UploadView({ accounts, prefill, onImport }) {
+  // Which account the statement goes into. It's never silently defaulted:
+  // it's pre-chosen only when the person started from that account ("Add
+  // transactions"), when the file clearly matches one account, or when
+  // there are no accounts yet (so it must be a new one).
+  const [accountChoice, setAccountChoice] = useState(
+    () => (prefill && prefill.accountId) || (accounts.length === 0 ? NEW_ACCOUNT : "")
+  );
+  const [choiceReason, setChoiceReason] = useState(prefill && prefill.accountId ? "prefill" : null);
   const [fileInfo, setFileInfo] = useState(null);
   const [parseError, setParseError] = useState(null);
   const [step, setStep] = useState("select");
@@ -25,7 +54,38 @@ export function UploadView({ accounts, prefill, onImport }) {
   const [reviewResult, setReviewResult] = useState(null);
   const fileInputRef = useRef(null);
 
-  const existingAccount = mode === "append" ? accounts.find((a) => a.id === targetAccountId) : null;
+  const existingAccount = accounts.find((a) => a.id === accountChoice) || null;
+
+  // Column settings for a given choice: an existing account's saved ones
+  // (where the file has them), or best guesses for a new account.
+  function mappingFor(choice, headers, fileName) {
+    const acct = accounts.find((a) => a.id === choice);
+    if (acct) {
+      const keep = (col) => (headers.includes(col) ? col : "");
+      return {
+        name: acct.name,
+        dateCol: keep(acct.dateCol),
+        descriptionCol: keep(acct.descriptionCol),
+        outCol: keep(acct.outCol),
+        inCol: keep(acct.inCol),
+        invertSign: !!acct.invertSign,
+      };
+    }
+    return {
+      name: fileName.replace(/\.(csv|xlsx|xls)$/i, ""),
+      dateCol: guessHeader(headers, ["transaction date", "posted date", "date"]),
+      descriptionCol: guessHeader(headers, ["description", "memo", "payee", "merchant", "name"]),
+      outCol: guessHeader(headers, ["debit", "withdrawal", "money out", "amount out"]),
+      inCol: guessHeader(headers, ["credit", "deposit", "money in", "amount in"]),
+      invertSign: false,
+    };
+  }
+
+  function changeAccount(choice) {
+    setAccountChoice(choice);
+    setChoiceReason(null);
+    if (fileInfo) setForm(mappingFor(choice, fileInfo.headers, fileInfo.fileName));
+  }
 
   async function handleFile(e) {
     const file = e.target.files && e.target.files[0];
@@ -37,26 +97,16 @@ export function UploadView({ accounts, prefill, onImport }) {
       if (rows.length === 0) throw new Error("This file doesn't have any data rows.");
       setFileInfo({ headers, rows, fileName: file.name });
 
-      const guessedName = file.name.replace(/\.(csv|xlsx|xls)$/i, "");
-      if (mode === "append" && existingAccount) {
-        setForm({
-          name: existingAccount.name,
-          dateCol: headers.includes(existingAccount.dateCol) ? existingAccount.dateCol : "",
-          descriptionCol: headers.includes(existingAccount.descriptionCol) ? existingAccount.descriptionCol : "",
-          outCol: headers.includes(existingAccount.outCol) ? existingAccount.outCol : "",
-          inCol: headers.includes(existingAccount.inCol) ? existingAccount.inCol : "",
-          invertSign: !!existingAccount.invertSign,
-        });
-      } else {
-        setForm({
-          name: guessedName,
-          dateCol: guessHeader(headers, ["transaction date", "posted date", "date"]),
-          descriptionCol: guessHeader(headers, ["description", "memo", "payee", "merchant", "name"]),
-          outCol: guessHeader(headers, ["debit", "withdrawal", "money out", "amount out"]),
-          inCol: guessHeader(headers, ["credit", "deposit", "money in", "amount in"]),
-          invertSign: false,
-        });
+      let choice = accountChoice;
+      let reason = choiceReason;
+      if (!(prefill && prefill.accountId) && accounts.length > 0) {
+        const match = matchAccountToFile(accounts, headers, file.name);
+        choice = match ? match.id : "";
+        reason = match ? match.reason : null;
       }
+      setAccountChoice(choice);
+      setChoiceReason(reason);
+      setForm(mappingFor(choice, headers, file.name));
       setStep("mapping");
     } catch (err) {
       setParseError(err.message || "Could not read this file.");
@@ -67,7 +117,8 @@ export function UploadView({ accounts, prefill, onImport }) {
   function handleMappingSubmit(e) {
     e.preventDefault();
     if (!form.name.trim() || !form.dateCol || (!form.outCol && !form.inCol)) return;
-    const accountId = mode === "append" && existingAccount ? existingAccount.id : uid();
+    if (!accountChoice) return;
+    const accountId = existingAccount ? existingAccount.id : uid();
     const { valid, invalid } = buildTransactions(fileInfo.rows, form, accountId, form.name.trim(), uid());
     setReviewResult({
       valid,
@@ -80,7 +131,7 @@ export function UploadView({ accounts, prefill, onImport }) {
         outCol: form.outCol,
         inCol: form.inCol,
         invertSign: form.invertSign,
-        isNew: !(mode === "append" && existingAccount),
+        isNew: !existingAccount,
       },
     });
     setStep("review");
@@ -99,7 +150,15 @@ export function UploadView({ accounts, prefill, onImport }) {
     if (fileInputRef.current) fileInputRef.current.value = "";
   }
 
-  const canSubmitMapping = form.name.trim() && form.dateCol && (form.outCol || form.inCol);
+  const canSubmitMapping = accountChoice && form.name.trim() && form.dateCol && (form.outCol || form.inCol);
+  // The chosen account's statements usually have columns this file lacks:
+  // a sign it may be the wrong account.
+  const missingColumns =
+    existingAccount && fileInfo
+      ? [existingAccount.dateCol, existingAccount.descriptionCol, existingAccount.outCol, existingAccount.inCol]
+          .filter(Boolean)
+          .filter((c, i, all) => all.indexOf(c) === i && !fileInfo.headers.includes(c))
+      : [];
   const sameColWarning = form.outCol && form.inCol && form.outCol === form.inCol;
 
   return (
@@ -119,42 +178,18 @@ export function UploadView({ accounts, prefill, onImport }) {
 
       {step === "select" && (
         <div className="panel">
-          {accounts.length > 0 && (
-            <div className="radio-row">
-              <label className="radio-option">
-                <input
-                  type="radio"
-                  name="mode"
-                  checked={mode === "append"}
-                  onChange={() => setMode("append")}
-                />
-                Add transactions to an existing account
-              </label>
-              <label className="radio-option">
-                <input
-                  type="radio"
-                  name="mode"
-                  checked={mode === "new"}
-                  onChange={() => setMode("new")}
-                />
-                This is a new account
-              </label>
-            </div>
-          )}
-
-          {mode === "append" && accounts.length > 0 && (
-            <div className="field" style={{ maxWidth: 320 }}>
-              <label>Account</label>
-              <select aria-label="Account" value={targetAccountId} onChange={(e) => setTargetAccountId(e.target.value)}>
-                {accounts.map((a) => (
-                  <option key={a.id} value={a.id}>
-                    {a.name}
-                  </option>
-                ))}
-              </select>
-            </div>
-          )}
-
+          <p className="hint" style={{ marginTop: 0 }}>
+            {prefill && existingAccount ? (
+              <>
+                Adding transactions to <strong>{existingAccount.name}</strong>. You can change the account after
+                choosing the file.
+              </>
+            ) : accounts.length > 0 ? (
+              "Choose the statement file first. Next, you'll pick which account it belongs to."
+            ) : (
+              "Choose a statement file to set up your first account."
+            )}
+          </p>
           {parseError && <div className="error-banner">{parseError}</div>}
 
           <div className="dropzone">
@@ -177,17 +212,63 @@ export function UploadView({ accounts, prefill, onImport }) {
       {step === "mapping" && fileInfo && (
         <div className="panel">
           <form onSubmit={handleMappingSubmit}>
+            <div className="upload-target">
+              <label htmlFor="upload-account" className="upload-target-label">
+                {existingAccount ? (
+                  <>
+                    Uploading to <strong>{existingAccount.name}</strong>
+                  </>
+                ) : accountChoice === NEW_ACCOUNT ? (
+                  "Uploading to a new account"
+                ) : (
+                  "Which account is this statement from?"
+                )}
+              </label>
+              <select
+                id="upload-account"
+                value={accountChoice}
+                onChange={(e) => changeAccount(e.target.value)}
+                required
+              >
+                <option value="" disabled>
+                  Choose an account…
+                </option>
+                {accounts.map((a) => (
+                  <option key={a.id} value={a.id}>
+                    {a.name}
+                  </option>
+                ))}
+                <option value={NEW_ACCOUNT}>+ A new account</option>
+              </select>
+              {choiceReason && existingAccount && (
+                <div className="hint">
+                  {choiceReason === "prefill"
+                    ? "Chosen because you started from this account."
+                    : choiceReason === "name"
+                      ? "Matched by the file's name. Please check it's right."
+                      : "Matched by the file's columns. Please check it's right."}
+                </div>
+              )}
+              {missingColumns.length > 0 && (
+                <div className="upload-warning" role="alert">
+                  This file doesn't have the columns {existingAccount.name}'s statements have used before (
+                  {missingColumns.join(", ")}). Make sure this is the right account.
+                </div>
+              )}
+            </div>
             <div className="form-grid">
-              <div className="field span-2">
-                <label>What should this account be called?</label>
-                <input
-                  type="text"
-                  value={form.name}
-                  disabled={mode === "append"}
-                  onChange={(e) => setForm({ ...form, name: e.target.value })}
-                  required
-                />
-              </div>
+              {accountChoice === NEW_ACCOUNT && (
+                <div className="field span-2">
+                  <label htmlFor="upload-new-name">What should this account be called?</label>
+                  <input
+                    id="upload-new-name"
+                    type="text"
+                    value={form.name}
+                    onChange={(e) => setForm({ ...form, name: e.target.value })}
+                    required
+                  />
+                </div>
+              )}
               <div className="field">
                 <label>Date column</label>
                 <select aria-label="Date column"
@@ -304,6 +385,10 @@ export function UploadView({ accounts, prefill, onImport }) {
 
       {step === "review" && reviewResult && (
         <div className="panel">
+          <p className="upload-review-target">
+            {reviewResult.accountMeta.isNew ? "Creating a new account: " : "Adding to "}
+            <strong>{reviewResult.accountMeta.name}</strong>
+          </p>
           <div className="summary-row">
             <StatBlock value={fileInfo.rows.length} label="Rows in file" />
             <StatBlock value={reviewResult.valid.length} label="Ready to import" />
@@ -332,10 +417,11 @@ export function UploadView({ accounts, prefill, onImport }) {
               onClick={confirmImport}
               disabled={reviewResult.valid.length === 0}
             >
-              Import {reviewResult.valid.length} transaction{reviewResult.valid.length === 1 ? "" : "s"}
+              Import {reviewResult.valid.length} transaction{reviewResult.valid.length === 1 ? "" : "s"} into{" "}
+              {reviewResult.accountMeta.name}
             </button>
             <button className="btn btn-secondary" onClick={() => setStep("mapping")}>
-              Back to mapping
+              Change account or columns
             </button>
             <button className="btn btn-ghost" onClick={resetWizard}>
               Cancel

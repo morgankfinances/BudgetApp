@@ -41,7 +41,10 @@ export function buildCategorySuggestions(transactions, categories) {
   const validCategoryIds = new Set(categories.map((c) => c.id));
   const byDescription = new Map();
   transactions.forEach((t) => {
-    if (!t.categoryId || !validCategoryIds.has(t.categoryId)) return;
+    // Learn only from categories a person chose or confirmed, never from
+    // suggestions that were applied automatically and not yet confirmed
+    // (otherwise one wrong guess would reinforce itself).
+    if (!t.categoryId || t.categorySuggested || !validCategoryIds.has(t.categoryId)) return;
     const norm = (t.description || "").trim().toLowerCase();
     if (!norm) return;
     if (!byDescription.has(norm)) byDescription.set(norm, []);
@@ -72,4 +75,34 @@ export function buildCategorySuggestions(transactions, categories) {
     if (best) suggestionByTxnId.set(t.id, best);
   });
   return suggestionByTxnId;
+}
+
+// Fills in suggested categories as real ones, marked categorySuggested so
+// they show as "Suggested" until someone confirms or changes them. They
+// count toward budgets and reports right away. With onlyIds, only those
+// transactions are considered (for example, just the ones being imported).
+// Returns the updated list and how many were filled in.
+export function applyCategorySuggestions(transactions, categories, onlyIds = null) {
+  const suggestions = buildCategorySuggestions(transactions, categories);
+  let applied = 0;
+  const next = transactions.map((t) => {
+    if (onlyIds && !onlyIds.has(t.id)) return t;
+    const categoryId = suggestions.get(t.id);
+    if (!categoryId) return t;
+    applied += 1;
+    return { ...t, categoryId, categorySuggested: true };
+  });
+  return { transactions: applied ? next : transactions, applied };
+}
+
+// A transaction whose category a person has chosen or confirmed.
+export function withoutSuggestedFlag(t) {
+  if (!("categorySuggested" in t)) return t;
+  const { categorySuggested, ...rest } = t; // eslint-disable-line no-unused-vars
+  return rest;
+}
+
+// Transactions showing a suggested category nobody has confirmed yet.
+export function isUnconfirmedSuggestion(t) {
+  return !!(t.categoryId && t.categorySuggested);
 }

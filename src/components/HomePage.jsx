@@ -15,7 +15,7 @@ const STEPS = [
   },
   {
     title: "Sort your spending",
-    body: "Choose a category for each transaction. Coinrose learns from your choices and suggests categories for the next ones.",
+    body: "Choose a category for each transaction. Coinrose learns from your choices and fills in categories for the next ones, for you to confirm or change.",
   },
   {
     title: "Budget and plan",
@@ -38,7 +38,7 @@ const FEATURES = [
   },
   {
     title: "Categorizing that learns",
-    body: "Suggestions based on how you've sorted similar purchases before, and a heads-up when something looks like a duplicate.",
+    body: "Categories filled in from how you've sorted similar purchases before, and a heads-up when something looks like a duplicate.",
   },
   {
     title: "Undo recent changes",

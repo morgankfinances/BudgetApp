@@ -201,7 +201,7 @@ describe("Upload", () => {
     expect(screen.getByDisplayValue("Withdrawal")).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: "Check 3 rows" }));
     expect(document.body.textContent).toMatch(/unrecognized date/);
-    fireEvent.click(await screen.findByRole("button", { name: "Import 2 transactions" }));
+    fireEvent.click(await screen.findByRole("button", { name: /^Import 2 transactions into Millbrook Savings$/ }));
     const [meta, txs] = onImport.mock.calls[0];
     expect(meta).toMatchObject({ name: "Millbrook Savings", dateCol: "Post Date", outCol: "Withdrawal", inCol: "Deposit" });
     expect(txs.map((t) => [t.date, t.description, t.amountOut, t.amountIn])).toEqual([
@@ -213,7 +213,7 @@ describe("Upload", () => {
     const { container } = render(<UploadView accounts={F.accounts} prefill={null} onImport={onImport} />);
     choose(container, "Date,Description,Money Out,Money In\n2026-09-22,Bakery,4.50,\n");
     fireEvent.click(await screen.findByRole("button", { name: "Check 1 rows" }));
-    fireEvent.click(await screen.findByRole("button", { name: "Import 1 transaction" }));
+    fireEvent.click(await screen.findByRole("button", { name: /^Import 1 transaction into Millbrook Checking$/ }));
     expect(onImport.mock.calls[0][0]).toMatchObject({ id: "acct-chk", name: "Millbrook Checking" });
   });
   it("explains a file it can't read", async () => {
@@ -377,3 +377,81 @@ describe("Reports: custom periods, account filter, remembered settings", () => {
     expect(document.querySelectorAll(".recharts-wrapper, .recharts-responsive-container").length).toBeGreaterThan(0);
   });
 });
+
+import { matchAccountToFile } from "../views/UploadView.jsx";
+describe("Upload: choosing the account", () => {
+  const choose = (container, text, name) =>
+    fireEvent.change(container.querySelector('input[type="file"]'), { target: { files: [new File([text], name)] } });
+  const accountSelect = () => screen.getByLabelText(/Uploading to|Which account is this statement from/);
+
+  it("matches a file to an account only when it's unambiguous", () => {
+    const accts = [...F.accounts, { id: "restored", name: "Old Card" }]; // restored accounts have no saved columns
+    expect(matchAccountToFile(accts, ["x"], "griffon-card-aug.csv")).toEqual({ id: "acct-card", reason: "name" });
+    expect(matchAccountToFile(accts, ["x"], "Griffon_Reserve_2026-08.CSV")).toEqual({ id: "acct-card", reason: "name" });
+    expect(matchAccountToFile(accts, ["x"], "millbrook-stmt.xlsx")).toEqual({ id: "acct-chk", reason: "name" });
+    // generic words alone never match ("card" appears in "Griffon Card")
+    expect(matchAccountToFile(accts, ["x"], "card-statement.csv")).toBeNull();
+    // a word shared by two accounts' names is ambiguous
+    expect(matchAccountToFile([{ id: "a", name: "Summit Checking" }, { id: "b", name: "Summit Savings" }], ["x"], "summit.csv")).toBeNull();
+    expect(matchAccountToFile(accts, ["Date", "Description", "Money Out", "Money In"], "export.csv")).toEqual({ id: "acct-chk", reason: "columns" });
+    expect(matchAccountToFile(accts, ["Date", "Description", "Amount", "Money Out", "Money In"], "export.csv")).toBeNull(); // both match
+    expect(matchAccountToFile(accts, ["Posted", "Memo"], "statement.csv")).toBeNull();
+  });
+  it("with no clear match, nothing is pre-chosen and you can't continue until you pick", async () => {
+    const onImport = vi.fn();
+    const { container } = render(<UploadView accounts={F.accounts} prefill={null} onImport={onImport} />);
+    expect(document.body.textContent).toMatch(/Choose the statement file first/);
+    choose(container, "Posted,Memo,Out\n2026-09-01,Shop,5\n", "statement.csv");
+    const select = await screen.findByLabelText(/Which account is this statement from/);
+    expect(select.value).toBe("");
+    expect(screen.getByRole("button", { name: "Check 1 rows" }).disabled).toBe(true);
+    fireEvent.change(select, { target: { value: "__new__" } });
+    expect(screen.getByLabelText("What should this account be called?").value).toBe("statement");
+    fireEvent.change(screen.getByLabelText("Date column"), { target: { value: "Posted" } });
+    fireEvent.change(screen.getByLabelText("Money out (expenses) column"), { target: { value: "Out" } });
+    expect(screen.getByRole("button", { name: "Check 1 rows" }).disabled).toBe(false);
+  });
+  it("a clear match is pre-chosen, says why, and applies that account's column settings", async () => {
+    const { container } = render(<UploadView accounts={F.accounts} prefill={null} onImport={vi.fn()} />);
+    choose(container, "Date,Description,Money Out,Money In\n2026-09-22,Bakery,4.50,\n", "export.csv");
+    await screen.findByText(/Matched by the file's columns/);
+    expect(accountSelect().value).toBe("acct-chk");
+    expect(document.body.textContent).toMatch(/Uploading to Millbrook Checking/);
+    expect(screen.getByLabelText("Money out (expenses) column").value).toBe("Money Out");
+  });
+  it("switching to an account whose statements look different warns about it", async () => {
+    const { container } = render(<UploadView accounts={F.accounts} prefill={null} onImport={vi.fn()} />);
+    choose(container, "Date,Description,Money Out,Money In\n2026-09-22,Bakery,4.50,\n", "export.csv");
+    await screen.findByText(/Matched by the file's columns/);
+    fireEvent.change(accountSelect(), { target: { value: "acct-card" } });
+    expect(screen.getByRole("alert").textContent).toMatch(/doesn't have the columns Griffon Card's statements have used before \(Amount\)/);
+    expect(screen.queryByText(/Matched by/)).toBeNull();
+  });
+  it("starting from an account keeps it, and the review step names it with a way back", async () => {
+    const onImport = vi.fn();
+    const { container } = render(<UploadView accounts={F.accounts} prefill={{ mode: "append", accountId: "acct-card" }} onImport={onImport} />);
+    expect(document.body.textContent).toMatch(/Adding transactions to Griffon Card/);
+    choose(container, "Date,Description,Amount\n2026-09-22,Bakery,4.50\n", "whatever.csv");
+    await screen.findByText(/Chosen because you started from this account/);
+    fireEvent.click(screen.getByRole("button", { name: "Check 1 rows" }));
+    expect(document.body.textContent).toMatch(/Adding to Griffon Card/);
+    fireEvent.click(screen.getByRole("button", { name: "Change account or columns" }));
+    expect(accountSelect().value).toBe("acct-card");
+  });
+});
+
+describe("Categories: the suggestions switch", () => {
+  it("shows the household setting and passes changes along", () => {
+    const onToggleAutoApply = vi.fn();
+    render(<CategoriesViewForSwitch onToggleAutoApply={onToggleAutoApply} />);
+    const box = screen.getByLabelText(/Fill in suggested categories automatically/);
+    expect(box.checked).toBe(true);
+    fireEvent.click(box);
+    expect(onToggleAutoApply).toHaveBeenCalledWith(false);
+  });
+});
+import { CategoriesView } from "../views/CategoriesView.jsx";
+function CategoriesViewForSwitch(props) {
+  return <CategoriesView categories={F.categories} transactions={F.transactions} onAdd={vi.fn()} onRename={vi.fn()} onDelete={vi.fn()}
+    onToggleExcluded={vi.fn()} onToggleIsIncome={vi.fn()} onMerge={vi.fn()} autoApplySuggestions={true} {...props} />;
+}

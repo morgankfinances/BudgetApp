@@ -68,3 +68,47 @@ describe("buildCategorySuggestions", () => {
     expect(buildCategorySuggestions(tx, categories).size).toBe(0);
   });
 });
+
+import { applyCategorySuggestions, withoutSuggestedFlag, isUnconfirmedSuggestion } from "../analysis.js";
+describe("filling in suggested categories", () => {
+  const cats = [{ id: "groc" }, { id: "dine" }];
+  const history = [
+    { id: "h1", description: "Thrifty Sprout", date: "2026-08-01", categoryId: "groc" },
+    { id: "h2", description: "Thrifty Sprout", date: "2026-08-08", categoryId: "groc" },
+  ];
+  it("fills in the suggestion as a real category, marked as suggested", () => {
+    const { transactions, applied } = applyCategorySuggestions([...history, { id: "n1", description: "THRIFTY SPROUT", categoryId: null }], cats);
+    expect(applied).toBe(1);
+    expect(transactions.find((t) => t.id === "n1")).toMatchObject({ categoryId: "groc", categorySuggested: true });
+    expect(transactions.find((t) => t.id === "h1")).toBe(history[0]); // untouched items are the same objects
+  });
+  it("can be limited to certain transactions, such as the ones just imported", () => {
+    const list = [...history, { id: "old", description: "Thrifty Sprout", categoryId: null }, { id: "new", description: "Thrifty Sprout", categoryId: null }];
+    const { transactions, applied } = applyCategorySuggestions(list, cats, new Set(["new"]));
+    expect(applied).toBe(1);
+    expect(transactions.find((t) => t.id === "old").categoryId).toBeNull();
+  });
+  it("returns the same list when there's nothing to fill in", () => {
+    const list = [{ id: "x", description: "Unknown shop", categoryId: null }];
+    const result = applyCategorySuggestions(list, cats);
+    expect(result.applied).toBe(0);
+    expect(result.transactions).toBe(list);
+  });
+  it("never learns from its own unconfirmed suggestions", () => {
+    const list = [
+      { id: "s1", description: "Corner Cafe", date: "2026-08-01", categoryId: "dine", categorySuggested: true },
+      { id: "n1", description: "Corner Cafe", categoryId: null },
+    ];
+    expect(applyCategorySuggestions(list, cats).applied).toBe(0);
+    const confirmed = [withoutSuggestedFlag(list[0]), list[1]];
+    expect(applyCategorySuggestions(confirmed, cats).applied).toBe(1);
+  });
+  it("tells unconfirmed suggestions apart, and confirming removes the mark", () => {
+    const t = { id: "a", categoryId: "groc", categorySuggested: true };
+    expect(isUnconfirmedSuggestion(t)).toBe(true);
+    expect(isUnconfirmedSuggestion({ id: "b", categoryId: null, categorySuggested: true })).toBe(false);
+    expect(withoutSuggestedFlag(t)).toEqual({ id: "a", categoryId: "groc" });
+    const plain = { id: "c", categoryId: "groc" };
+    expect(withoutSuggestedFlag(plain)).toBe(plain);
+  });
+});

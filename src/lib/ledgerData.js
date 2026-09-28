@@ -33,6 +33,7 @@ export function normalizeSnapshot(data) {
     incomeWarningDismissed: !!data.incomeWarningDismissed,
     hiddenBudgetMonths: data.hiddenBudgetMonths || [],
     excludeUnassignedFromBudget: !!data.excludeUnassignedFromBudget,
+    autoApplySuggestions: data.autoApplySuggestions !== false, // on unless turned off
   };
 }
 
@@ -59,6 +60,7 @@ export function normalizeLoadedLedger(parsed) {
     incomeWarningDismissed: !!parsed.incomeWarningDismissed,
     hiddenBudgetMonths: Array.isArray(parsed.hiddenBudgetMonths) ? parsed.hiddenBudgetMonths : [],
     excludeUnassignedFromBudget: !!parsed.excludeUnassignedFromBudget,
+    autoApplySuggestions: parsed.autoApplySuggestions !== false, // on unless turned off
   };
 }
 

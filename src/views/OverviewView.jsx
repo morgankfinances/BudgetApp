@@ -6,6 +6,7 @@ import { ThemedStar } from "../householdGate.jsx";
 import { buildBudgetItems, computeBudgetPeriodData, flagForBudgetItem } from "../lib/budget.js";
 import { loadReportPeriodConfig, periodFnsForConfig } from "../lib/periods.js";
 import { formatMoney } from "../lib/utils.js";
+import { isUnconfirmedSuggestion } from "../lib/analysis.js";
 
 export function OverviewView({ transactions, categories, budgetGroups, onNavigate }) {
   const periodConfig = useMemo(() => loadReportPeriodConfig(), []);
@@ -94,7 +95,8 @@ export function OverviewView({ transactions, categories, budgetGroups, onNavigat
   }, [weeklyData, monthlyData]);
 
   const uncategorizedCount = transactions.filter((t) => !t.categoryId).length;
-  const needsAttentionCount = flagged.length + (uncategorizedCount > 0 ? 1 : 0);
+  const suggestedCount = transactions.filter(isUnconfirmedSuggestion).length;
+  const needsAttentionCount = flagged.length + (uncategorizedCount > 0 ? 1 : 0) + (suggestedCount > 0 ? 1 : 0);
 
   return (
     <div>
@@ -133,6 +135,20 @@ export function OverviewView({ transactions, categories, budgetGroups, onNavigat
                       {uncategorizedCount} uncategorized transaction{uncategorizedCount === 1 ? "" : "s"}
                     </div>
                     <div className="meta">Tap to review them</div>
+                  </div>
+                </button>
+              )}
+              {suggestedCount > 0 && (
+                <button
+                  className="account-card"
+                  style={{ width: "100%", textAlign: "left", cursor: "pointer", border: "none", background: "var(--subtle-bg)", borderRadius: "var(--radius)" }}
+                  onClick={() => onNavigate("transactions")}
+                >
+                  <div>
+                    <div className="name" style={{ fontSize: 13.5 }}>
+                      {suggestedCount} suggested categor{suggestedCount === 1 ? "y" : "ies"} to confirm
+                    </div>
+                    <div className="meta">Already counted in budgets; tap to review</div>
                   </div>
                 </button>
               )}

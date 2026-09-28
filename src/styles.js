@@ -329,7 +329,8 @@ export const STYLES = `
 .field input[type="text"],
 .field input[type="date"],
 .field input[type="number"],
-.field select {
+.field select,
+.upload-target select {
   font-family: inherit;
   font-size: 14px;
   padding: 8px 10px;
@@ -338,7 +339,7 @@ export const STYLES = `
   background: var(--panel);
   color: var(--ink);
 }
-.field input:focus, .field select:focus {
+.field input:focus, .field select:focus, .upload-target select:focus {
   outline: 2px solid var(--accent);
   outline-offset: 1px;
 }
@@ -626,6 +627,28 @@ export const STYLES = `
    216px sidebar. On phones the sidebar is hidden, so it centers on the
    screen (see the mobile rules below). */
 .coinrose-bg-ring.beside-sidebar { left: calc(216px + (100vw - 216px) / 2); }
+
+/* Upload: the account being uploaded to, front and center. */
+.upload-target {
+  border: 1px solid var(--border); border-left: 4px solid var(--accent-button); border-radius: var(--radius);
+  background: var(--subtle-bg); padding: 12px 16px; margin-bottom: 18px; display: grid; gap: 8px; max-width: 640px;
+}
+.upload-target-label { font-size: 15px; font-weight: 600; }
+.upload-target-label strong { font-weight: 700; }
+.upload-target select { max-width: 360px; }
+.upload-warning {
+  background: var(--warn-bg); border: 1px solid var(--warn-border); color: var(--warn-ink);
+  border-radius: var(--radius); padding: 8px 12px; font-size: 13.5px;
+}
+.upload-review-target { font-size: 15px; margin: 0 0 12px; }
+
+/* Suggested categories: what was filled in automatically, with one-click
+   confirm and apply. */
+.suggest-banner {
+  border: 1px solid var(--border); border-left: 4px solid var(--accent-button); border-radius: var(--radius);
+  background: var(--panel); padding: 10px 14px; margin-bottom: 14px; font-size: 13.5px;
+}
+.suggest-banner-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; padding: 4px 0; }
 
 /* Checkboxes and radio buttons: big enough to tap (WCAG target size). */
 .ledger-root input[type="checkbox"], .ledger-root input[type="radio"] { width: 18px; height: 18px; margin: 3px 6px 3px 0; flex-shrink: 0; accent-color: var(--accent-button); }

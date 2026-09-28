@@ -64,7 +64,7 @@ export const TUTORIAL_STEPS = [
   {
     view: "transactions",
     title: "Categorize your transactions",
-    body: "Everything you upload lands here. Choose a category for each transaction from its dropdown. As you go, Coinrose learns from your choices and suggests categories for similar transactions, marked as suggested until you confirm them. Filters at the top find uncategorized transactions, a date range, or a recent upload.",
+    body: "Everything you upload lands here. Choose a category for each transaction from its dropdown. As you go, Coinrose learns from your choices and fills in categories for similar transactions you import later. Those count right away and are marked Suggested until you confirm or change them. Filters at the top find uncategorized transactions, a date range, or a recent upload.",
   },
   {
     view: "categories",

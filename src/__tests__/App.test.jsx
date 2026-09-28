@@ -152,11 +152,11 @@ describe("the app", () => {
   it("importing a statement adds the account and transactions, then opens them for categorizing", async () => {
     const { nav, lastSave } = await openApp();
     nav("Upload");
-    fireEvent.click(screen.getByLabelText(/This is a new account/));
     const csv = "Date,Description,Withdrawal,Deposit\n9/20/2026,Corner Grocer,31.07,\n9/21/2026,Refund,,5.00\n";
     fireEvent.change(document.querySelector('input[type="file"]'), { target: { files: [new File([csv], "Savings.csv")] } });
+    fireEvent.change(await screen.findByLabelText(/Which account is this statement from/), { target: { value: "__new__" } });
     fireEvent.click(await screen.findByRole("button", { name: "Check 2 rows" }));
-    fireEvent.click(await screen.findByRole("button", { name: "Import 2 transactions" }));
+    fireEvent.click(await screen.findByRole("button", { name: /^Import 2 transactions into Savings$/ }));
     await flush();
     expect(await screen.findByRole("heading", { name: "Categorize your import" })).toBeTruthy();
     expect(lastSave().upserts.accounts).toEqual([expect.objectContaining({ name: "Savings" })]);
@@ -193,7 +193,7 @@ describe("the app's actions each save exactly what changed", () => {
     nav("Accounts");
     fireEvent.click(within(card("Griffon Card", ".account-card-wrap")).getByRole("button", { name: "Add transactions" }));
     expect(screen.getByRole("heading", { name: "Upload a statement" })).toBeTruthy();
-    expect(screen.getByDisplayValue("Griffon Card")).toBeTruthy();
+    expect(document.body.textContent).toMatch(/Adding transactions to Griffon Card/);
   });
 
   it("categories: add, rename, and flag as excluded or income", async () => {
@@ -333,7 +333,7 @@ describe("the app's actions each save exactly what changed", () => {
     const csv = "Date,Description,Money Out,Money In\n2026-09-22,Bakery,4.50,\n";
     fireEvent.change(document.querySelector('input[type="file"]'), { target: { files: [new File([csv], "x.csv")] } });
     fireEvent.click(await screen.findByRole("button", { name: "Check 1 rows" }));
-    fireEvent.click(await screen.findByRole("button", { name: "Import 1 transaction" }));
+    fireEvent.click(await screen.findByRole("button", { name: /^Import 1 transaction into/ }));
     fireEvent.click(await screen.findByRole("button", { name: /Skip for now/ }));
     expect(screen.getByRole("heading", { name: "Transactions" })).toBeTruthy();
   });
@@ -354,5 +354,69 @@ describe("the desktop sidebar can be hidden", () => {
     fireEvent.click(screen.getByRole("button", { name: "Show sidebar" }));
     expect(second.container.querySelector(".app-shell").className).not.toMatch(/sidebar-collapsed/);
     await waitFor(() => expect(document.activeElement.getAttribute("aria-label")).toBe("Hide sidebar"));
+  });
+});
+
+describe("suggested categories fill in automatically", () => {
+  const importFile = async (csv, name = "export.csv") => {
+    fireEvent.change(document.querySelector('input[type="file"]'), { target: { files: [new File([csv], name)] } });
+    fireEvent.click(await screen.findByRole("button", { name: /^Check \d+ rows$/ }));
+    fireEvent.click(await screen.findByRole("button", { name: /^Import \d+ transactions? into/ }));
+    await flush();
+  };
+  const csv = "Date,Description,Money Out,Money In\n2026-09-22,Thrifty Sprout Market,12.00,\n2026-09-23,Brand New Shop,3.00,\n";
+
+  it("importing fills in categories from past choices; they count, and can be confirmed", async () => {
+    const { nav, lastSave } = await openApp();
+    nav("Upload");
+    await importFile(csv);
+    const saved = lastSave().upserts.transactions;
+    const sprout = saved.find((t) => t.description === "Thrifty Sprout Market");
+    expect(sprout).toMatchObject({ category_id: "cat-groc", props: expect.objectContaining({ categorySuggested: true }) });
+    expect(saved.find((t) => t.description === "Brand New Shop").category_id).toBeNull();
+    expect(document.body.textContent).toMatch(/1 categorized from your past choices/);
+    fireEvent.click(await screen.findByRole("button", { name: "Confirm all 1 suggestion" }));
+    await flush();
+    expect(lastSave().upserts.transactions).toEqual([expect.objectContaining({ id: sprout.id, category_id: "cat-groc", props: {} })]);
+  });
+
+  it("with the setting off, imports don't fill anything in, and the setting is saved for the household", async () => {
+    const { nav, lastSave } = await openApp();
+    nav("Categories");
+    fireEvent.click(screen.getByLabelText(/Fill in suggested categories automatically/));
+    await flush();
+    expect(lastSave().settings.props.autoApplySuggestions).toBe(false);
+    nav("Upload");
+    await importFile(csv);
+    expect(lastSave().upserts.transactions.every((t) => t.category_id === null)).toBe(true);
+  });
+
+  it("older uncategorized transactions can be filled in with one click, then confirmed or changed", async () => {
+    const { nav, lastSave } = await openApp();
+    nav("Transactions");
+    fireEvent.click(screen.getByRole("button", { name: "Apply suggestions" }));
+    await flush();
+    expect(lastSave().upserts.transactions).toEqual([expect.objectContaining({ id: "t7", category_id: "cat-groc", props: expect.objectContaining({ categorySuggested: true }) })]);
+    expect(document.body.textContent).toMatch(/1 category was filled in/);
+    const row = () => [...document.querySelectorAll("tr.tx-row-full")].find((r) => r.textContent.includes("Thrifty Sprout Market") && r.textContent.includes("Griffon"));
+    fireEvent.click(within(row()).getByRole("button", { name: /Confirm suggested category/ }));
+    await flush();
+    expect(lastSave().upserts.transactions).toEqual([expect.objectContaining({ id: "t7", props: {} })]);
+  });
+
+  it("picking a different category also counts as confirming, and the Overview lists suggestions to confirm", async () => {
+    const { nav, lastSave } = await openApp();
+    nav("Transactions");
+    fireEvent.click(screen.getByRole("button", { name: "Apply suggestions" }));
+    await flush();
+    nav("Overview");
+    expect(document.body.textContent).toMatch(/1 suggested category to confirm/);
+    nav("Transactions");
+    fireEvent.click(screen.getByLabelText(/Suggested, not yet confirmed/));
+    const rows = [...document.querySelectorAll("tr.tx-row-full")];
+    expect(rows).toHaveLength(1);
+    fireEvent.change(within(rows[0]).getByRole("combobox"), { target: { value: "cat-dine" } });
+    await flush();
+    expect(lastSave().upserts.transactions).toEqual([expect.objectContaining({ id: "t7", category_id: "cat-dine", props: {} })]);
   });
 });

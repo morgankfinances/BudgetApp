@@ -3,7 +3,7 @@ import { TutorialDialog } from "./components/TutorialDialog.jsx";
 import { VIEW_TITLES } from "./constants.js";
 import { DecoRing, LoadingIndicator, ThemedLogo } from "./householdGate.jsx";
 import { computeLedgerChanges, fetchLedgerVersion, hasChanges, saveLedgerChanges } from "./ledgerStore.js";
-import { computeDuplicates } from "./lib/analysis.js";
+import { applyCategorySuggestions, computeDuplicates, isUnconfirmedSuggestion, withoutSuggestedFlag } from "./lib/analysis.js";
 import { mapRow } from "./lib/importing.js";
 import { loadData } from "./lib/ledgerData.js";
 import { TUTORIAL_EVENT, TUTORIAL_STEPS, markTutorialSeen, tutorialAlreadySeen } from "./lib/tutorial.js";
@@ -33,6 +33,11 @@ function App({ householdName } = {}) {
   const [incomeWarningDismissed, setIncomeWarningDismissed] = useState(false);
   const [hiddenBudgetMonths, setHiddenBudgetMonths] = useState([]);
   const [excludeUnassignedFromBudget, setExcludeUnassignedFromBudget] = useState(false);
+  // Household setting: fill in suggested categories automatically (on by
+  // default). Kept in a ref too, so every save includes it without each
+  // save call having to pass it along.
+  const [autoApplySuggestions, setAutoApplySuggestions] = useState(true);
+  const autoApplyRef = useRef(true);
   const [view, setView] = useState("overview");
   const [saveError, setSaveError] = useState(null);
   const [toast, setToast] = useState(null);
@@ -166,6 +171,9 @@ function App({ householdName } = {}) {
     setIncomeWarningDismissed(snap.incomeWarningDismissed);
     setHiddenBudgetMonths(snap.hiddenBudgetMonths);
     setExcludeUnassignedFromBudget(snap.excludeUnassignedFromBudget);
+    const autoApply = snap.autoApplySuggestions !== false;
+    autoApplyRef.current = autoApply;
+    setAutoApplySuggestions(autoApply);
   }
 
   const handleSyncNow = useCallback(async () => {
@@ -206,6 +214,7 @@ function App({ householdName } = {}) {
         incomeWarningDismissed: nextIncomeWarningDismissed,
         hiddenBudgetMonths: nextHiddenBudgetMonths,
         excludeUnassignedFromBudget: nextExcludeUnassignedFromBudget,
+        autoApplySuggestions: autoApplyRef.current,
       };
 
       // Show the edit immediately.
@@ -282,7 +291,13 @@ function App({ householdName } = {}) {
             : a
         );
       }
-      const nextTransactions = [...transactions, ...valid];
+      let nextTransactions = [...transactions, ...valid];
+      let suggested = 0;
+      if (autoApplyRef.current) {
+        const result = applyCategorySuggestions(nextTransactions, categories, new Set(valid.map((t) => t.id)));
+        nextTransactions = result.transactions;
+        suggested = result.applied;
+      }
       persist(nextAccounts, nextTransactions, categories, budgetGroups, plannedIncome, incomeWarningDismissed, hiddenBudgetMonths, excludeUnassignedFromBudget);
       const batchId = valid.length > 0 ? valid[0].uploadBatchId : null;
       if (batchId) {
@@ -291,7 +306,10 @@ function App({ householdName } = {}) {
       } else {
         setView("transactions");
       }
-      setToast(`Imported ${valid.length} transaction${valid.length === 1 ? "" : "s"} into ${accountMeta.name}.`);
+      setToast(
+        `Imported ${valid.length} transaction${valid.length === 1 ? "" : "s"} into ${accountMeta.name}` +
+          (suggested ? `; ${suggested} categorized from your past choices (marked Suggested).` : ".")
+      );
     },
     [accounts, transactions, categories, budgetGroups, plannedIncome, incomeWarningDismissed, hiddenBudgetMonths, excludeUnassignedFromBudget, persist]
   );
@@ -382,8 +400,42 @@ function App({ householdName } = {}) {
 
   const handleUpdateTransaction = useCallback(
     (id, updates) => {
-      const nextTransactions = transactions.map((t) => (t.id === id ? { ...t, ...updates } : t));
+      const nextTransactions = transactions.map((t) => {
+        if (t.id !== id) return t;
+        const updated = { ...t, ...updates };
+        // Picking or confirming a category makes it a person's choice.
+        return "categoryId" in updates ? withoutSuggestedFlag(updated) : updated;
+      });
       persist(accounts, nextTransactions, categories, budgetGroups, plannedIncome, incomeWarningDismissed, hiddenBudgetMonths, excludeUnassignedFromBudget);
+    },
+    [accounts, transactions, categories, budgetGroups, plannedIncome, incomeWarningDismissed, hiddenBudgetMonths, excludeUnassignedFromBudget, persist]
+  );
+
+  // Confirm suggested categories (the given ids, or every unconfirmed one).
+  const handleConfirmSuggestions = useCallback(
+    (ids) => {
+      const only = ids ? new Set(ids) : null;
+      const nextTransactions = transactions.map((t) =>
+        isUnconfirmedSuggestion(t) && (!only || only.has(t.id)) ? withoutSuggestedFlag(t) : t
+      );
+      persist(accounts, nextTransactions, categories, budgetGroups, plannedIncome, incomeWarningDismissed, hiddenBudgetMonths, excludeUnassignedFromBudget);
+    },
+    [accounts, transactions, categories, budgetGroups, plannedIncome, incomeWarningDismissed, hiddenBudgetMonths, excludeUnassignedFromBudget, persist]
+  );
+
+  // Fill in suggestions for uncategorized transactions already in the ledger.
+  const handleApplySuggestions = useCallback(() => {
+    const { transactions: nextTransactions, applied } = applyCategorySuggestions(transactions, categories);
+    if (!applied) return;
+    persist(accounts, nextTransactions, categories, budgetGroups, plannedIncome, incomeWarningDismissed, hiddenBudgetMonths, excludeUnassignedFromBudget);
+    setToast(`Filled in ${applied} suggested categor${applied === 1 ? "y" : "ies"}. They're marked Suggested until confirmed.`);
+  }, [accounts, transactions, categories, budgetGroups, plannedIncome, incomeWarningDismissed, hiddenBudgetMonths, excludeUnassignedFromBudget, persist]);
+
+  const handleToggleAutoApply = useCallback(
+    (on) => {
+      autoApplyRef.current = on;
+      setAutoApplySuggestions(on);
+      persist(accounts, transactions, categories, budgetGroups, plannedIncome, incomeWarningDismissed, hiddenBudgetMonths, excludeUnassignedFromBudget);
     },
     [accounts, transactions, categories, budgetGroups, plannedIncome, incomeWarningDismissed, hiddenBudgetMonths, excludeUnassignedFromBudget, persist]
   );
@@ -855,6 +907,7 @@ function App({ householdName } = {}) {
               duplicateInfo={duplicateInfo}
               onUpdate={handleUpdateTransaction}
               onDelete={handleDeleteTransaction}
+              onConfirmSuggestions={handleConfirmSuggestions}
               onSkip={() => setView("transactions")}
             />
           )}
@@ -867,6 +920,9 @@ function App({ householdName } = {}) {
               onUpdate={handleUpdateTransaction}
               onDelete={handleDeleteTransaction}
               onGoUpload={goToUpload}
+              autoApplySuggestions={autoApplySuggestions}
+              onConfirmSuggestions={handleConfirmSuggestions}
+              onApplySuggestions={handleApplySuggestions}
             />
           )}
           {view === "reports" && (
@@ -938,6 +994,8 @@ function App({ householdName } = {}) {
               onToggleExcluded={handleToggleCategoryExcluded}
               onToggleIsIncome={handleToggleCategoryIsIncome}
               onMerge={handleMergeCategory}
+              autoApplySuggestions={autoApplySuggestions}
+              onToggleAutoApply={handleToggleAutoApply}
             />
           )}
           {view === "backup" && (

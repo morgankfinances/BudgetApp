@@ -1,6 +1,6 @@
 import React, { useMemo, useState } from "react";
 import { EmptyState, StatBlock } from "../components/common.jsx";
-import { buildCategorySuggestions } from "../lib/analysis.js";
+import { buildCategorySuggestions, isUnconfirmedSuggestion } from "../lib/analysis.js";
 import { formatMonthLabel, getMonthStartISO } from "../lib/periods.js";
 import { formatDateDisplay, formatMoney, parseMoney } from "../lib/utils.js";
 
@@ -77,7 +77,9 @@ export function TransactionRow({ t, duplicateInfo, expanded, onToggleExpand, all
             </button>
           </div>
           <div className="tx-compact-subline">
-            {categoryName ? (
+            {categoryName && isUnconfirmedSuggestion(t) ? (
+              <span className="tx-compact-suggested">Suggested: {categoryName}</span>
+            ) : categoryName ? (
               categoryName
             ) : suggestedName ? (
               <span className="tx-compact-suggested">Suggested: {suggestedName}</span>
@@ -178,14 +180,23 @@ export function TransactionRow({ t, duplicateInfo, expanded, onToggleExpand, all
         </td>
         <td data-label="Category">
           {(() => {
+            // Filled in automatically and not yet confirmed; counts already.
+            const isApplied = isUnconfirmedSuggestion(t);
+            // Suggested but not filled in (automatic suggestions turned off).
             const isSuggestion = !t.categoryId && suggestedCategoryId;
             return (
               <div className="category-cell">
                 <select aria-label={`Category for ${t.description || "transaction"}`}
-                  className={isSuggestion ? "category-select suggested" : "category-select"}
+                  className={isApplied || isSuggestion ? "category-select suggested" : "category-select"}
                   value={t.categoryId || (isSuggestion ? suggestedCategoryId : "")}
                   onChange={(e) => onUpdate(t.id, { categoryId: e.target.value || null })}
-                  title={isSuggestion ? "Suggested based on how you've categorized this before — pick a category to confirm or change it" : undefined}
+                  title={
+                    isApplied
+                      ? "Filled in from how you've categorized this before. Confirm it, or pick a different category."
+                      : isSuggestion
+                        ? "Suggested based on how you've categorized this before — pick a category to confirm or change it"
+                        : undefined
+                  }
                 >
                   <option value="">Uncategorized</option>
                   {categories.map((c) => (
@@ -194,6 +205,16 @@ export function TransactionRow({ t, duplicateInfo, expanded, onToggleExpand, all
                     </option>
                   ))}
                 </select>
+                {isApplied && (
+                  <button
+                    type="button"
+                    className="suggested-confirm-btn"
+                    aria-label={`Confirm suggested category for ${t.description || "transaction"}`}
+                    onClick={() => onUpdate(t.id, { categoryId: t.categoryId })}
+                  >
+                    ✓ Confirm
+                  </button>
+                )}
                 {isSuggestion && (
                   <button
                     type="button"
@@ -270,11 +291,12 @@ export function TransactionRow({ t, duplicateInfo, expanded, onToggleExpand, all
 }
 
 
-export function TransactionsView({ transactions, accounts, categories, duplicateInfo, onUpdate, onDelete, onGoUpload }) {
+export function TransactionsView({ transactions, accounts, categories, duplicateInfo, onUpdate, onDelete, onGoUpload, autoApplySuggestions = true, onConfirmSuggestions, onApplySuggestions }) {
   const [filterAccount, setFilterAccount] = useState("all");
   const [filterCategory, setFilterCategory] = useState("all");
   const [search, setSearch] = useState("");
   const [dupOnly, setDupOnly] = useState(false);
+  const [suggestedOnly, setSuggestedOnly] = useState(false);
   const [expandedId, setExpandedId] = useState(null);
   const [dateSortDir, setDateSortDir] = useState("desc");
   const [dateFrom, setDateFrom] = useState("");
@@ -285,6 +307,8 @@ export function TransactionsView({ transactions, accounts, categories, duplicate
     () => buildCategorySuggestions(transactions, categories),
     [transactions, categories]
   );
+  const unconfirmedCount = useMemo(() => transactions.filter(isUnconfirmedSuggestion).length, [transactions]);
+  const pendingSuggestionCount = categorySuggestions.size;
 
   // The last several distinct uploads, newest first — surfaced by date/
   // account/count so a person can jump straight to "what I just
@@ -319,6 +343,7 @@ export function TransactionsView({ transactions, accounts, categories, duplicate
     if (filterCategory === "uncategorized") list = list.filter((t) => !t.categoryId);
     else if (filterCategory !== "all") list = list.filter((t) => t.categoryId === filterCategory);
     if (dupOnly) list = list.filter((t) => duplicateInfo.dupIds.has(t.id));
+    if (suggestedOnly) list = list.filter(isUnconfirmedSuggestion);
     if (filterBatchId !== "all") list = list.filter((t) => t.uploadBatchId === filterBatchId);
     if (dateFrom) list = list.filter((t) => t.date && t.date >= dateFrom);
     if (dateTo) list = list.filter((t) => t.date && t.date <= dateTo);
@@ -333,7 +358,7 @@ export function TransactionsView({ transactions, accounts, categories, duplicate
     }
     const dir = dateSortDir === "asc" ? 1 : -1;
     return [...list].sort((a, b) => (a.date < b.date ? -dir : a.date > b.date ? dir : 0));
-  }, [transactions, filterAccount, filterCategory, dupOnly, filterBatchId, search, duplicateInfo, dateSortDir, dateFrom, dateTo]);
+  }, [transactions, filterAccount, filterCategory, dupOnly, suggestedOnly, filterBatchId, search, duplicateInfo, dateSortDir, dateFrom, dateTo]);
 
   if (accounts.length === 0) {
     return (
@@ -410,6 +435,12 @@ export function TransactionsView({ transactions, accounts, categories, duplicate
           <input type="checkbox" checked={dupOnly} onChange={(e) => setDupOnly(e.target.checked)} />
           Possible duplicates only ({duplicateInfo.dupIds.size})
         </label>
+        {(unconfirmedCount > 0 || suggestedOnly) && (
+          <label className="checkbox-filter">
+            <input type="checkbox" checked={suggestedOnly} onChange={(e) => setSuggestedOnly(e.target.checked)} />
+            Suggested, not yet confirmed ({unconfirmedCount})
+          </label>
+        )}
         <label className="checkbox-filter" style={{ gap: 8 }}>
           Between
           <input type="date" value={dateFrom} onChange={(e) => setDateFrom(e.target.value)} />
@@ -428,6 +459,38 @@ export function TransactionsView({ transactions, accounts, categories, duplicate
           )}
         </label>
       </div>
+
+      {(unconfirmedCount > 0 || (autoApplySuggestions && pendingSuggestionCount > 0)) && (
+        <div className="suggest-banner" role="status">
+          {unconfirmedCount > 0 && (
+            <div className="suggest-banner-row">
+              <span>
+                <strong>
+                  {unconfirmedCount} categor{unconfirmedCount === 1 ? "y was" : "ies were"} filled in
+                </strong>{" "}
+                from your past choices and {unconfirmedCount === 1 ? "is" : "are"} marked Suggested. They already count
+                toward budgets and reports.
+              </span>
+              <button className="btn btn-secondary btn-sm" onClick={() => onConfirmSuggestions && onConfirmSuggestions()}>
+                Confirm all {unconfirmedCount}
+              </button>
+            </div>
+          )}
+          {autoApplySuggestions && pendingSuggestionCount > 0 && (
+            <div className="suggest-banner-row">
+              <span>
+                <strong>
+                  {pendingSuggestionCount} uncategorized transaction{pendingSuggestionCount === 1 ? " has" : "s have"} a
+                  suggested category.
+                </strong>
+              </span>
+              <button className="btn btn-secondary btn-sm" onClick={() => onApplySuggestions && onApplySuggestions()}>
+                Apply suggestions
+              </button>
+            </div>
+          )}
+        </div>
+      )}
 
       <div className="panel" style={{ padding: 0, overflowX: "auto" }}>
         <table className="tx-table">
@@ -484,13 +547,14 @@ export function TransactionsView({ transactions, accounts, categories, duplicate
 /* Post-upload categorization                                          */
 /* ------------------------------------------------------------------ */
 
-export function PostUploadCategorizeView({ transactions, batchId, accountName, categories, duplicateInfo, onUpdate, onDelete, onSkip }) {
+export function PostUploadCategorizeView({ transactions, batchId, accountName, categories, duplicateInfo, onUpdate, onDelete, onSkip, onConfirmSuggestions }) {
   const [expandedId, setExpandedId] = useState(null);
   const batchTransactions = useMemo(
     () => transactions.filter((t) => t.uploadBatchId === batchId),
     [transactions, batchId]
   );
   const uncategorizedCount = batchTransactions.filter((t) => !t.categoryId).length;
+  const batchSuggested = batchTransactions.filter(isUnconfirmedSuggestion);
   const categorySuggestions = useMemo(
     () => buildCategorySuggestions(transactions, categories),
     [transactions, categories]
@@ -522,9 +586,15 @@ export function PostUploadCategorizeView({ transactions, batchId, accountName, c
       <div className="summary-row">
         <StatBlock value={batchTransactions.length} label="Just imported" />
         <StatBlock value={uncategorizedCount} label="Still uncategorized" />
+        {batchSuggested.length > 0 && <StatBlock value={batchSuggested.length} label="Suggested, to confirm" />}
       </div>
 
       <div className="actions-row" style={{ marginBottom: 16 }}>
+        {batchSuggested.length > 0 && onConfirmSuggestions && (
+          <button className="btn btn-primary" onClick={() => onConfirmSuggestions(batchSuggested.map((t) => t.id))}>
+            Confirm all {batchSuggested.length} suggestion{batchSuggested.length === 1 ? "" : "s"}
+          </button>
+        )}
         <button className="btn btn-secondary" onClick={onSkip}>
           Skip for now
         </button>

@@ -18,7 +18,8 @@ Coinrose never connects to your bank and never asks for bank logins. You upload 
 - Upload CSV or Excel statements from any bank or card. A column-mapping step guesses the file's layout, and handles separate money-in and money-out columns or a single signed amount, with optional sign inversion.
 - Only the mapped columns are stored; everything else in the bank's file (account numbers, memos, balances) is discarded before saving.
 - Duplicate detection by date, amount, and direction, with a way to dismiss false alarms.
-- Category suggestions learned from how you've categorized similar transactions before.
+- Categories filled in automatically on import, learned from how you've categorized similar transactions before. They count right away and are marked Suggested until someone confirms or changes them; a household setting turns this off. Coinrose learns only from confirmed categories.
+- An explicit account choice when uploading: files are matched to an account only when the match is unambiguous (by file name or columns), with a warning if the file's columns don't fit the chosen account.
 - Filters by account, category, date range, uncategorized status, or a recent upload, plus search.
 - A dedicated screen for categorizing exactly what you just imported.
 
