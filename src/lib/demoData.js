@@ -86,6 +86,21 @@ const weekday = (iso) => new Date(`${iso}T00:00:00Z`).getUTCDay();
 const dayOfMonth = (iso) => Number(iso.slice(8, 10));
 const money = (n) => Math.round(n * 100) / 100;
 
+// Paid twice a month: the 15th and the month's last day, or the Friday
+// before either when it falls on a weekend.
+function isTwiceMonthlyPayday(iso) {
+  const [y, m] = iso.split("-").map(Number);
+  const lastDay = new Date(Date.UTC(y, m, 0)).getUTCDate();
+  const payday = (d) => {
+    const date = new Date(Date.UTC(y, m - 1, d));
+    const dow = date.getUTCDay();
+    if (dow === 6) date.setUTCDate(d - 1);
+    if (dow === 0) date.setUTCDate(d - 2);
+    return date.toISOString().slice(0, 10);
+  };
+  return iso === payday(15) || iso === payday(lastDay);
+}
+
 // Builds the whole demo ledger, ending on `today` (YYYY-MM-DD).
 export function buildDemoLedger(today = todayISO()) {
   // History starts on the 1st of the month, three months before this one.
@@ -126,7 +141,10 @@ export function buildDemoLedger(today = todayISO()) {
 
     // Income
     if (dow === 5 && weeksSincePay % 2 === 0) add("demo-chk", day, "Thornwick & Vale Payroll", null, 2184.62, "demo-pay");
-    if (dow === 5 && weeksSincePay % 2 === 1) add("demo-chk", day, "Brightwater Clinic Payroll", null, 1612.4, "demo-pay");
+    // The other earner is paid twice a month (the 15th and the last day,
+    // moved to the Friday before when those fall on a weekend), with small
+    // differences from paycheck to paycheck.
+    if (isTwiceMonthlyPayday(day)) add("demo-chk", day, "Brightwater Clinic Payroll", null, between(1590, 1640), "demo-pay");
 
     // Monthly bills and subscriptions
     if (dom === 1) add("demo-chk", day, "Hearthside Property Management", 1450, null, "demo-rent");

@@ -98,7 +98,7 @@ export function InsightsView({ insights, recurring, hiddenRecurring = [], catego
       <h2 className="insights-heading">Recurring bills and subscriptions</h2>
       {bills.length ? (
         <>
-          <p className="hint" style={{ marginTop: 0 }}>
+          <p className="hint insights-intro">
             {bills.length} found, about <strong>{formatMoney(monthlyBills)} a month</strong> in total. Recurring means at
             least three charges on a steady schedule (two for quarterly or yearly ones).
           </p>
@@ -119,7 +119,7 @@ export function InsightsView({ insights, recurring, hiddenRecurring = [], catego
       )}
 
       {hiddenItems.length > 0 && (
-        <div className="skipped-panel" style={{ marginTop: 18 }}>
+        <div className="skipped-panel" style={{ marginTop: 40 }}>
           <button
             type="button"
             className="skipped-toggle"

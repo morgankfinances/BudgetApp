@@ -91,3 +91,11 @@ describe("the demo's comments", () => {
     expect(withComments[0].comments.every((c) => ids.has(c.authorId) && c.text)).toBe(true);
   });
 });
+
+describe("the demo's paychecks", () => {
+  it("one earner every two weeks, the other twice a month (moved for weekends)", () => {
+    const d = buildDemoLedger("2026-09-28");
+    const twice = d.transactions.filter((t) => t.description === "Brightwater Clinic Payroll").map((t) => t.date);
+    expect(twice).toEqual(["2026-06-15", "2026-06-30", "2026-07-15", "2026-07-31", "2026-08-14", "2026-08-31", "2026-09-15"]);
+  });
+});

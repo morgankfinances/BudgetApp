@@ -30,6 +30,9 @@ export function merchantKey(description) {
 export const CADENCES = [
   { id: "weekly", label: "Every week", days: 7, min: 6, max: 8, minCount: 3 },
   { id: "biweekly", label: "Every 2 weeks", days: 14, min: 12, max: 16, minCount: 3 },
+  // Twice a month (the 1st and 15th, or the 15th and the last day): gaps
+  // swing between about 13 and 18 days with month lengths and weekends.
+  { id: "semimonthly", label: "Twice a month", days: 15.22, min: 9, max: 21, minCount: 4 },
   { id: "monthly", label: "Every month", days: 30.44, min: 26, max: 35, minCount: 3 },
   { id: "quarterly", label: "Every 3 months", days: 91.3, min: 84, max: 98, minCount: 2 },
   { id: "yearly", label: "Every year", days: 365.25, min: 350, max: 380, minCount: 2 },
@@ -62,11 +65,52 @@ function nextExpected(lastISO, cadence) {
 function findCadence(dates) {
   if (dates.length < 2) return null;
   const gaps = dates.slice(1).map((d, i) => dayNumber(d) - dayNumber(dates[i]));
+  // Every 2 weeks and twice a month look alike. Pay every 2 weeks is almost
+  // always exactly 14 days apart (13 or 15 around holidays); pay twice a
+  // month lands once in each half of the month, with gaps that swing more.
+  const byId = Object.fromEntries(CADENCES.map((c) => [c.id, c]));
+  if (dates.length >= 3 && gaps.filter((g) => g >= 13 && g <= 15).length / gaps.length >= 0.8) return byId.biweekly;
+  if (isTwiceAMonth(dates, gaps)) return byId.semimonthly;
   const typical = median(gaps);
-  const cadence = CADENCES.find((c) => typical >= c.min && typical <= c.max);
+  // (Twice a month is only ever decided by its own test above.)
+  const cadence = CADENCES.find((c) => c.id !== "semimonthly" && typical >= c.min && typical <= c.max);
   if (!cadence || dates.length < cadence.minCount) return null;
   const fitting = gaps.filter((g) => g >= cadence.min && g <= cadence.max).length;
   return fitting / gaps.length >= 2 / 3 ? cadence : null;
+}
+
+// Twice a month: at least four dates, nearly all gaps between 9 and 21 days,
+// and gaps averaging about 15.2 days (365 / 24), whatever the pattern: the
+// 15th and last day, or the 1st and 15th, including paydays moved for
+// weekends (the 1st paid on the last day of the month before).
+function isTwiceAMonth(dates, gaps) {
+  if (dates.length < 4) return false;
+  const average = gaps.reduce((a, b) => a + b, 0) / gaps.length;
+  return average >= 14 && average <= 16.5 && gaps.filter((g) => g >= 9 && g <= 21).length / gaps.length >= 0.8;
+}
+
+// The next twice-a-month date. The two paydays are learned from the history:
+// one near the month's edge (the 1st, or the last day; a payday on the 30th
+// or 31st may be either the last day or an early-paid 1st) and one in the
+// middle (usually the 15th). The next one is the first of those at least a
+// week after the last payday.
+function nextTwiceAMonth(lastISO, dates) {
+  const days = dates.map((d) => Number(d.slice(8, 10)));
+  const nearStart = days.filter((d) => d <= 5).length;
+  const nearEnd = days.filter((d) => d >= 26).length;
+  // Paid on the 1st if 1st-ish days are common; otherwise on the last day.
+  const edge = nearStart >= nearEnd / 2 && nearStart > 0 ? "start" : "end";
+  const middle = Math.round(median(days.filter((d) => d > 5 && d < 26)) || 15);
+  const lastDayOf = (y, m) => new Date(Date.UTC(y, m, 0)).getUTCDate();
+  const iso = (y, m, d) => new Date(Date.UTC(y, m - 1, d)).toISOString().slice(0, 10);
+  const [y0, m0] = lastISO.split("-").map(Number);
+  const candidates = [];
+  for (let k = 0; k < 3; k += 1) {
+    const y = y0 + Math.floor((m0 - 1 + k) / 12);
+    const m = ((m0 - 1 + k) % 12) + 1;
+    candidates.push(iso(y, m, edge === "start" ? 1 : lastDayOf(y, m)), iso(y, m, Math.min(middle, lastDayOf(y, m))));
+  }
+  return candidates.sort().find((c) => dayNumber(c) - dayNumber(lastISO) >= 7);
 }
 
 /* ------------------------------------------------------------------ */
@@ -112,11 +156,14 @@ export function findRecurring(transactions, categories, today) {
 
     const amounts = byDay.map((t) => (direction === "out" ? t.amountOut : t.amountIn) || 0);
     const typical = median(amounts);
-    const fixed = Math.max(...amounts) - Math.min(...amounts) <= Math.max(1, typical * 0.03);
-    // Varying amounts only count as a bill on a monthly-or-longer rhythm
-    // (utilities). Weekly shopping at the same store is a habit, not a bill.
+    // "Same each time": within $1 or 1% (so a paycheck varying by $25 isn't).
+    const fixed = Math.max(...amounts) - Math.min(...amounts) <= Math.max(1, typical * 0.01);
+    // Spending that varies only counts as a bill on a monthly-or-longer
+    // rhythm (utilities): weekly shopping at the same store is a habit, not a
+    // bill. Income that varies (paychecks with changing hours or taxes)
+    // counts on any rhythm.
     if (!fixed) {
-      if (cadence.days < 26) return;
+      if (direction === "out" && cadence.days < 26) return;
       const tolerance = direction === "out" ? 0.5 : 0.25;
       if (amounts.some((a) => Math.abs(a - typical) > typical * tolerance)) return;
     }
@@ -130,8 +177,8 @@ export function findRecurring(transactions, categories, today) {
     if (amounts.length >= 2) {
       const lastAmount = amounts[amounts.length - 1];
       const before = amounts.slice(0, -1);
-      const earlierFixed = Math.max(...before) - Math.min(...before) <= Math.max(1, median(before) * 0.03);
-      if (earlierFixed && Math.abs(lastAmount - median(before)) > Math.max(0.5, median(before) * 0.03)) {
+      const earlierFixed = Math.max(...before) - Math.min(...before) <= Math.max(1, median(before) * 0.01);
+      if (earlierFixed && Math.abs(lastAmount - median(before)) > Math.max(0.5, median(before) * 0.01)) {
         priceChange = { from: round2(median(before)), to: round2(lastAmount) };
       }
     }
@@ -147,7 +194,7 @@ export function findRecurring(transactions, categories, today) {
       typicalAmount: round2(current),
       monthlyCost: round2(current * (30.44 / cadence.days)),
       lastDate: last.date,
-      nextDate: nextExpected(last.date, cadence),
+      nextDate: cadence.id === "semimonthly" ? nextTwiceAMonth(last.date, byDay.map((t) => t.date)) : nextExpected(last.date, cadence),
       count: byDay.length,
       categoryId: recentCategory ? recentCategory.categoryId : null,
       isSplit: Array.isArray(last.splits) && last.splits.length > 0,
@@ -192,13 +239,19 @@ export function buildInsights(transactions, categories, recurring, today, format
   const lastMonth = shiftMonth(thisMonth, -1);
   const dayOfMonth = Number(today.slice(8, 10));
 
+  // When records start partway through a month (the first transaction after
+  // the 7th), that month is incomplete: comparing against it would make
+  // everything since look like an increase.
+  const firstDate = counted.reduce((min, t) => (!min || t.date < min ? t.date : min), "");
+  const partialMonth = firstDate && Number(firstDate.slice(8, 10)) > 7 ? monthOf(firstDate) : null;
+
   // 1. This month so far, compared with the same point last month.
   const upToDay = (ym) => spending.filter((t) => monthOf(t.date) === ym && Number(t.date.slice(8, 10)) <= dayOfMonth);
   const sum = (list) => list.reduce((s, t) => s + (t.amountOut || 0), 0);
   const soFar = sum(upToDay(thisMonth));
   const asideNow = setAside(counted.filter((t) => monthOf(t.date) === thisMonth && Number(t.date.slice(8, 10)) <= dayOfMonth));
   const lastAtThisPoint = sum(upToDay(lastMonth));
-  if (spending.some((t) => monthOf(t.date) === lastMonth) && (soFar > 0 || lastAtThisPoint > 0)) {
+  if (lastMonth !== partialMonth && spending.some((t) => monthOf(t.date) === lastMonth) && (soFar > 0 || lastAtThisPoint > 0)) {
     const diff = soFar - lastAtThisPoint;
     insights.push({
       id: "pace",
@@ -213,13 +266,15 @@ export function buildInsights(transactions, categories, recurring, today, format
     });
   }
 
-  // 2. Categories that changed notably last month, against the three months before.
-  // Compared with the average of up to three months before it (at least two
-  // with data, so one odd month doesn't set "usual").
-  const priorMonths = [shiftMonth(lastMonth, -1), shiftMonth(lastMonth, -2), shiftMonth(lastMonth, -3)].filter((ym) =>
-    spending.some((t) => monthOf(t.date) === ym)
+  // 2. Categories that changed notably last month. "Usual" is the average of
+  // up to three months before it, counting only months when that category
+  // actually had spending (a month with no rent payment isn't a $0 rent
+  // month), and never a partial first month. At least two such months are
+  // needed, so one odd month doesn't set "usual".
+  const priorMonths = [shiftMonth(lastMonth, -1), shiftMonth(lastMonth, -2), shiftMonth(lastMonth, -3)].filter(
+    (ym) => ym !== partialMonth && spending.some((t) => monthOf(t.date) === ym)
   );
-  if (priorMonths.length >= 2 && spending.some((t) => monthOf(t.date) === lastMonth)) {
+  if (lastMonth !== partialMonth && priorMonths.length >= 2 && spending.some((t) => monthOf(t.date) === lastMonth)) {
     const byCategory = (ym) => {
       const totals = {};
       spending.filter((t) => monthOf(t.date) === ym && t.categoryId).forEach((t) => {
@@ -231,10 +286,12 @@ export function buildInsights(transactions, categories, recurring, today, format
     const prior = priorMonths.map(byCategory);
     const changes = [];
     new Set([...Object.keys(last), ...prior.flatMap(Object.keys)]).forEach((id) => {
-      const usual = prior.reduce((s, p) => s + (p[id] || 0), 0) / prior.length;
+      const active = prior.filter((p) => (p[id] || 0) > 0);
+      if (active.length < 2) return;
+      const usual = active.reduce((s, p) => s + p[id], 0) / active.length;
       const now = last[id] || 0;
       const change = now - usual;
-      if (usual > 0 && Math.abs(change) >= 25 && Math.abs(change) / usual >= 0.25) changes.push({ id, now, usual, change });
+      if (Math.abs(change) >= 25 && Math.abs(change) / usual >= 0.25) changes.push({ id, now, usual, change, months: active.length });
     });
     changes.sort((a, b) => Math.abs(b.change) - Math.abs(a.change));
     changes.slice(0, 2).forEach((c) => {
@@ -242,7 +299,7 @@ export function buildInsights(transactions, categories, recurring, today, format
       insights.push({
         id: `change-${c.id}`,
         title: `${nameOf(c.id)} ${c.change > 0 ? "went up" : "went down"}`,
-        body: `${formatMoney(c.now)} last month, ${pct}% ${c.change > 0 ? "more" : "less"} than your usual ${formatMoney(c.usual)} (the average of the ${priorMonths.length} months before).`,
+        body: `${formatMoney(c.now)} last month, ${pct}% ${c.change > 0 ? "more" : "less"} than your usual ${formatMoney(c.usual)} (the average of the ${c.months} months before it with ${nameOf(c.id)} spending).`,
         tone: c.change > 0 ? "watch" : "good",
       });
     });
@@ -288,13 +345,19 @@ export function buildInsights(transactions, categories, recurring, today, format
 
   // 6. The biggest purchase this month.
   const recurringMerchants = new Set(recurring.filter((r) => r.direction === "out").map((r) => r.key.slice(4)));
-  const oneOffs = spending.filter((t) => monthOf(t.date) === thisMonth && !recurringMerchants.has(merchantKey(t.description)));
+  // A regular payment isn't a one-off, even when it goes through something
+  // generic like Venmo: the same category had a similar amount (within 10%)
+  // in each of the two months before.
+  const similarIn = (ym, t) =>
+    spending.some((o) => monthOf(o.date) === ym && o.categoryId === t.categoryId && Math.abs(o.amountOut - t.amountOut) <= t.amountOut * 0.1);
+  const isRegular = (t) => t.categoryId && similarIn(lastMonth, t) && similarIn(shiftMonth(lastMonth, -1), t);
+  const oneOffs = spending.filter((t) => monthOf(t.date) === thisMonth && !recurringMerchants.has(merchantKey(t.description)) && !isRegular(t));
   if (oneOffs.length >= 3) {
     const biggest = oneOffs.reduce((a, b) => (b.amountOut > a.amountOut ? b : a));
     insights.push({
       id: "biggest",
       title: "Biggest one-off purchase this month",
-      body: `${formatMoney(biggest.amountOut)} at ${biggest.description || "an unnamed merchant"}, on ${biggest.date.slice(5).replace("-", "/")}.`,
+      body: `${formatMoney(biggest.amountOut)} at ${biggest.description || "an unnamed merchant"}, on ${biggest.date.slice(5).replace("-", "/")} (${biggest.categoryId ? nameOf(biggest.categoryId) : "not categorized yet"}).`,
       tone: "info",
     });
   }

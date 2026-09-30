@@ -696,16 +696,21 @@ export const STYLES = `
 }
 
 /* Insights. */
-.insights-heading { font-size: 17px; margin: 26px 0 10px; }
-.insights-grid { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 12px; }
-.insight-card { background: var(--panel); border: 1px solid var(--border); border-left: 4px solid var(--accent-button); border-radius: var(--radius); padding: 12px 14px; }
-.insight-card h3 { font-size: 14.5px; margin: 0 0 4px; }
-.insight-card p { font-size: 13.5px; margin: 0; color: var(--ink-muted); line-height: 1.45; }
+/* Generous space between sections, most of it above each section title. */
+/* (Prefixed with .ledger-root so these win over the app's general heading
+   and paragraph spacing.) */
+.ledger-root .insights-heading { font-size: 18px; margin: 48px 0 14px; }
+.ledger-root .view-header + .insights-heading { margin-top: 20px; }
+.ledger-root .insights-intro { margin: 0 0 16px; }
+.insights-grid { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 16px; }
+.insight-card { background: var(--panel); border: 1px solid var(--border); border-left: 4px solid var(--accent-button); border-radius: var(--radius); padding: 16px 18px; }
+.insight-card h3 { font-size: 14.5px; margin: 0 0 6px; }
+.insight-card p { font-size: 13.5px; margin: 0; color: var(--ink-muted); line-height: 1.55; }
 .insight-good { border-left-color: var(--income); }
 .insight-watch { border-left-color: var(--warn-border); }
 .insights-table-wrap { padding: 0; overflow-x: auto; }
 .insights-table { width: 100%; border-collapse: collapse; font-size: 13.5px; }
-.insights-table th, .insights-table td { text-align: left; padding: 10px 12px; border-bottom: 1px solid var(--border); vertical-align: top; }
+.insights-table th, .insights-table td { text-align: left; padding: 12px 14px; border-bottom: 1px solid var(--border); vertical-align: top; }
 .insights-table thead th { font-size: 11.5px; text-transform: uppercase; letter-spacing: .04em; color: var(--ink-muted); }
 .insights-table tbody th { font-weight: 600; }
 .insights-table tbody th .hint { font-weight: 400; }
