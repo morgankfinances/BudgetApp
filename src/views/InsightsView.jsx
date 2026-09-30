@@ -69,8 +69,10 @@ function RecurringTable({ items, categories, today, onHide, caption }) {
 export function InsightsView({ insights, recurring, hiddenRecurring = [], categories, today, onHideRecurring, onShowRecurring }) {
   const [showHidden, setShowHidden] = useState(false);
   const hidden = new Set(hiddenRecurring);
-  const bills = recurring.filter((r) => r.direction === "out" && !hidden.has(r.key));
-  const income = recurring.filter((r) => r.direction === "in" && !hidden.has(r.key));
+  // Soonest first, like a timeline (anything overdue comes first).
+  const byNextDate = (a, b) => a.nextDate.localeCompare(b.nextDate) || a.name.localeCompare(b.name);
+  const bills = recurring.filter((r) => r.direction === "out" && !hidden.has(r.key)).sort(byNextDate);
+  const income = recurring.filter((r) => r.direction === "in" && !hidden.has(r.key)).sort(byNextDate);
   const hiddenItems = recurring.filter((r) => hidden.has(r.key));
   const monthlyBills = bills.reduce((s, r) => s + r.monthlyCost, 0);
 
@@ -88,6 +90,26 @@ export function InsightsView({ insights, recurring, hiddenRecurring = [], catego
             <li key={i.id} className={`insight-card insight-${i.tone}`}>
               <h3>{i.title}</h3>
               <p>{i.body}</p>
+              {i.details && i.details.items.length > 0 && (
+                <details className="insight-details">
+                  <summary>{i.details.label}</summary>
+                  <ul>
+                    {i.details.items.map((d) => (
+                      <li key={d.key}>
+                        <span>
+                          {d.name}
+                          {d.date && <span className="hint insight-details-date">{formatDateDisplay(d.date)}</span>}
+                        </span>
+                        <span className="insight-details-amount">
+                          {d.approximate ? "about " : ""}
+                          {formatMoney(d.amount)}
+                          {d.suffix ? ` ${d.suffix}` : ""}
+                        </span>
+                      </li>
+                    ))}
+                  </ul>
+                </details>
+              )}
             </li>
           ))}
         </ul>

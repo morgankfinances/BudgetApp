@@ -315,6 +315,11 @@ export function buildInsights(transactions, categories, recurring, today, format
       title: `${upcoming.length} bill${upcoming.length === 1 ? "" : "s"} expected in the next 2 weeks`,
       body: `About ${formatMoney(total)} in total, starting with ${upcoming[0].name} (about ${formatMoney(upcoming[0].typicalAmount)}).`,
       tone: "info",
+      // Everything the summary is based on, soonest first.
+      details: {
+        label: `See all ${upcoming.length} bill${upcoming.length === 1 ? "" : "s"}`,
+        items: upcoming.map((r) => ({ key: r.key, name: r.name, date: r.nextDate, amount: r.typicalAmount, approximate: !r.fixed })),
+      },
     });
   }
 
@@ -327,6 +332,12 @@ export function buildInsights(transactions, categories, recurring, today, format
       title: `${subscriptions.length} fixed-price service${subscriptions.length === 1 ? "" : "s"}`,
       body: `Subscriptions and other services that charge the same amount each time: about ${formatMoney(monthly)} a month, or ${formatMoney(monthly * 12)} a year.`,
       tone: "info",
+      details: {
+        label: `See all ${subscriptions.length} service${subscriptions.length === 1 ? "" : "s"}`,
+        items: [...subscriptions]
+          .sort((a, b) => b.monthlyCost - a.monthlyCost)
+          .map((r) => ({ key: r.key, name: r.name, amount: r.monthlyCost, suffix: "a month" })),
+      },
     });
   }
 

@@ -745,3 +745,33 @@ describe("Transactions: comments", () => {
     expect([...document.querySelectorAll("tr.tx-row-full")].map((r) => r.textContent.includes("Noodle"))).toEqual([true]);
   });
 });
+
+describe("Insights: dates in order, and the full list behind a card", () => {
+  const rec = (key, name, nextDate, extra = {}) => ({ key, name, direction: "out", cadence: "monthly", cadenceLabel: "Every month", fixed: true,
+    typicalAmount: 20, monthlyCost: 20, lastDate: "2026-09-01", nextDate, count: 3, categoryId: null, accountName: "Card", priceChange: null, ...extra });
+  it("recurring bills and income are listed soonest first, with anything overdue at the top", () => {
+    render(<InsightsView today="2026-09-25" categories={F.categories} insights={[]} onHideRecurring={vi.fn()} onShowRecurring={vi.fn()}
+      recurring={[rec("out|b", "Big bill", "2026-10-20", { monthlyCost: 900 }), rec("out|s", "Soon", "2026-09-28"), rec("out|o", "Overdue", "2026-09-12"), rec("out|m", "Middle", "2026-10-03"),
+        rec("in|p2", "Pay later", "2026-10-09", { direction: "in" }), rec("in|p1", "Pay soon", "2026-09-30", { direction: "in" })]} />);
+    const names = (table) => within(screen.getByRole("table", { name: table })).getAllByRole("rowheader").map((th) => th.textContent.split(/Card|Price/)[0]);
+    expect(names("Recurring bills and subscriptions")).toEqual(["Overdue", "Soon", "Middle", "Big bill"]);
+    expect(names("Recurring income")).toEqual(["Pay soon", "Pay later"]);
+  });
+  it("a card with more behind it opens to show everything", () => {
+    const details = { label: "See all 3 bills", items: [
+      { key: "a", name: "Whisperwire", date: "2026-09-30", amount: 10.99 },
+      { key: "b", name: "Rent", date: "2026-10-01", amount: 1450 },
+      { key: "c", name: "Water", date: "2026-10-06", amount: 46.2, approximate: true },
+    ] };
+    render(<InsightsView today="2026-09-28" categories={F.categories} recurring={[]} onHideRecurring={vi.fn()} onShowRecurring={vi.fn()}
+      insights={[{ id: "upcoming", title: "3 bills expected in the next 2 weeks", body: "About $1,507.19 in total.", tone: "info", details }]} />);
+    const toggle = screen.getByText("See all 3 bills");
+    const box = toggle.closest("details");
+    expect(box.open).toBe(false);
+    fireEvent.click(toggle);
+    expect(box.open).toBe(true);
+    expect([...box.querySelectorAll("li")].map((li) => li.textContent)).toEqual([
+      "WhisperwireSep 30, 2026$10.99", "RentOct 1, 2026$1,450.00", "WaterOct 6, 2026about $46.20",
+    ]);
+  });
+});

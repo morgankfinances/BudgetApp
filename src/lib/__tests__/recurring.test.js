@@ -169,3 +169,20 @@ describe("insights with records that start partway through a month", () => {
     expect(uncategorized.body).toBe("$500.00 at Mystery, on 09/12 (not categorized yet).");
   });
 });
+
+describe("insight cards include the full list behind their summary", () => {
+  const rec = (key, name, nextDate, typicalAmount, monthlyCost, fixed = true) => ({ key, name, direction: "out", fixed, typicalAmount, monthlyCost, nextDate, priceChange: null });
+  it("every bill expected in the next two weeks, soonest first, and every fixed-price service by cost", () => {
+    const recurring = [rec("out|rent", "Rent", "2026-10-01", 1450, 1450), rec("out|water", "Water", "2026-10-06", 46.2, 46.2, false),
+      rec("out|music", "Whisperwire", "2026-09-30", 10.99, 10.99), rec("out|cloud", "Cloudnest", "2026-10-09", 2.99, 2.99), rec("out|later", "Insurance", "2026-11-02", 90, 90)];
+    const insights = buildInsights([], cats, recurring, "2026-09-28", fm);
+    const upcoming = insights.find((i) => i.id === "upcoming");
+    expect(upcoming.details.label).toBe("See all 4 bills");
+    expect(upcoming.details.items.map((d) => [d.name, d.date, d.amount, d.approximate])).toEqual([
+      ["Whisperwire", "2026-09-30", 10.99, false], ["Rent", "2026-10-01", 1450, false], ["Water", "2026-10-06", 46.2, true], ["Cloudnest", "2026-10-09", 2.99, false],
+    ]);
+    const services = insights.find((i) => i.id === "subscriptions");
+    expect(services.details.label).toBe("See all 3 services");
+    expect(services.details.items.map((d) => [d.name, d.amount, d.suffix])).toEqual([["Insurance", 90, "a month"], ["Whisperwire", 10.99, "a month"], ["Cloudnest", 2.99, "a month"]]);
+  });
+});

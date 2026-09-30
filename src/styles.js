@@ -706,6 +706,13 @@ export const STYLES = `
 .insight-card { background: var(--panel); border: 1px solid var(--border); border-left: 4px solid var(--accent-button); border-radius: var(--radius); padding: 16px 18px; }
 .insight-card h3 { font-size: 14.5px; margin: 0 0 6px; }
 .insight-card p { font-size: 13.5px; margin: 0; color: var(--ink-muted); line-height: 1.55; }
+.insight-details { margin-top: 10px; font-size: 13.5px; }
+.insight-details summary { cursor: pointer; font-weight: 600; color: var(--accent); padding: 2px 0; }
+.insight-details summary:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 3px; }
+.insight-details ul { list-style: none; margin: 8px 0 0; padding: 0; }
+.insight-details li { display: flex; justify-content: space-between; gap: 10px; padding: 6px 0; border-top: 1px solid var(--border); }
+.insight-details-amount { white-space: nowrap; font-weight: 600; }
+.insight-details-date { display: block; font-size: 12.5px; }
 .insight-good { border-left-color: var(--income); }
 .insight-watch { border-left-color: var(--warn-border); }
 .insights-table-wrap { padding: 0; overflow-x: auto; }
