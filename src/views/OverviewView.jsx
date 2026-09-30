@@ -8,7 +8,7 @@ import { addDaysISO, loadReportPeriodConfig, periodFnsForConfig } from "../lib/p
 import { formatDateDisplay, formatMoney, todayISO } from "../lib/utils.js";
 import { isUnconfirmedSuggestion } from "../lib/analysis.js";
 
-export function OverviewView({ transactions, categories, budgetGroups, onNavigate }) {
+export function OverviewView({ transactions, categories, budgetGroups, onNavigate, transferPairCount = 0, upcomingBills = [] }) {
   const periodConfig = useMemo(() => loadReportPeriodConfig(), []);
   const { keyFn: periodKeyFn, labelFn: periodLabelFn } = useMemo(() => periodFnsForConfig(periodConfig), [periodConfig]);
 
@@ -113,7 +113,8 @@ export function OverviewView({ transactions, categories, budgetGroups, onNavigat
 
   const uncategorizedCount = transactions.filter((t) => !t.categoryId).length;
   const suggestedCount = transactions.filter(isUnconfirmedSuggestion).length;
-  const needsAttentionCount = flagged.length + (uncategorizedCount > 0 ? 1 : 0) + (suggestedCount > 0 ? 1 : 0);
+  const needsAttentionCount =
+    flagged.length + (uncategorizedCount > 0 ? 1 : 0) + (suggestedCount > 0 ? 1 : 0) + (transferPairCount > 0 ? 1 : 0);
 
   return (
     <div>
@@ -207,6 +208,20 @@ export function OverviewView({ transactions, categories, budgetGroups, onNavigat
                   </div>
                 </button>
               )}
+              {transferPairCount > 0 && (
+                <button
+                  className="account-card"
+                  style={{ width: "100%", textAlign: "left", cursor: "pointer", border: "none", background: "var(--subtle-bg)", borderRadius: "var(--radius)" }}
+                  onClick={() => onNavigate("transactions")}
+                >
+                  <div>
+                    <div className="name" style={{ fontSize: 13.5 }}>
+                      {transferPairCount} possible transfer{transferPairCount === 1 ? "" : "s"} between your accounts
+                    </div>
+                    <div className="meta">Counted twice until marked; tap to review</div>
+                  </div>
+                </button>
+              )}
               {flagged.map(({ item, spent, flag, periodWord }) => (
                 <button
                   key={item.id}
@@ -249,10 +264,12 @@ export function OverviewView({ transactions, categories, budgetGroups, onNavigat
             <p className="hint">No spending recorded yet for {periodLabelFn(viewKey)}.</p>
           ) : (
             <div style={{ display: "flex", gap: 16, alignItems: "center", marginTop: 8 }}>
-              <div style={{ width: 120, height: 120, flexShrink: 0 }}>
+              {/* The donut repeats the list beside it, so screen readers get
+                  the list instead of a series of unlabeled shapes. */}
+              <div style={{ width: 120, height: 120, flexShrink: 0 }} aria-hidden="true">
                 <ResponsiveContainer>
-                  <PieChart>
-                    <Pie data={donutData} dataKey="value" nameKey="name" innerRadius="58%" outerRadius="92%" paddingAngle={donutData.length > 1 ? 2 : 0}>
+                  <PieChart accessibilityLayer={false}>
+                    <Pie rootTabIndex={-1} data={donutData} dataKey="value" nameKey="name" innerRadius="58%" outerRadius="92%" paddingAngle={donutData.length > 1 ? 2 : 0}>
                       {donutData.map((d, i) => (
                         <Cell key={i} fill={d.isOther ? "var(--chart-other)" : CHART_PALETTE[i % CHART_PALETTE.length]} />
                       ))}
@@ -289,6 +306,32 @@ export function OverviewView({ transactions, categories, budgetGroups, onNavigat
             See full Reports
           </button>
         </div>
+
+        {upcomingBills.length > 0 && (
+          <div className="panel">
+            <h3 style={{ marginTop: 0, marginBottom: 4, fontSize: 15 }}>Coming up</h3>
+            <p className="hint" style={{ marginTop: 0 }}>Recurring bills expected in the next two weeks.</p>
+            <ul className="coming-up-list">
+              {upcomingBills.slice(0, 4).map((r) => (
+                <li key={r.key}>
+                  <span>
+                    {r.name}
+                    <span className="hint" style={{ display: "block" }}>
+                      {formatDateDisplay(r.nextDate)}
+                    </span>
+                  </span>
+                  <span className="money-out">
+                    {r.fixed ? "" : "about "}
+                    {formatMoney(r.typicalAmount)}
+                  </span>
+                </li>
+              ))}
+            </ul>
+            <button className="btn btn-ghost btn-sm" style={{ marginTop: 8 }} onClick={() => onNavigate("insights")}>
+              {upcomingBills.length > 4 ? `See all ${upcomingBills.length} in Insights` : "See Insights"}
+            </button>
+          </div>
+        )}
       </div>
     </div>
   );

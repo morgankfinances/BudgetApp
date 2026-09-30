@@ -15,13 +15,21 @@ function setup() {
 }
 
 describe("Transactions screen", () => {
-  it("lists every transaction with money in, out, and net totals", () => {
+  it("shows the newest month's transactions with money in, out, and net totals, and steps to earlier months", () => {
     const { rows } = setup();
-    expect(rows()).toHaveLength(10);
+    expect(screen.getByText("September 2026")).toBeTruthy();
+    expect(rows()).toHaveLength(8);
     const stats = document.querySelector(".stat-row") || document.body;
     expect(stats.textContent).toContain("$1,355.13");  // money in
-    expect(stats.textContent).toContain("$2,142.50");  // money out
-    expect(screen.getByText("-$787.37")).toBeTruthy(); // net
+    expect(stats.textContent).toContain("$1,722.50");  // money out, September only
+    expect(screen.getByText("-$367.37")).toBeTruthy(); // net
+    fireEvent.click(screen.getByRole("button", { name: "Show the previous month, Aug 2026" }));
+    expect(screen.getByText("August 2026")).toBeTruthy();
+    expect(rows()).toHaveLength(2);
+    expect(screen.getByRole("button", { name: "Show the next month, Sep 2026" }).disabled).toBe(false);
+    fireEvent.click(screen.getByRole("button", { name: "Newest" }));
+    expect(rows()).toHaveLength(8);
+    expect(screen.getByRole("button", { name: /Show the next month/ }).disabled).toBe(true);
   });
   it("filters to uncategorized, by account, and by search text", () => {
     const { rows } = setup();
@@ -38,7 +46,7 @@ describe("Transactions screen", () => {
     const { rows } = setup();
     expect(rows()[0].textContent).toContain("Sep 16, 2026");
     fireEvent.click(screen.getByRole("button", { name: /Date/ }));
-    expect(rows()[0].textContent).toContain("Aug 3, 2026");
+    expect(rows()[0].textContent).toContain("Sep 1, 2026"); // oldest in the month shown
   });
   it("choosing a category saves it", () => {
     const { rowFor, onUpdate } = setup();
@@ -104,8 +112,9 @@ describe("Transactions: date range, upload, and category filters", () => {
     fireEvent.change(from, { target: { value: "2026-09-10" } });
     fireEvent.change(to, { target: { value: "2026-09-15" } });
     expect(rows().map((r) => r.textContent.match(/Sep \d+, 2026/)[0])).toEqual(["Sep 15, 2026", "Sep 14, 2026", "Sep 12, 2026", "Sep 10, 2026"]);
+    expect(document.body.textContent).toMatch(/Showing matches from all time/);
     fireEvent.click(screen.getAllByRole("button", { name: "Clear" }).at(-1));
-    expect(rows()).toHaveLength(10);
+    expect(rows()).toHaveLength(8); // back to the month view
   });
   it("picking a recent upload shows only what it brought in", () => {
     const { rows } = setup();
@@ -116,6 +125,8 @@ describe("Transactions: date range, upload, and category filters", () => {
   it("filtering by category, or to uncategorized through the category list", () => {
     const { rows } = setup();
     fireEvent.change(screen.getByDisplayValue("All categories"), { target: { value: "cat-groc" } });
-    expect(rows()).toHaveLength(3);
+    expect(rows()).toHaveLength(1); // a category narrows within the month shown
+    fireEvent.click(screen.getByRole("button", { name: "Show the previous month, Aug 2026" }));
+    expect(rows()).toHaveLength(2);
   });
 });

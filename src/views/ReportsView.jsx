@@ -131,9 +131,13 @@ export function ReportsDonutGrid({ periods, periodLabelFn, rows, categoryColor, 
                     No activity
                   </div>
                 ) : (
-                  <ResponsiveContainer>
-                    <PieChart>
+                  <div aria-hidden="true" style={{ height: "100%" }}>
+                    {/* Decorative: the legend and table give the same numbers in a
+                        form screen readers can use. */}
+                    <ResponsiveContainer>
+                    <PieChart accessibilityLayer={false}>
                       <Pie
+                        rootTabIndex={-1}
                         data={data}
                         dataKey="value"
                         nameKey="name"
@@ -151,6 +155,7 @@ export function ReportsDonutGrid({ periods, periodLabelFn, rows, categoryColor, 
                       <Tooltip content={<ReportsDonutTooltip />} wrapperStyle={{ zIndex: 100 }} />
                     </PieChart>
                   </ResponsiveContainer>
+                  </div>
                 )}
                 {data.length > 0 && (
                   <div

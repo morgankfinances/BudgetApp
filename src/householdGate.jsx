@@ -23,6 +23,7 @@ import React, { useState, useEffect, useRef } from "react";
 import { supabase } from "./supabaseClient.js";
 import { resetHouseholdCache } from "./storageAdapter.js";
 import { reloadPage } from "./lib/browser.js";
+import { useImportPrefs } from "./lib/importPrefs.js";
 
 /* ------------------------------------------------------------------ */
 /* Theme                                                                */
@@ -207,6 +208,76 @@ export function DecoRing({ className = "" }) {
 }
 
 // Every loading screen in the app uses this: the turning compass rose.
+// Settings → Importing: the household's duplicate handling and suggested
+// categories. The app owns these (and saves them for the household); this
+// shows and changes them through importPrefs.js.
+const DUPLICATE_OPTIONS = [
+  {
+    value: "skip",
+    label: "Skip them automatically (recommended)",
+    hint: "Exact matches are set aside instead of imported. You can review and restore them from Transactions.",
+  },
+  {
+    value: "flag",
+    label: "Import them, and flag possible duplicates",
+    hint: "Everything is imported; likely duplicates are flagged for you to review.",
+  },
+  {
+    value: "off",
+    label: "Import everything, with no duplicate checks",
+    hint: "Nothing is skipped or flagged. Anything skipped earlier stays available to restore.",
+  },
+];
+
+function ImportSettings() {
+  const prefs = useImportPrefs();
+  if (!prefs) return null;
+  return (
+    <>
+      <div style={sectionLabelStyle}>Importing</div>
+      <fieldset style={{ border: "none", padding: 0, margin: "0 0 12px" }}>
+        <legend style={{ fontSize: 13, fontWeight: 600, marginBottom: 6, padding: 0 }}>
+          When an import includes transactions already in Coinrose
+        </legend>
+        {DUPLICATE_OPTIONS.map((o) => (
+          <label key={o.value} style={{ display: "flex", gap: 8, alignItems: "flex-start", margin: "0 0 8px", cursor: "pointer" }}>
+            <input
+              type="radio"
+              name="duplicate-handling"
+              value={o.value}
+              checked={prefs.duplicateHandling === o.value}
+              onChange={() => prefs.onSetDuplicateHandling(o.value)}
+              style={{ marginTop: 3 }}
+            />
+            <span style={{ fontSize: 13 }}>
+              {o.label}
+              <span style={{ display: "block", color: "var(--ink-muted)", fontSize: 12 }}>{o.hint}</span>
+            </span>
+          </label>
+        ))}
+      </fieldset>
+      <label style={{ display: "flex", gap: 8, alignItems: "flex-start", margin: "0 0 8px", cursor: "pointer" }}>
+        <input
+          type="checkbox"
+          checked={prefs.autoApplySuggestions}
+          onChange={(e) => prefs.onToggleAutoApply(e.target.checked)}
+          style={{ marginTop: 3 }}
+        />
+        <span style={{ fontSize: 13 }}>
+          Fill in suggested categories automatically
+          <span style={{ display: "block", color: "var(--ink-muted)", fontSize: 12 }}>
+            When importing, Coinrose fills in categories based on how you've sorted similar transactions before. They
+            count right away and show as Suggested until you confirm or change them.
+          </span>
+        </span>
+      </label>
+      <p style={{ fontSize: 12, color: "var(--ink-muted)", margin: "0 0 14px" }}>
+        These settings apply to everyone in your household.
+      </p>
+    </>
+  );
+}
+
 export function LoadingIndicator({ label = "Loading…" }) {
   return (
     <div className="coinrose-loading" role="status">
@@ -1230,6 +1301,8 @@ function HouseholdPanel({ onClose, onDataChanged, onRoleKnown, theme, onThemeCha
           <p style={{ color: "var(--danger)", fontSize: 13 }}>{error}</p>
         )}
 
+        <ImportSettings />
+
         <div style={sectionLabelStyle}>Appearance</div>
         <ThemePicker theme={theme} onChange={onThemeChange} />
 
@@ -1379,7 +1452,8 @@ export default function HouseholdGate({ children }) {
   const [panelOpen, setPanelOpen] = useState(false);
   const [pendingCount, setPendingCount] = useState(0);
   const [isOwner, setIsOwner] = useState(false);
-  const settingsButtonRef = useRef(null); // only owners can act on join requests, so only they see the badge
+  const settingsButtonRef = useRef(null);
+  const [people, setPeople] = useState({ currentUserId: null, members: [] }); // only owners can act on join requests, so only they see the badge
   const [theme, setTheme] = useState(loadTheme);
 
   // Injects the theme CSS variables into <head> once, regardless of
@@ -1436,6 +1510,12 @@ export default function HouseholdGate({ children }) {
       setStatus("ready");
       setActiveHouseholdName(membership.households?.name || "");
       refreshPendingCount(membership.household_id);
+      // Who's who, for showing comment authors in the app.
+      setPeople({ currentUserId: user.id, members: [] });
+      supabase
+        .rpc("get_household_members", { p_household_id: membership.household_id })
+        .then(({ data }) => setPeople({ currentUserId: user.id, members: Array.isArray(data) ? data : [] }))
+        .catch(() => {});
       return;
     }
     setActiveHouseholdName("");
@@ -1667,7 +1747,11 @@ export default function HouseholdGate({ children }) {
 
   return (
     <>
-      {React.cloneElement(children, { householdName: activeHouseholdName })}
+      {React.cloneElement(children, {
+        householdName: activeHouseholdName,
+        currentUserId: people.currentUserId,
+        householdMembers: people.members,
+      })}
       <button
         ref={settingsButtonRef}
         onClick={() => setPanelOpen(true)}

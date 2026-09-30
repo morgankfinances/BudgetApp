@@ -503,3 +503,53 @@ describe("demo mode", () => {
     expect(isDemo()).toBe(false);
   });
 });
+
+import { publishImportPrefs } from "../lib/importPrefs.js";
+describe("Settings → Importing", () => {
+  it("shows the household's import settings once the app has published them, and changes them", async () => {
+    const onSetDuplicateHandling = vi.fn(), onToggleAutoApply = vi.fn();
+    fake.reset({ membership: { household_id: "h1", role: "owner", households: household }, members: [owner] });
+    render(<HouseholdGate><TheApp /></HouseholdGate>);
+    await screen.findByText("the app");
+    fireEvent.click(screen.getByRole("button", { name: /^Settings/ }));
+    await screen.findByText("Members");
+    expect(screen.queryByText("Importing")).toBeNull(); // nothing to show until the app is open
+    act(() => publishImportPrefs({ duplicateHandling: "skip", autoApplySuggestions: true, skippedCount: 0, onSetDuplicateHandling, onToggleAutoApply }));
+    expect(screen.getByText("Importing")).toBeTruthy();
+    expect(screen.getByLabelText(/Skip them automatically/).checked).toBe(true);
+    fireEvent.click(screen.getByLabelText(/Import everything, with no duplicate checks/));
+    expect(onSetDuplicateHandling).toHaveBeenCalledWith("off");
+    fireEvent.click(screen.getByLabelText(/Fill in suggested categories automatically/));
+    expect(onToggleAutoApply).toHaveBeenCalledWith(false);
+    act(() => publishImportPrefs(null));
+  });
+});
+
+describe("demo mode and signing in", () => {
+  it("the app never loads the demo's data for a signed-in person: demo mode is off before the app appears", async () => {
+    const { startDemo, isDemo } = await import("../ledgerStore.js");
+    startDemo({ accounts: [] });
+    let demoWhenAppAppeared = null;
+    function RecordingApp() {
+      if (demoWhenAppAppeared === null) demoWhenAppAppeared = isDemo();
+      return <div>the app</div>;
+    }
+    fake.state.session = { user: { id: "u1" } };
+    render(<AuthGate><RecordingApp /></AuthGate>);
+    await screen.findByText("the app");
+    expect(demoWhenAppAppeared).toBe(false);
+  });
+});
+
+describe("the household screen tells the app who's who", () => {
+  it("passes the signed-in person's ID and the member list, for comment authors", async () => {
+    let received = null;
+    function PropsApp(props) { received = props; return <div>the app</div>; }
+    fake.reset({ membership: { household_id: "h1", role: "owner", households: household }, members: [owner, partner] });
+    render(<HouseholdGate><PropsApp /></HouseholdGate>);
+    await screen.findByText("the app");
+    await waitFor(() => expect(received.householdMembers).toHaveLength(2));
+    expect(received.currentUserId).toBe(owner.user_id);
+    expect(received.householdName).toBe(household.name);
+  });
+});

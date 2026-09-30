@@ -187,7 +187,7 @@ export default function HomePage({ onSignIn, onGetStarted, onTryDemo }) {
             <h2 id="privacy-title">Built to know as little as possible</h2>
             <ul className="home-checks">
               <li>Coinrose never connects to your bank and never asks for bank passwords. You upload statement files yourself.</li>
-              <li>Only the date, description, and amount columns are kept. Account numbers, memos, and anything else in the file are discarded.</li>
+              <li>Only the date, description, and amount columns are kept, plus the bank's reference number for each transaction if the file has one. Account numbers, memos, and anything else in the file are discarded.</li>
               <li>No ads, no selling your data, and no tracking.</li>
               <li>Each household's data is kept separate by the database itself, not just hidden by the app.</li>
             </ul>

@@ -9,6 +9,7 @@
 
 import { addDaysISO, getMonthStartISO } from "./periods.js";
 import { todayISO } from "./utils.js";
+import { percentsToAmounts } from "./splits.js";
 
 // A small, fast, seeded random number generator: same seed, same numbers.
 function seededRandom(seedText) {
@@ -19,6 +20,13 @@ function seededRandom(seedText) {
     return seed / 4294967296;
   };
 }
+
+// The demo's household members: you, and a sample partner.
+export const DEMO_YOU = "demo-you";
+export const DEMO_MEMBERS = [
+  { user_id: DEMO_YOU, email: "you@example.com", role: "owner" },
+  { user_id: "demo-sam", email: "sam@example.com", role: "owner" },
+];
 
 const ACCOUNTS = [
   { id: "demo-chk", name: "Millbrook Trust Checking", dateCol: "Date", descriptionCol: "Description", outCol: "Money Out", inCol: "Money In", invertSign: false },
@@ -90,6 +98,7 @@ export function buildDemoLedger(today = todayISO()) {
   const accountName = Object.fromEntries(ACCOUNTS.map((a) => [a.id, a.name]));
 
   const transactions = [];
+  const transferPairs = [];
   let counter = 0;
   const add = (accountId, date, description, amountOut, amountIn, categoryId) => {
     counter += 1;
@@ -124,6 +133,7 @@ export function buildDemoLedger(today = todayISO()) {
     if (dom === 2) {
       add("demo-chk", day, "Transfer to Savings", 400, null, "demo-xfer");
       add("demo-sav", day, "Transfer from Checking", null, 400, "demo-xfer");
+      transferPairs.push([transactions.at(-2), transactions.at(-1)]);
     }
     if (dom === 3) add("demo-card", day, "Whisperwire Music", 10.99, null, "demo-subs");
     if (dom === 6) add("demo-chk", day, "Glowlight Electric", between(78, 142), null, "demo-elec");
@@ -134,7 +144,8 @@ export function buildDemoLedger(today = todayISO()) {
     if (dom === 25) {
       const payment = between(900, 1300);
       add("demo-chk", day, "Griffon Reserve Card Payment", payment, null, "demo-xfer");
-      add("demo-card", day, "Payment Received - Thank You", null, payment, "demo-xfer");
+      add("demo-card", addDaysISO(day, 1) <= today ? addDaysISO(day, 1) : day, "Payment Received - Thank You", null, payment, "demo-xfer");
+      transferPairs.push([transactions.at(-2), transactions.at(-1)]);
     }
 
     // Everyday spending, mostly on the card
@@ -146,14 +157,44 @@ export function buildDemoLedger(today = todayISO()) {
     }
     if (dow === 1 && random() < 0.85) add("demo-card", day, "Cobalt Fuel", between(34, 61), null, "demo-gas");
     if (dom === 14 && random() < 0.8) add("demo-card", day, "Hollow Oak Hardware", between(22, 96), null, "demo-home");
+    // A monthly superstore run, split between groceries and home supplies.
+    if (dom === 16) {
+      const total = between(90, 170);
+      add("demo-card", day, "Tallpine Superstore", total, null, null);
+      const [groceries, home] = percentsToAmounts(total, [65, 35]);
+      transactions.at(-1).splits = [{ categoryId: "demo-groc", amount: groceries }, { categoryId: "demo-home", amount: home }];
+    }
     if (dow === 6 && random() < 0.3) add("demo-card", day, pick(["Pinecone Books", "Starfall Cinema", "Loom & Lantern Crafts"]), between(12, 64), null, "demo-fun");
+  }
+
+  // Transfers are linked in pairs, except the most recent card payment,
+  // left unmarked so the demo shows a suggested transfer to review.
+  const lastCardPayment = [...transferPairs].reverse().find(([out]) => out.description === "Griffon Reserve Card Payment");
+  transferPairs.forEach(([out, into]) => {
+    if (lastCardPayment && out === lastCardPayment[0]) {
+      out.categoryId = null;
+      into.categoryId = null;
+      return;
+    }
+    out.transferWith = into.id;
+    into.transferWith = out.id;
+  });
+
+  // A short conversation on the most recent hardware store trip, to show
+  // comments between household members.
+  const hardware = [...transactions].reverse().find((t) => t.description === "Hollow Oak Hardware");
+  if (hardware) {
+    hardware.comments = [
+      { id: "demo-c1", text: "Paint and brushes for the porch railing.", authorId: "demo-sam", at: `${hardware.date}T19:12:00.000Z` },
+      { id: "demo-c2", text: "Nice! Can you keep the receipt in case we return the extra can?", authorId: DEMO_YOU, at: `${hardware.date}T20:03:00.000Z` },
+    ];
   }
 
   // The last few days haven't been categorized yet, so the demo shows the
   // categorizing step (with suggestions, since similar ones exist).
   const recentStart = addDaysISO(today, -4);
   transactions.forEach((t) => {
-    if (t.date >= recentStart && t.categoryId !== "demo-pay" && t.categoryId !== "demo-xfer") t.categoryId = null;
+    if (t.date >= recentStart && t.categoryId !== "demo-pay" && t.categoryId !== "demo-xfer" && !t.splits) t.categoryId = null;
   });
 
   return {

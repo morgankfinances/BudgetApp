@@ -30,7 +30,7 @@ const TRANSACTION_FIELDS = [
   "id", "accountId", "accountName", "categoryId", "date", "description",
   "amountOut", "amountIn", "uploadBatchId", "uploadedAt", "raw",
 ];
-const SETTINGS_FIELDS = ["plannedIncome", "incomeWarningDismissed", "hiddenBudgetMonths", "excludeUnassignedFromBudget", "autoApplySuggestions"];
+const SETTINGS_FIELDS = ["plannedIncome", "incomeWarningDismissed", "hiddenBudgetMonths", "excludeUnassignedFromBudget", "autoApplySuggestions", "duplicateHandling", "hiddenRecurring"];
 
 export function accountToRow(a, index) {
   return { id: a.id, name: a.name ?? "", sort_order: index, props: omit(a, ACCOUNT_FIELDS) };

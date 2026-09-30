@@ -1,15 +1,24 @@
-import React, { useMemo, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import { EmptyState, StatBlock } from "../components/common.jsx";
 import { buildCategorySuggestions, isUnconfirmedSuggestion } from "../lib/analysis.js";
 import { formatMonthLabel, getMonthStartISO } from "../lib/periods.js";
 import { formatDateDisplay, formatMoney, parseMoney } from "../lib/utils.js";
+import { SplitEditor } from "../components/SplitEditor.jsx";
+import { hasSplits, isUncategorized } from "../lib/splits.js";
+import { CommentThread } from "../components/CommentThread.jsx";
 
 /* ------------------------------------------------------------------ */
 /* Transactions view                                                    */
 /* ------------------------------------------------------------------ */
 
-export function TransactionRow({ t, duplicateInfo, expanded, onToggleExpand, allTransactions, categories, onUpdate, onDelete, suggestedCategoryId }) {
+// How many rows show at once; "Show more" adds this many again.
+export const ROW_LIMIT = 200;
+
+export function TransactionRow({ t, duplicateInfo, expanded, onToggleExpand, allTransactions, categories, onUpdate, onDelete, suggestedCategoryId, onUnlinkTransfer, onSetSplits, comments = null }) {
   const [editing, setEditing] = useState(false);
+  const [splitting, setSplitting] = useState(false);
+  const [showComments, setShowComments] = useState(false);
+  const commentCount = Array.isArray(t.comments) ? t.comments.length : 0;
   const [draft, setDraft] = useState({
     date: t.date || "",
     description: t.description || "",
@@ -77,7 +86,10 @@ export function TransactionRow({ t, duplicateInfo, expanded, onToggleExpand, all
             </button>
           </div>
           <div className="tx-compact-subline">
-            {categoryName && isUnconfirmedSuggestion(t) ? (
+            {commentCount > 0 && <span className="tx-compact-comments">💬 {commentCount} · </span>}
+            {hasSplits(t) ? (
+              <span>Split · {t.splits.length} categories</span>
+            ) : categoryName && isUnconfirmedSuggestion(t) ? (
               <span className="tx-compact-suggested">Suggested: {categoryName}</span>
             ) : categoryName ? (
               categoryName
@@ -180,6 +192,21 @@ export function TransactionRow({ t, duplicateInfo, expanded, onToggleExpand, all
         </td>
         <td data-label="Category">
           {(() => {
+            if (hasSplits(t)) {
+              const name = (id) => (categories.find((c) => c.id === id) || {}).name || "Uncategorized";
+              return (
+                <div className="split-summary">
+                  <span>
+                    Split: {t.splits.map((sp) => `${name(sp.categoryId)} ${formatMoney(sp.amount)}`).join(", ")}
+                  </span>
+                  {onSetSplits && (
+                    <button className="btn btn-ghost btn-sm" onClick={() => setSplitting(!splitting)} aria-expanded={splitting}>
+                      Edit split
+                    </button>
+                  )}
+                </div>
+              );
+            }
             // Filled in automatically and not yet confirmed; counts already.
             const isApplied = isUnconfirmedSuggestion(t);
             // Suggested but not filled in (automatic suggestions turned off).
@@ -230,6 +257,25 @@ export function TransactionRow({ t, duplicateInfo, expanded, onToggleExpand, all
           })()}
         </td>
         <td className="no-label-cell">
+          {t.transferWith && (() => {
+            const partner = (allTransactions || []).find((o) => o.id === t.transferWith);
+            return (
+              <div className="dup-cell">
+                <span className="transfer-tag" title="Money moved between your own accounts: not counted as spending or income.">
+                  ↔ Transfer {t.amountOut != null ? "to" : "from"} {partner ? partner.accountName : "another account"}
+                </span>
+                {onUnlinkTransfer && (
+                  <button
+                    className="btn btn-ghost btn-sm"
+                    onClick={() => onUnlinkTransfer(t.id)}
+                    aria-label={`Unpair this transfer: ${t.description || "transaction"}`}
+                  >
+                    Unpair
+                  </button>
+                )}
+              </div>
+            );
+          })()}
           {isDup && (
             <div className="dup-cell">
               <span className="badge" onClick={() => onToggleExpand(t.id)}>
@@ -266,6 +312,26 @@ export function TransactionRow({ t, duplicateInfo, expanded, onToggleExpand, all
               <button className="btn btn-ghost btn-sm" onClick={startEdit}>
                 Edit
               </button>
+              {comments && (
+                <button
+                  className="btn btn-ghost btn-sm comment-btn"
+                  onClick={() => setShowComments(!showComments)}
+                  aria-expanded={showComments}
+                  aria-label={`${commentCount ? `${commentCount} comment${commentCount === 1 ? "" : "s"}` : "Comment"} on ${t.description || "this transaction"}`}
+                >
+                  💬{commentCount ? ` ${commentCount}` : ""}
+                </button>
+              )}
+              {onSetSplits && !t.transferWith && !hasSplits(t) && (
+                <button
+                  className="btn btn-ghost btn-sm"
+                  onClick={() => setSplitting(!splitting)}
+                  aria-expanded={splitting}
+                  aria-label={`Split ${t.description || "this transaction"} among categories`}
+                >
+                  Split
+                </button>
+              )}
               <button className="btn btn-ghost btn-sm" onClick={() => setConfirmingDelete(true)}>
                 Delete
               </button>
@@ -273,6 +339,35 @@ export function TransactionRow({ t, duplicateInfo, expanded, onToggleExpand, all
           )}
         </td>
       </tr>
+      {splitting && onSetSplits && (
+        <tr className="split-row">
+          <td colSpan={8}>
+            <SplitEditor
+              t={t}
+              categories={categories}
+              onSave={(splits) => {
+                onSetSplits(t.id, splits);
+                setSplitting(false);
+              }}
+              onCancel={() => setSplitting(false)}
+            />
+          </td>
+        </tr>
+      )}
+      {showComments && comments && (
+        <tr className="split-row">
+          <td colSpan={8}>
+            <CommentThread
+              t={t}
+              currentUserId={comments.currentUserId}
+              members={comments.members}
+              onAdd={comments.onAdd}
+              onDelete={comments.onDelete}
+              onClose={() => setShowComments(false)}
+            />
+          </td>
+        </tr>
+      )}
       {expanded && isDup && (
         <tr className="dup-detail-row">
           <td colSpan={8}>
@@ -291,12 +386,15 @@ export function TransactionRow({ t, duplicateInfo, expanded, onToggleExpand, all
 }
 
 
-export function TransactionsView({ transactions, accounts, categories, duplicateInfo, onUpdate, onDelete, onGoUpload, autoApplySuggestions = true, onConfirmSuggestions, onApplySuggestions }) {
+export function TransactionsView({ transactions, accounts, categories, duplicateInfo, onUpdate, onDelete, onGoUpload, autoApplySuggestions = true, onConfirmSuggestions, onApplySuggestions, skippedDuplicates = [], onRestoreSkipped, onDeleteSkipped, duplicateHandling = "skip", transferPairs = [], onLinkTransfers, onDismissTransfer, onUnlinkTransfer, onSetSplits, comments = null, pageSize = ROW_LIMIT }) {
   const [filterAccount, setFilterAccount] = useState("all");
   const [filterCategory, setFilterCategory] = useState("all");
   const [search, setSearch] = useState("");
   const [dupOnly, setDupOnly] = useState(false);
   const [suggestedOnly, setSuggestedOnly] = useState(false);
+  const [showSkipped, setShowSkipped] = useState(false);
+  const [showTransfers, setShowTransfers] = useState(false);
+  const [confirmDeleteAll, setConfirmDeleteAll] = useState(false);
   const [expandedId, setExpandedId] = useState(null);
   const [dateSortDir, setDateSortDir] = useState("desc");
   const [dateFrom, setDateFrom] = useState("");
@@ -337,11 +435,43 @@ export function TransactionsView({ transactions, accounts, categories, duplicate
     return `${dateStr} — ${accountStr} (${batch.count})`;
   }
 
+  // Browsing shows one month at a time (starting with the newest month that
+  // has anything). Searching, or filters for finding particular things, look
+  // across all time instead, so an upload spanning two months stays together.
+  const newestMonth = useMemo(
+    () => transactions.reduce((m, t) => (t.date && t.date.slice(0, 7) > m ? t.date.slice(0, 7) : m), ""),
+    [transactions]
+  );
+  const [pickedMonth, setPickedMonth] = useState(null);
+  const shownMonth = pickedMonth || newestMonth;
+  const findingAcrossAllTime =
+    !!search.trim() || filterBatchId !== "all" || !!dateFrom || !!dateTo || dupOnly || suggestedOnly || filterCategory === "uncategorized";
+  const stepMonth = (delta) => {
+    const [y, m] = shownMonth.split("-").map(Number);
+    const d = new Date(Date.UTC(y, m - 1 + delta, 1));
+    const next = `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, "0")}`;
+    setPickedMonth(next >= newestMonth ? null : next);
+  };
+  const monthLabel = (ym) =>
+    ym ? new Date(`${ym}-01T00:00:00Z`).toLocaleDateString("en-US", { month: "long", year: "numeric", timeZone: "UTC" }) : "";
+  const shortMonth = (delta) => {
+    const [y, m] = shownMonth.split("-").map(Number);
+    return new Date(Date.UTC(y, m - 1 + delta, 1)).toLocaleDateString("en-US", { month: "short", year: "numeric", timeZone: "UTC" });
+  };
+
+  // At most this many rows at once; "Show more" adds more.
+  const [rowLimit, setRowLimit] = useState(pageSize);
+  useEffect(() => {
+    setRowLimit(pageSize);
+  }, [shownMonth, findingAcrossAllTime, filterAccount, filterCategory, search, filterBatchId, dateFrom, dateTo, pageSize]);
+
   const filtered = useMemo(() => {
     let list = transactions;
+    if (!findingAcrossAllTime && shownMonth) list = list.filter((t) => t.date && t.date.slice(0, 7) === shownMonth);
     if (filterAccount !== "all") list = list.filter((t) => t.accountId === filterAccount);
-    if (filterCategory === "uncategorized") list = list.filter((t) => !t.categoryId);
-    else if (filterCategory !== "all") list = list.filter((t) => t.categoryId === filterCategory);
+    if (filterCategory === "uncategorized") list = list.filter(isUncategorized);
+    else if (filterCategory !== "all")
+      list = list.filter((t) => t.categoryId === filterCategory || (hasSplits(t) && t.splits.some((sp) => sp.categoryId === filterCategory)));
     if (dupOnly) list = list.filter((t) => duplicateInfo.dupIds.has(t.id));
     if (suggestedOnly) list = list.filter(isUnconfirmedSuggestion);
     if (filterBatchId !== "all") list = list.filter((t) => t.uploadBatchId === filterBatchId);
@@ -350,7 +480,7 @@ export function TransactionsView({ transactions, accounts, categories, duplicate
     if (search.trim()) {
       const q = search.trim().toLowerCase();
       list = list.filter((t) => {
-        const haystack = [t.accountName, t.date, t.description, ...Object.values(t.raw || {}).map(String)]
+        const haystack = [t.accountName, t.date, t.description, ...Object.values(t.raw || {}).map(String), ...(t.comments || []).map((c) => c.text)]
           .join(" ")
           .toLowerCase();
         return haystack.includes(q);
@@ -358,7 +488,7 @@ export function TransactionsView({ transactions, accounts, categories, duplicate
     }
     const dir = dateSortDir === "asc" ? 1 : -1;
     return [...list].sort((a, b) => (a.date < b.date ? -dir : a.date > b.date ? dir : 0));
-  }, [transactions, filterAccount, filterCategory, dupOnly, suggestedOnly, filterBatchId, search, duplicateInfo, dateSortDir, dateFrom, dateTo]);
+  }, [transactions, shownMonth, findingAcrossAllTime, filterAccount, filterCategory, dupOnly, suggestedOnly, filterBatchId, search, duplicateInfo, dateSortDir, dateFrom, dateTo]);
 
   if (accounts.length === 0) {
     return (
@@ -373,7 +503,7 @@ export function TransactionsView({ transactions, accounts, categories, duplicate
 
   const totalIn = filtered.reduce((s, t) => s + (t.amountIn || 0), 0);
   const totalOut = filtered.reduce((s, t) => s + (t.amountOut || 0), 0);
-  const uncategorizedCount = transactions.filter((t) => !t.categoryId).length;
+  const uncategorizedCount = transactions.filter(isUncategorized).length;
 
   return (
     <div>
@@ -381,6 +511,33 @@ export function TransactionsView({ transactions, accounts, categories, duplicate
         <h1>Transactions</h1>
         <p>Everything you've imported, combined in one place.</p>
       </div>
+
+      {newestMonth && (
+        <div className="period-stepper" role="group" aria-label="Month shown">
+          {findingAcrossAllTime ? (
+            <span className="hint" aria-live="polite">
+              Showing matches from all time: searching and these filters look beyond one month.
+            </span>
+          ) : (
+            <>
+              <button type="button" className="btn btn-secondary btn-sm" onClick={() => stepMonth(-1)} aria-label={`Show the previous month, ${shortMonth(-1)}`}>
+                ‹ {shortMonth(-1)}
+              </button>
+              <span className="period-stepper-current" aria-live="polite">
+                {monthLabel(shownMonth)}
+              </span>
+              <button type="button" className="btn btn-secondary btn-sm" onClick={() => stepMonth(1)} disabled={shownMonth >= newestMonth} aria-label={`Show the next month, ${shortMonth(1)}`}>
+                {shortMonth(1)} ›
+              </button>
+              {shownMonth !== newestMonth && (
+                <button type="button" className="btn btn-ghost btn-sm" onClick={() => setPickedMonth(null)}>
+                  Newest
+                </button>
+              )}
+            </>
+          )}
+        </div>
+      )}
 
       <div className="summary-row">
         <StatBlock value={filtered.length} label="Transactions shown" />
@@ -431,10 +588,12 @@ export function TransactionsView({ transactions, accounts, categories, duplicate
           />
           Uncategorized only ({uncategorizedCount})
         </label>
-        <label className="checkbox-filter">
-          <input type="checkbox" checked={dupOnly} onChange={(e) => setDupOnly(e.target.checked)} />
-          Possible duplicates only ({duplicateInfo.dupIds.size})
-        </label>
+        {duplicateHandling !== "off" && (
+          <label className="checkbox-filter">
+            <input type="checkbox" checked={dupOnly} onChange={(e) => setDupOnly(e.target.checked)} />
+            Possible duplicates only ({duplicateInfo.dupIds.size})
+          </label>
+        )}
         {(unconfirmedCount > 0 || suggestedOnly) && (
           <label className="checkbox-filter">
             <input type="checkbox" checked={suggestedOnly} onChange={(e) => setSuggestedOnly(e.target.checked)} />
@@ -459,6 +618,158 @@ export function TransactionsView({ transactions, accounts, categories, duplicate
           )}
         </label>
       </div>
+
+      {transferPairs.length > 0 && (
+        <div className="suggest-banner transfer-panel" role="region" aria-label="Possible transfers">
+          <div className="suggest-banner-row">
+            <span>
+              <strong>
+                {transferPairs.length} possible transfer{transferPairs.length === 1 ? "" : "s"} between your accounts.
+              </strong>{" "}
+              Money moving between your own accounts isn't spending or income. Marking these as transfers keeps them from
+              being counted twice.
+            </span>
+            <span className="skipped-item-actions">
+              <button
+                type="button"
+                className="btn btn-ghost btn-sm"
+                aria-expanded={showTransfers}
+                aria-controls="transfer-list"
+                onClick={() => setShowTransfers(!showTransfers)}
+              >
+                {showTransfers ? "Hide" : "Review"}
+              </button>
+              <button className="btn btn-secondary btn-sm" onClick={() => onLinkTransfers && onLinkTransfers(transferPairs)}>
+                Mark all {transferPairs.length} as transfers
+              </button>
+            </span>
+          </div>
+          {showTransfers && (
+            <ul className="skipped-list" id="transfer-list">
+              {transferPairs.map((pair) => {
+                const out = transactions.find((t) => t.id === pair.outId);
+                const into = transactions.find((t) => t.id === pair.inId);
+                if (!out || !into) return null;
+                return (
+                  <li key={`${pair.outId}-${pair.inId}`} className="skipped-item">
+                    <span className="transfer-pair">
+                      <span>
+                        <strong>−{formatMoney(out.amountOut)}</strong> from {out.accountName}
+                        <span className="hint" style={{ display: "block" }}>
+                          {formatDateDisplay(out.date)} · {out.description || "(no description)"}
+                        </span>
+                      </span>
+                      <span aria-hidden="true" className="transfer-arrow">→</span>
+                      <span>
+                        <strong>+{formatMoney(into.amountIn)}</strong> into {into.accountName}
+                        <span className="hint" style={{ display: "block" }}>
+                          {formatDateDisplay(into.date)} · {into.description || "(no description)"}
+                        </span>
+                      </span>
+                    </span>
+                    <span className="skipped-item-actions">
+                      <button
+                        className="btn btn-secondary btn-sm"
+                        onClick={() => onLinkTransfers && onLinkTransfers([pair])}
+                        aria-label={`Mark as transfer: ${formatMoney(out.amountOut)} from ${out.accountName} to ${into.accountName}, ${formatDateDisplay(out.date)}`}
+                      >
+                        Mark as transfer
+                      </button>
+                      <button
+                        className="btn btn-ghost btn-sm"
+                        onClick={() => onDismissTransfer && onDismissTransfer(pair)}
+                        aria-label={`Not a transfer: ${formatMoney(out.amountOut)} from ${out.accountName} to ${into.accountName}, ${formatDateDisplay(out.date)}`}
+                      >
+                        Not a transfer
+                      </button>
+                    </span>
+                  </li>
+                );
+              })}
+            </ul>
+          )}
+        </div>
+      )}
+
+      {skippedDuplicates.length > 0 && (
+        <div className="skipped-panel">
+          <button
+            type="button"
+            className="skipped-toggle"
+            aria-expanded={showSkipped}
+            aria-controls="skipped-list"
+            onClick={() => setShowSkipped(!showSkipped)}
+          >
+            {showSkipped ? "▾" : "▸"} Skipped duplicates ({skippedDuplicates.length})
+          </button>
+          <span className="hint"> Set aside during imports because they matched transactions already here.</span>
+          {showSkipped && (
+            <div id="skipped-list">
+              <div className="skipped-actions">
+                <button className="btn btn-secondary btn-sm" onClick={() => onRestoreSkipped && onRestoreSkipped()}>
+                  Restore all
+                </button>
+                {confirmDeleteAll ? (
+                  <>
+                    <span className="hint">Delete all {skippedDuplicates.length} for good?</span>
+                    <button
+                      className="btn btn-danger btn-sm"
+                      onClick={() => {
+                        setConfirmDeleteAll(false);
+                        if (onDeleteSkipped) onDeleteSkipped();
+                      }}
+                    >
+                      Yes, delete them
+                    </button>
+                    <button className="btn btn-ghost btn-sm" onClick={() => setConfirmDeleteAll(false)}>
+                      Cancel
+                    </button>
+                  </>
+                ) : (
+                  <button className="btn btn-ghost btn-sm" onClick={() => setConfirmDeleteAll(true)}>
+                    Delete all
+                  </button>
+                )}
+              </div>
+              <ul className="skipped-list">
+                {skippedDuplicates.map((t) => {
+                  const original = transactions.find((o) => o.id === t.skippedDuplicateOf);
+                  const amount = t.amountOut != null ? `−${formatMoney(t.amountOut)}` : `+${formatMoney(t.amountIn)}`;
+                  return (
+                    <li key={t.id} className="skipped-item">
+                      <span>
+                        <strong>{t.description || "(no description)"}</strong> · {formatDateDisplay(t.date)} · {amount} ·{" "}
+                        {t.accountName}
+                        <span className="hint" style={{ display: "block" }}>
+                          {original
+                            ? `Matched ${original.description} on ${formatDateDisplay(original.date)}${t.externalId && original.externalId ? " (same bank transaction ID)" : ""}.`
+                            : "The transaction it matched has since been removed."}
+                        </span>
+                      </span>
+                      <span className="skipped-item-actions">
+                        <button
+                          className="btn btn-secondary btn-sm"
+                          onClick={() => onRestoreSkipped && onRestoreSkipped([t.id])}
+                          aria-label={`Restore ${t.description}, ${formatDateDisplay(t.date)}`}
+                        >
+                          Restore
+                        </button>
+                        <button
+                          className="btn btn-ghost btn-sm"
+                          onClick={() => onDeleteSkipped && onDeleteSkipped([t.id])}
+                          aria-label={`Delete ${t.description}, ${formatDateDisplay(t.date)}, for good`}
+                        >
+                          Delete
+                        </button>
+                      </span>
+                    </li>
+                  );
+                })}
+              </ul>
+            </div>
+          )}
+        </div>
+      )}
 
       {(unconfirmedCount > 0 || (autoApplySuggestions && pendingSuggestionCount > 0)) && (
         <div className="suggest-banner" role="status">
@@ -514,7 +825,7 @@ export function TransactionsView({ transactions, accounts, categories, duplicate
             </tr>
           </thead>
           <tbody>
-            {filtered.map((t) => (
+            {filtered.slice(0, rowLimit).map((t) => (
               <TransactionRow
                 key={t.id}
                 t={t}
@@ -526,6 +837,9 @@ export function TransactionsView({ transactions, accounts, categories, duplicate
                 onUpdate={onUpdate}
                 onDelete={onDelete}
                 suggestedCategoryId={categorySuggestions.get(t.id) || null}
+                onUnlinkTransfer={onUnlinkTransfer}
+                onSetSplits={onSetSplits}
+                comments={comments}
               />
             ))}
             {filtered.length === 0 && (
@@ -538,6 +852,13 @@ export function TransactionsView({ transactions, accounts, categories, duplicate
           </tbody>
         </table>
       </div>
+      {filtered.length > rowLimit && (
+        <div className="actions-row" style={{ justifyContent: "center", marginTop: 12 }}>
+          <button type="button" className="btn btn-secondary" onClick={() => setRowLimit(rowLimit + pageSize)}>
+            Show {Math.min(pageSize, filtered.length - rowLimit)} more ({filtered.length - rowLimit} not shown yet)
+          </button>
+        </div>
+      )}
     </div>
   );
 }
@@ -547,13 +868,13 @@ export function TransactionsView({ transactions, accounts, categories, duplicate
 /* Post-upload categorization                                          */
 /* ------------------------------------------------------------------ */
 
-export function PostUploadCategorizeView({ transactions, batchId, accountName, categories, duplicateInfo, onUpdate, onDelete, onSkip, onConfirmSuggestions }) {
+export function PostUploadCategorizeView({ transactions, batchId, accountName, categories, duplicateInfo, onUpdate, onDelete, onSkip, onConfirmSuggestions, onSetSplits, comments = null }) {
   const [expandedId, setExpandedId] = useState(null);
   const batchTransactions = useMemo(
     () => transactions.filter((t) => t.uploadBatchId === batchId),
     [transactions, batchId]
   );
-  const uncategorizedCount = batchTransactions.filter((t) => !t.categoryId).length;
+  const uncategorizedCount = batchTransactions.filter(isUncategorized).length;
   const batchSuggested = batchTransactions.filter(isUnconfirmedSuggestion);
   const categorySuggestions = useMemo(
     () => buildCategorySuggestions(transactions, categories),
@@ -627,6 +948,8 @@ export function PostUploadCategorizeView({ transactions, batchId, accountName, c
                 onUpdate={onUpdate}
                 onDelete={onDelete}
                 suggestedCategoryId={categorySuggestions.get(t.id) || null}
+                onSetSplits={onSetSplits}
+                comments={comments}
               />
             ))}
           </tbody>

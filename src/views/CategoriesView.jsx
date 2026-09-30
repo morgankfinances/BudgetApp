@@ -186,7 +186,7 @@ export function CategoryCard({ category, categories, txCount, transactions, onRe
 }
 
 
-export function CategoriesView({ categories, transactions, onAdd, onRename, onDelete, onToggleExcluded, onToggleIsIncome, onMerge, autoApplySuggestions = true, onToggleAutoApply }) {
+export function CategoriesView({ categories, transactions, onAdd, onRename, onDelete, onToggleExcluded, onToggleIsIncome, onMerge }) {
   const [newName, setNewName] = useState("");
   const [addError, setAddError] = useState(null);
 
@@ -211,21 +211,6 @@ export function CategoriesView({ categories, transactions, onAdd, onRename, onDe
         <p>Set up the categories you'll use to organize spending. Assign them to transactions from the Transactions tab.</p>
       </div>
 
-      {onToggleAutoApply && (
-        <div className="panel">
-          <label className="checkbox-filter" style={{ alignItems: "flex-start", gap: 8 }}>
-            <input type="checkbox" checked={autoApplySuggestions} onChange={(e) => onToggleAutoApply(e.target.checked)} />
-            <span>
-              <strong>Fill in suggested categories automatically</strong>
-              <span className="hint" style={{ display: "block", marginTop: 2 }}>
-                When you import transactions, Coinrose fills in categories based on how you've sorted similar ones
-                before. They count toward budgets and reports right away, and show as Suggested until you confirm or
-                change them. This applies to everyone in your household.
-              </span>
-            </span>
-          </label>
-        </div>
-      )}
 
       <div className="panel">
         <form onSubmit={handleAdd} style={{ display: "flex", gap: 10, marginBottom: 16 }}>

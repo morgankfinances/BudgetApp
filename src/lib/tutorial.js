@@ -59,7 +59,7 @@ export const TUTORIAL_STEPS = [
   {
     view: "upload",
     title: "Start by uploading a statement",
-    body: "Download a CSV file of your transactions from your bank or credit card's website, then upload it here. Coinrose guesses which columns hold the date, description, and amounts, and you confirm. Each bank account or card becomes its own account in Coinrose.",
+    body: "Download your transactions from your bank or credit card's website (as CSV, Excel, or, best of all, OFX or QFX), then upload it here. Coinrose guesses which columns hold the date, description, and amounts, and you confirm. Each bank account or card becomes its own account in Coinrose.",
   },
   {
     view: "transactions",

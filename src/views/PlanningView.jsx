@@ -91,7 +91,12 @@ export function PlanningCategoryRow({ category, groupName, onSetBudget }) {
             <span className="budget-row-label" style={{ fontWeight: 400 }}>
               Track since:
             </span>
-            <input type="date" value={startDateDraft} onChange={(e) => setStartDateDraft(e.target.value)} />
+            <input
+              type="date"
+              aria-label={`Track ${category.name} since`}
+              value={startDateDraft}
+              onChange={(e) => setStartDateDraft(e.target.value)}
+            />
             <span className="muted-cell" style={{ fontSize: 11.5 }}>
               Backdate this to see how you've been doing over past periods, not just from today forward.
             </span>

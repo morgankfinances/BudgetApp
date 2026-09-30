@@ -646,6 +646,84 @@ export const STYLES = `
 }
 .upload-review-target { font-size: 15px; margin: 0 0 12px; }
 
+/* Upload: file formats, and duplicates found at review. */
+.upload-tip { margin-top: 14px; font-size: 13px; line-height: 1.5; color: var(--ink-muted); max-width: 720px; }
+.upload-tip strong { color: var(--ink); }
+.duplicate-review { border: 1px solid var(--border); border-radius: var(--radius); padding: 10px 12px; margin: 12px 0; font-size: 13.5px; }
+.duplicate-row { display: grid; grid-template-columns: auto 110px 1fr auto; gap: 10px; align-items: center; cursor: pointer; }
+
+/* Transactions: duplicates skipped during imports. */
+.skipped-panel { border: 1px solid var(--border); border-radius: var(--radius); background: var(--panel); padding: 8px 14px; margin-bottom: 14px; font-size: 13.5px; }
+.skipped-toggle { background: none; border: none; padding: 4px 0; font: inherit; font-weight: 600; color: var(--ink); cursor: pointer; }
+.skipped-actions { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin: 8px 0; }
+.skipped-list { list-style: none; margin: 0; padding: 0; }
+.skipped-item { display: flex; justify-content: space-between; align-items: center; gap: 12px; padding: 8px 0; border-top: 1px solid var(--border); }
+.skipped-item-actions { display: flex; gap: 6px; flex-shrink: 0; }
+
+/* Transfers between the household's own accounts. */
+.transfer-tag { font-size: 12px; font-weight: 600; color: var(--ink-muted); white-space: nowrap; }
+.transfer-pair { display: grid; grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr); gap: 12px; align-items: center; flex: 1; }
+.transfer-arrow { color: var(--ink-muted); font-size: 18px; }
+@media (max-width: 760px) {
+  .transfer-pair { grid-template-columns: minmax(0, 1fr); gap: 4px; }
+  .transfer-arrow { display: none; }
+  .skipped-item { flex-direction: column; align-items: flex-start; }
+}
+
+/* Split transactions. */
+.split-summary { display: grid; gap: 2px; font-size: 12.5px; max-width: 240px; }
+.split-row td { background: var(--subtle-bg); }
+/* Kept to a readable width, at the left of the (sometimes wide, scrolling) table. */
+.split-editor { padding: 10px 4px; display: grid; gap: 8px; font-size: 13.5px; max-width: 720px; }
+.split-editor-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap; }
+.split-quick { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.split-line { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.split-line select, .split-line input {
+  font: inherit; font-size: 13.5px; padding: 6px 8px; border: 1px solid var(--border);
+  border-radius: var(--radius); background: var(--panel); color: var(--ink);
+}
+.split-line select { min-width: 200px; }
+.split-line input { width: 100px; }
+.split-amount { display: inline-flex; align-items: center; gap: 4px; }
+.split-editor-foot { display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap; }
+.split-status { font-weight: 600; color: var(--ink-muted); }
+.split-status-ok { color: var(--income); }
+
+/* Only for screen readers (table captions, labels for icon columns). */
+.visually-hidden {
+  position: absolute !important; width: 1px; height: 1px; padding: 0; margin: -1px;
+  overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0;
+}
+
+/* Insights. */
+.insights-heading { font-size: 17px; margin: 26px 0 10px; }
+.insights-grid { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 12px; }
+.insight-card { background: var(--panel); border: 1px solid var(--border); border-left: 4px solid var(--accent-button); border-radius: var(--radius); padding: 12px 14px; }
+.insight-card h3 { font-size: 14.5px; margin: 0 0 4px; }
+.insight-card p { font-size: 13.5px; margin: 0; color: var(--ink-muted); line-height: 1.45; }
+.insight-good { border-left-color: var(--income); }
+.insight-watch { border-left-color: var(--warn-border); }
+.insights-table-wrap { padding: 0; overflow-x: auto; }
+.insights-table { width: 100%; border-collapse: collapse; font-size: 13.5px; }
+.insights-table th, .insights-table td { text-align: left; padding: 10px 12px; border-bottom: 1px solid var(--border); vertical-align: top; }
+.insights-table thead th { font-size: 11.5px; text-transform: uppercase; letter-spacing: .04em; color: var(--ink-muted); }
+.insights-table tbody th { font-weight: 600; }
+.insights-table tbody th .hint { font-weight: 400; }
+.insight-badge { display: inline-block; margin-left: 6px; font-size: 11px; font-weight: 600; padding: 1px 6px; border-radius: 10px; vertical-align: 1px; }
+.insight-badge-watch { background: var(--warn-bg); color: var(--warn-ink); border: 1px solid var(--warn-border); }
+.coming-up-list { list-style: none; margin: 0; padding: 0; }
+.coming-up-list li { display: flex; justify-content: space-between; gap: 10px; padding: 6px 0; border-top: 1px solid var(--border); font-size: 13.5px; }
+
+/* Comments on transactions. */
+.comment-btn { white-space: nowrap; }
+.comment-thread { padding: 10px 4px; display: grid; gap: 8px; max-width: 640px; font-size: 13.5px; }
+.comment-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }
+.comment { background: var(--panel); border: 1px solid var(--border); border-radius: var(--radius); padding: 8px 10px; }
+.comment-meta { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.comment-text { margin: 4px 0 0; white-space: pre-wrap; overflow-wrap: anywhere; }
+.comment-input { font: inherit; font-size: 13.5px; padding: 8px 10px; border: 1px solid var(--border); border-radius: var(--radius); background: var(--panel); color: var(--ink); resize: vertical; }
+.comment-input:focus { outline: 2px solid var(--accent); outline-offset: 1px; }
+
 /* Suggested categories: what was filled in automatically, with one-click
    confirm and apply. */
 .suggest-banner {

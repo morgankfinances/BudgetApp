@@ -17,7 +17,7 @@ import React, { Suspense, lazy, useEffect, useLayoutEffect, useRef, useState } f
 import { supabase } from "./supabaseClient.js";
 import { applySavedTheme, ThemedLogo, DecoRing, LoadingIndicator } from "./householdGate.jsx";
 import HomePage from "./components/HomePage.jsx";
-import { stopDemo } from "./ledgerStore.js";
+import { isDemo, stopDemo } from "./ledgerStore.js";
 
 // The demo's code (and the app's) loads only when someone opens it.
 const DemoMode = lazy(() => import("./components/DemoMode.jsx"));
@@ -572,7 +572,13 @@ export default function AuthGate({ children }) {
     );
   }
 
-  if (session) return children;
+  if (session) {
+    // Signed in: make sure the data layer is on the real database before the
+    // app appears and loads anything (not after, when it could briefly load
+    // the demo's sample data).
+    if (isDemo()) stopDemo();
+    return children;
+  }
 
   if (demo) {
     return (

@@ -1,6 +1,6 @@
 import { describe, it, expect, vi } from "vitest";
 import React from "react";
-import { render, screen, fireEvent, within, waitFor } from "@testing-library/react";
+import { render, screen, fireEvent, within, waitFor, cleanup } from "@testing-library/react";
 import * as F from "./fixtures.js";
 import { OverviewView } from "../views/OverviewView.jsx";
 import { BudgetView } from "../views/BudgetView.jsx";
@@ -440,21 +440,6 @@ describe("Upload: choosing the account", () => {
   });
 });
 
-describe("Categories: the suggestions switch", () => {
-  it("shows the household setting and passes changes along", () => {
-    const onToggleAutoApply = vi.fn();
-    render(<CategoriesViewForSwitch onToggleAutoApply={onToggleAutoApply} />);
-    const box = screen.getByLabelText(/Fill in suggested categories automatically/);
-    expect(box.checked).toBe(true);
-    fireEvent.click(box);
-    expect(onToggleAutoApply).toHaveBeenCalledWith(false);
-  });
-});
-import { CategoriesView } from "../views/CategoriesView.jsx";
-function CategoriesViewForSwitch(props) {
-  return <CategoriesView categories={F.categories} transactions={F.transactions} onAdd={vi.fn()} onRename={vi.fn()} onDelete={vi.fn()}
-    onToggleExcluded={vi.fn()} onToggleIsIncome={vi.fn()} onMerge={vi.fn()} autoApplySuggestions={true} {...props} />;
-}
 
 describe("Overview: periods", () => {
   const open = (transactions = F.transactions) =>
@@ -491,5 +476,272 @@ describe("Overview: periods", () => {
     vi.setSystemTime(new Date(2026, 8, 30, 22, 45));
     open();
     expect(screen.getByText("Sep 2026 (current)")).toBeTruthy();
+  });
+});
+
+describe("Upload: OFX files, transaction IDs, and duplicates", () => {
+  const choose = (container, text, name) =>
+    fireEvent.change(container.querySelector('input[type="file"]'), { target: { files: [new File([text], name)] } });
+  const ofx = "<OFX><BANKACCTFROM><ACCTID>99884321</BANKACCTFROM><STMTTRN><DTPOSTED>20260920<TRNAMT>-7.25<FITID>F1<NAME>Round Loaf</STMTTRN></OFX>";
+  it("explains why OFX/QFX or an ID column is the best choice", () => {
+    render(<UploadView accounts={F.accounts} prefill={null} onImport={vi.fn()} />);
+    expect(document.body.textContent).toMatch(/choose OFX or QFX if your bank offers it/);
+    expect(document.querySelector('input[type="file"]').getAttribute("accept")).toBe(".csv,.xlsx,.xls,.ofx,.qfx");
+  });
+  it("an OFX file fills in every column, including IDs, and shows the account's last four digits", async () => {
+    const { container } = render(<UploadView accounts={F.accounts} prefill={{ mode: "append", accountId: "acct-card" }} onImport={vi.fn()} />);
+    choose(container, ofx, "export.ofx");
+    await screen.findByText(/Read from an OFX\/QFX file/);
+    expect(document.body.textContent).toMatch(/account ending in 4321/);
+    expect(screen.getByLabelText("Transaction ID (optional)").value).toBe("Transaction ID");
+    expect(screen.getByLabelText("Money out (expenses) column").value).toBe("Amount");
+    expect(screen.queryByRole("alert")).toBeNull(); // no "different columns" warning for standard OFX columns
+  });
+  it("guesses a CSV's ID column, and remembers it with the account", async () => {
+    const onImport = vi.fn();
+    const { container } = render(<UploadView accounts={[]} prefill={null} onImport={onImport} />);
+    choose(container, "Date,Description,Debit,Transaction ID\n2026-09-20,Bakery,4.50,T-1\n", "new.csv");
+    expect((await screen.findByLabelText("Transaction ID (optional)")).value).toBe("Transaction ID");
+    fireEvent.click(screen.getByRole("button", { name: "Check 1 rows" }));
+    fireEvent.click(screen.getByRole("button", { name: /^Import 1 transaction into new$/ }));
+    expect(onImport.mock.calls[0][0].idCol).toBe("Transaction ID");
+    expect(onImport.mock.calls[0][1][0].externalId).toBe("T-1");
+  });
+  it("lists what's already in Coinrose, skips it, and lets you import any anyway", async () => {
+    const onImport = vi.fn();
+    const sortDuplicates = (incoming) => ({ imported: incoming.slice(1), skipped: [{ transaction: incoming[0], duplicateOf: "t1", by: "details" }], alreadySkipped: 1 });
+    const { container } = render(<UploadView accounts={F.accounts} prefill={null} onImport={onImport} sortDuplicates={sortDuplicates} />);
+    choose(container, "Date,Description,Money Out,Money In\n2026-09-02,Thrifty Sprout Market,180,\n2026-09-22,New Place,5,\n", "export.csv");
+    fireEvent.click(await screen.findByRole("button", { name: "Check 2 rows" }));
+    expect(document.body.textContent).toMatch(/1 already in Coinrose, so it will be skipped/);
+    expect(document.body.textContent).toMatch(/matched by account, date, amount, and description/);
+    expect(document.body.textContent).toMatch(/1 more was already skipped in an earlier import/);
+    expect(screen.getByRole("button", { name: /^Import 1 transaction into/ })).toBeTruthy();
+    const stat = (label) => [...document.querySelectorAll(".summary-stat")].find((el) => el.textContent.endsWith(label)).textContent;
+    expect(stat("Ready to import")).toBe("1Ready to import");
+    expect(stat("Already in Coinrose")).toBe("2Already in Coinrose"); // 1 found now + 1 skipped in an earlier import
+    fireEvent.click(screen.getByLabelText(/Import anyway: Thrifty Sprout Market/));
+    expect(stat("Ready to import")).toBe("2Ready to import");
+    fireEvent.click(screen.getByRole("button", { name: /^Import 2 transactions into/ }));
+    const plan = onImport.mock.calls[0][2];
+    expect(plan.imported.map((t) => t.description)).toEqual(["New Place", "Thrifty Sprout Market"]);
+    expect(plan.skipped).toEqual([]);
+  });
+  it("when duplicates aren't skipped, it says where to change that", async () => {
+    const { container } = render(<UploadView accounts={F.accounts} prefill={null} onImport={vi.fn()} duplicateHandling="flag" />);
+    choose(container, "Date,Description,Money Out,Money In\n2026-09-22,New Place,5,\n", "export.csv");
+    fireEvent.click(await screen.findByRole("button", { name: "Check 1 rows" }));
+    expect(document.body.textContent).toMatch(/Duplicates aren't skipped automatically \(see Settings → Importing\)/);
+  });
+});
+
+describe("Upload: how duplicates were matched is described accurately", () => {
+  const review = async (skippedBy) => {
+    const sortDuplicates = (incoming) => ({ imported: [], skipped: incoming.map((t, i) => ({ transaction: t, duplicateOf: "t1", by: skippedBy[i] })), alreadySkipped: 0 });
+    const { container } = render(<UploadView accounts={F.accounts} prefill={null} onImport={vi.fn()} sortDuplicates={sortDuplicates} />);
+    fireEvent.change(container.querySelector('input[type="file"]'), { target: { files: [new File(["Date,Description,Money Out,Money In\n2026-09-02,A,1,\n2026-09-03,B,2,\n"], "export.csv")] } });
+    fireEvent.click(await screen.findByRole("button", { name: "Check 2 rows" }));
+    return container.querySelector(".duplicate-review").textContent;
+  };
+  it("all by ID, all by details, or a mix", async () => {
+    expect(await review(["id", "id"])).toMatch(/\(matched by the bank's transaction IDs\)/);
+    cleanup();
+    expect(await review(["details", "details"])).toMatch(/\(matched by account, date, amount, and description\)/);
+    cleanup();
+    expect(await review(["id", "details"])).toMatch(/or by account, date, amount, and description where there's no ID to compare/);
+  });
+});
+
+import { SplitEditor } from "../components/SplitEditor.jsx";
+import { TransactionsView, ROW_LIMIT } from "../views/TransactionsView.jsx";
+describe("the split editor", () => {
+  const t = { id: "t2", description: "Noodle & Newt", amountOut: 180, amountIn: null, categoryId: "cat-dine" };
+  const open = (props = {}) => {
+    const onSave = vi.fn(), onCancel = vi.fn();
+    render(<SplitEditor t={t} categories={F.categories} onSave={onSave} onCancel={onCancel} {...props} />);
+    return { onSave, onCancel };
+  };
+  const status = () => document.querySelector(".split-status").textContent;
+  it("starts with the current category, shows what's unassigned, and saves only when it adds up", () => {
+    const { onSave } = open();
+    expect(screen.getByLabelText("Category for part 1").value).toBe("cat-dine");
+    fireEvent.change(screen.getByLabelText("Amount for part 1"), { target: { value: "120" } });
+    expect(status()).toBe("Assigned $120.00 of $180.00 · $60.00 unassigned");
+    const save = screen.getByRole("button", { name: "Save split" });
+    expect(save.disabled).toBe(true);
+    fireEvent.change(screen.getByLabelText("Category for part 2"), { target: { value: "cat-groc" } });
+    fireEvent.click(screen.getAllByRole("button", { name: "Put the rest here" })[1]);
+    expect(screen.getByLabelText("Amount for part 2").value).toBe("60.00");
+    expect(status()).toBe("Fully assigned: $180.00");
+    fireEvent.click(save);
+    expect(onSave).toHaveBeenCalledWith([{ categoryId: "cat-dine", amount: 120 }, { categoryId: "cat-groc", amount: 60 }]);
+  });
+  it("quick splits divide evenly, and more than the total is called out", () => {
+    open();
+    fireEvent.click(screen.getByRole("button", { name: "⅓ each" }));
+    expect([1, 2, 3].map((i) => screen.getByLabelText(`Amount for part ${i}`).value)).toEqual(["60.00", "60.00", "60.00"]);
+    fireEvent.click(screen.getByRole("button", { name: "Remove part 3" }));
+    expect(status()).toMatch(/\$60\.00 unassigned/);
+    fireEvent.change(screen.getByLabelText("Amount for part 1"), { target: { value: "150" } });
+    expect(status()).toBe("Assigned $210.00: $30.00 more than the transaction");
+    fireEvent.click(screen.getByRole("button", { name: "¼ each" }));
+    expect(screen.getByLabelText("Amount for part 4").value).toBe("45.00");
+    fireEvent.click(screen.getByRole("button", { name: "½ each" }));
+    expect(screen.queryByLabelText("Amount for part 3")).toBeNull();
+  });
+  it("by percentage: amounts follow the percentages, and 'the rest' fills to 100%", () => {
+    const { onSave } = open();
+    fireEvent.click(screen.getByLabelText("By percentage"));
+    fireEvent.change(screen.getByLabelText("Percent for part 1"), { target: { value: "25" } });
+    fireEvent.change(screen.getByLabelText("Category for part 2"), { target: { value: "cat-groc" } });
+    fireEvent.click(screen.getAllByRole("button", { name: "Put the rest here" })[1]);
+    expect(screen.getByLabelText("Percent for part 2").value).toBe("75");
+    expect(status()).toBe("Fully assigned: $180.00");
+    fireEvent.click(screen.getByRole("button", { name: "Save split" }));
+    expect(onSave).toHaveBeenCalledWith([{ categoryId: "cat-dine", amount: 45 }, { categoryId: "cat-groc", amount: 135 }]);
+    fireEvent.click(screen.getByLabelText("By percentage")); // back to amounts, keeping them
+    expect(screen.getByLabelText("Amount for part 2").value).toBe("135.00");
+  });
+  it("an existing split can be edited or removed, and Cancel closes without saving", () => {
+    const { onSave, onCancel } = open({ t: { ...t, categoryId: null, splits: [{ categoryId: "cat-dine", amount: 100 }, { categoryId: "cat-groc", amount: 80 }] } });
+    expect(screen.getByLabelText("Amount for part 2").value).toBe("80.00");
+    fireEvent.click(screen.getByRole("button", { name: "+ Add a line" }));
+    expect(screen.getByLabelText("Category for part 3").value).toBe("");
+    fireEvent.click(screen.getByRole("button", { name: "Remove split" }));
+    expect(onSave).toHaveBeenCalledWith(null);
+    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+    expect(onCancel).toHaveBeenCalled();
+  });
+});
+
+describe("Transactions: splits, searching all time, and the row limit", () => {
+  const view = (transactions, extra = {}) =>
+    render(<TransactionsView transactions={transactions} accounts={F.accounts} categories={F.categories} duplicateInfo={{ dupIds: new Set(), groupByKey: {}, keyByTxId: {} }}
+      onUpdate={vi.fn()} onDelete={vi.fn()} onGoUpload={vi.fn()} {...extra} />);
+  const rows = () => [...document.querySelectorAll("tr.tx-row-full")];
+  it("Split opens the editor; a split shows its pieces, counts as categorized, and matches its categories' filters", () => {
+    const onSetSplits = vi.fn();
+    const list = F.transactions.map((t) => (t.id === "t7" ? { ...t, splits: [{ categoryId: "cat-groc", amount: 20 }, { categoryId: "cat-dine", amount: 15.5 }] } : t));
+    view(list, { onSetSplits });
+    const splitRow = rows().find((r) => r.textContent.includes("Split: Groceries $20.00, Dining Out $15.50"));
+    expect(splitRow).toBeTruthy();
+    expect(screen.getByLabelText(/Uncategorized only \(1\)/)).toBeTruthy(); // t8 only
+    fireEvent.change(screen.getByDisplayValue("All categories"), { target: { value: "cat-dine" } });
+    expect(rows().map((r) => r.textContent.match(/Noodle|Thrifty/)[0]).sort()).toEqual(["Noodle", "Thrifty"]);
+    fireEvent.click(within(splitRow).getByRole("button", { name: "Edit split" }));
+    expect(screen.getByRole("group", { name: /Split Thrifty Sprout Market among categories/ })).toBeTruthy();
+    const plain = rows().find((r) => r.textContent.includes("Noodle"));
+    fireEvent.click(within(plain).getByRole("button", { name: "Split Noodle & Newt among categories" }));
+    expect(screen.getAllByRole("button", { name: "Save split" })).toHaveLength(2);
+  });
+  it("searching looks across all months, and says so", () => {
+    view(F.transactions);
+    fireEvent.change(screen.getByPlaceholderText("Search transactions…"), { target: { value: "Thrifty" } });
+    expect(rows()).toHaveLength(4); // September's 2 and August's 2
+    expect(document.body.textContent).toMatch(/Showing matches from all time/);
+  });
+  it("shows a page of rows at a time (200 in the app), with 'Show more'", () => {
+    expect(ROW_LIMIT).toBe(200);
+    // A small page keeps this test quick; the logic is the same at 200.
+    const many = Array.from({ length: 23 }, (_, i) => ({ ...F.transactions[0], id: `m${i}`, date: `2026-09-${String((i % 28) + 1).padStart(2, "0")}` }));
+    view(many, { pageSize: 10 });
+    expect(rows()).toHaveLength(10);
+    fireEvent.click(screen.getByRole("button", { name: "Show 10 more (13 not shown yet)" }));
+    expect(rows()).toHaveLength(20);
+    fireEvent.click(screen.getByRole("button", { name: "Show 3 more (3 not shown yet)" }));
+    expect(rows()).toHaveLength(23);
+    expect(screen.queryByRole("button", { name: /Show \d+ more/ })).toBeNull();
+  });
+});
+
+import { InsightsView } from "../views/InsightsView.jsx";
+describe("Insights page", () => {
+  const rec = (over) => ({ key: "out|music", name: "Whisperwire", direction: "out", cadence: "monthly", cadenceLabel: "Every month", fixed: true,
+    typicalAmount: 12.99, monthlyCost: 12.99, lastDate: "2026-09-03", nextDate: "2026-10-03", count: 4, categoryId: "cat-dine", accountName: "Griffon Card", priceChange: null, ...over });
+  it("shows insights, recurring bills with totals, and income, and says it changes nothing", () => {
+    const onHide = vi.fn();
+    render(<InsightsView today="2026-09-25" categories={F.categories} onHideRecurring={onHide} onShowRecurring={vi.fn()}
+      insights={[{ id: "pace", title: "This month so far", body: "You've spent $10.00.", tone: "watch" }]}
+      recurring={[rec({ priceChange: { from: 10.99, to: 12.99 } }), rec({ key: "out|water", name: "Riverbend Water", fixed: false, typicalAmount: 46.22, monthlyCost: 46.22, nextDate: "2026-09-12" }),
+        rec({ key: "in|pay", name: "Thornwick Payroll", direction: "in", cadenceLabel: "Every 2 weeks", typicalAmount: 2184.62, monthlyCost: 4749.99 })]} />);
+    expect(document.body.textContent).toMatch(/Nothing here changes your data/);
+    expect(screen.getByRole("heading", { name: "This month so far" }).closest("li").className).toMatch(/insight-watch/);
+    expect(document.body.textContent).toMatch(/2 found, about \$59\.21 a month in total/);
+    const bills = screen.getByRole("table", { name: "Recurring bills and subscriptions" });
+    expect(within(bills).getByText("Price went up")).toBeTruthy();
+    expect(within(bills).getByText("Was expected Sep 12, 2026")).toBeTruthy(); // a date already past
+    expect(within(bills).getByText(/about/)).toBeTruthy(); // varying amounts say "about"
+    expect(screen.getByRole("table", { name: "Recurring income" }).textContent).toMatch(/Thornwick Payroll/);
+    fireEvent.click(screen.getByRole("button", { name: "Not recurring: hide Riverbend Water from these lists" }));
+    expect(onHide).toHaveBeenCalledWith("out|water");
+  });
+  it("explains what's needed when there isn't enough yet, and lists hidden items to show again", () => {
+    const onShow = vi.fn();
+    render(<InsightsView today="2026-09-25" categories={F.categories} insights={[]} recurring={[rec()]} hiddenRecurring={["out|music"]} onHideRecurring={vi.fn()} onShowRecurring={onShow} />);
+    expect(document.body.textContent).toMatch(/Insights appear once there's about a month of transactions/);
+    expect(document.body.textContent).toMatch(/None found yet\. Coinrose needs at least three charges/);
+    fireEvent.click(screen.getByRole("button", { name: /Marked not recurring \(1\)/ }));
+    fireEvent.click(screen.getByRole("button", { name: "Show Whisperwire again" }));
+    expect(onShow).toHaveBeenCalledWith("out|music");
+  });
+});
+
+import { CommentThread, authorLabel } from "../components/CommentThread.jsx";
+describe("comments on a transaction", () => {
+  const members = [{ user_id: "me", email: "morgan@example.com" }, { user_id: "sam", email: "sam@example.com" }];
+  const t = { id: "t1", description: "Hollow Oak Hardware", comments: [
+    { id: "c1", text: "Paint for the porch.", authorId: "sam", at: "2026-09-14T19:12:00.000Z" },
+    { id: "c2", text: "Keep the receipt?", authorId: "me", at: "2026-09-14T20:03:00.000Z" },
+    { id: "c3", text: "Old note", authorId: "gone", at: "2026-09-10T08:00:00.000Z" },
+  ] };
+  it("shows who wrote each one: you, a member by email, or a former member", () => {
+    expect(authorLabel("me", "me", members)).toBe("You");
+    expect(authorLabel("sam", "me", members)).toBe("sam@example.com");
+    expect(authorLabel("gone", "me", members)).toBe("Former member");
+    expect(authorLabel(undefined, "me", members)).toBe("Former member");
+    render(<CommentThread t={t} currentUserId="me" members={members} onAdd={vi.fn()} onDelete={vi.fn()} onClose={vi.fn()} />);
+    const text = document.querySelector(".comment-list").textContent;
+    expect(text).toMatch(/sam@example\.com.*Paint for the porch\..*You.*Keep the receipt\?.*Former member.*Old note/);
+  });
+  it("only your own comments can be deleted", () => {
+    const onDelete = vi.fn();
+    render(<CommentThread t={t} currentUserId="me" members={members} onAdd={vi.fn()} onDelete={onDelete} onClose={vi.fn()} />);
+    const deletes = screen.getAllByRole("button", { name: /^Delete your comment/ });
+    expect(deletes).toHaveLength(1);
+    fireEvent.click(deletes[0]);
+    expect(onDelete).toHaveBeenCalledWith("t1", "c2");
+  });
+  it("posts with the button or Ctrl+Enter, trimmed, and never posts an empty comment", () => {
+    const onAdd = vi.fn(), onClose = vi.fn();
+    render(<CommentThread t={{ id: "t9", description: "Diner" }} currentUserId="me" members={members} onAdd={onAdd} onDelete={vi.fn()} onClose={onClose} />);
+    expect(document.body.textContent).toMatch(/No comments yet\. Comments are shared with everyone in your household\./);
+    const box = screen.getByLabelText("Add a comment");
+    expect(screen.getByRole("button", { name: "Post comment" }).disabled).toBe(true);
+    fireEvent.change(box, { target: { value: "   " } });
+    expect(screen.getByRole("button", { name: "Post comment" }).disabled).toBe(true);
+    fireEvent.change(box, { target: { value: "  Is this the vet bill?  " } });
+    fireEvent.click(screen.getByRole("button", { name: "Post comment" }));
+    expect(onAdd).toHaveBeenCalledWith("t9", "Is this the vet bill?");
+    expect(box.value).toBe("");
+    fireEvent.change(box, { target: { value: "Second" } });
+    fireEvent.keyDown(box, { key: "Enter", ctrlKey: true });
+    expect(onAdd).toHaveBeenLastCalledWith("t9", "Second");
+    fireEvent.change(box, { target: { value: "x".repeat(950) } });
+    expect(document.body.textContent).toMatch(/50 characters left/);
+    fireEvent.click(screen.getByRole("button", { name: "Close" }));
+    expect(onClose).toHaveBeenCalled();
+  });
+});
+
+describe("Transactions: comments", () => {
+  it("each row has a comment button with the count, and search finds comment text", () => {
+    const list = F.transactions.map((t) => (t.id === "t2" ? { ...t, comments: [{ id: "c", text: "Birthday dinner", authorId: "me", at: "2026-09-05T20:00:00Z" }] } : t));
+    render(<TransactionsView transactions={list} accounts={F.accounts} categories={F.categories} duplicateInfo={{ dupIds: new Set(), groupByKey: {}, keyByTxId: {} }}
+      onUpdate={vi.fn()} onDelete={vi.fn()} onGoUpload={vi.fn()} comments={{ currentUserId: "me", members: [], onAdd: vi.fn(), onDelete: vi.fn() }} />);
+    fireEvent.click(screen.getByRole("button", { name: "1 comment on Noodle & Newt" }));
+    expect(screen.getByRole("group", { name: "Comments on Noodle & Newt" }).textContent).toMatch(/You.*Birthday dinner/);
+    expect(screen.getByRole("button", { name: "Comment on Mystery Merchant" })).toBeTruthy();
+    fireEvent.change(screen.getByPlaceholderText("Search transactions…"), { target: { value: "birthday" } });
+    expect([...document.querySelectorAll("tr.tx-row-full")].map((r) => r.textContent.includes("Noodle"))).toEqual([true]);
   });
 });

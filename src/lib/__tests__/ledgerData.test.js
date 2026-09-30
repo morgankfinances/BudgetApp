@@ -23,7 +23,7 @@ describe("normalizeSnapshot", () => {
   it("fills every field with a safe default", () => {
     expect(normalizeSnapshot({})).toEqual({ accounts: [], transactions: [], categories: [], budgetGroups: [],
       plannedIncome: null, incomeWarningDismissed: false, hiddenBudgetMonths: [], excludeUnassignedFromBudget: false,
-      autoApplySuggestions: true });
+      autoApplySuggestions: true, duplicateHandling: "skip", hiddenRecurring: [] });
     expect(normalizeSnapshot({ plannedIncome: 0, incomeWarningDismissed: 1 })).toMatchObject({ plannedIncome: 0, incomeWarningDismissed: true });
   });
 });

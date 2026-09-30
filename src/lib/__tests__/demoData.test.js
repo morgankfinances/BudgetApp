@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { buildDemoLedger } from "../demoData.js";
 import { normalizeLoadedLedger } from "../ledgerData.js";
+import { isUncategorized } from "../splits.js";
 
 describe("the demo's sample data", () => {
   it("always ends on the day it's opened, covering three full months before this one", () => {
@@ -44,11 +45,49 @@ describe("the demo's sample data", () => {
     const recent = d.transactions.filter((t) => t.date >= "2026-09-24" && !["demo-pay", "demo-xfer"].includes(t.categoryId));
     expect(recent.length).toBeGreaterThan(0);
     expect(recent.every((t) => t.categoryId === null)).toBe(true);
-    expect(d.transactions.filter((t) => t.date < "2026-09-24").every((t) => t.categoryId)).toBe(true);
+    expect(d.transactions.filter((t) => t.date < "2026-09-24").every((t) => !isUncategorized(t))).toBe(true); // categorized or split
   });
   it("survives the same loading step real data goes through", () => {
     const d = normalizeLoadedLedger(buildDemoLedger("2026-09-28"));
     expect(d.transactions.length).toBeGreaterThan(100);
     expect(d.autoApplySuggestions).toBe(true);
+  });
+});
+
+import { findTransferPairs } from "../transfers.js";
+describe("the demo's transfers", () => {
+  it("earlier transfers are paired both ways, and the latest card payment waits as a suggestion", () => {
+    for (const today of ["2026-09-28", "2026-10-03", "2027-02-27"]) {
+      const d = buildDemoLedger(today);
+      const byId = new Map(d.transactions.map((t) => [t.id, t]));
+      const linked = d.transactions.filter((t) => t.transferWith);
+      expect(linked.length).toBeGreaterThan(4);
+      expect(linked.every((t) => byId.get(t.transferWith).transferWith === t.id && t.categoryId === "demo-xfer")).toBe(true);
+      const pairs = findTransferPairs(d.transactions, d.categories);
+      expect(pairs).toHaveLength(1);
+      expect(byId.get(pairs[0].outId).description).toBe("Griffon Reserve Card Payment");
+    }
+  });
+});
+
+import { splitsFitAmount } from "../splits.js";
+describe("the demo's split transactions", () => {
+  it("include a monthly superstore run, split between real categories, adding up exactly", () => {
+    const d = buildDemoLedger("2026-09-28");
+    const categoryIds = new Set(d.categories.map((c) => c.id));
+    const split = d.transactions.filter((t) => t.splits);
+    expect(split.map((t) => t.date)).toEqual(["2026-06-16", "2026-07-16", "2026-08-16", "2026-09-16"]);
+    expect(split.every((t) => splitsFitAmount(t) && t.categoryId === null && t.splits.every((s) => categoryIds.has(s.categoryId)))).toBe(true);
+  });
+});
+
+import { DEMO_MEMBERS } from "../demoData.js";
+describe("the demo's comments", () => {
+  it("include a short conversation between the sample members", () => {
+    const d = buildDemoLedger("2026-09-28");
+    const withComments = d.transactions.filter((t) => t.comments);
+    expect(withComments).toHaveLength(1);
+    const ids = new Set(DEMO_MEMBERS.map((m) => m.user_id));
+    expect(withComments[0].comments.every((c) => ids.has(c.authorId) && c.text)).toBe(true);
   });
 });

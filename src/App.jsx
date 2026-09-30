@@ -3,11 +3,11 @@ import { TutorialDialog } from "./components/TutorialDialog.jsx";
 import { VIEW_TITLES } from "./constants.js";
 import { DecoRing, LoadingIndicator, ThemedLogo } from "./householdGate.jsx";
 import { computeLedgerChanges, fetchLedgerVersion, hasChanges, saveLedgerChanges } from "./ledgerStore.js";
-import { applyCategorySuggestions, computeDuplicates, isUnconfirmedSuggestion, withoutSuggestedFlag } from "./lib/analysis.js";
+import { applyCategorySuggestions, computeDuplicates, isSkippedDuplicate, isUnconfirmedSuggestion, sortImportDuplicates, withoutSuggestedFlag } from "./lib/analysis.js";
 import { mapRow } from "./lib/importing.js";
 import { loadData } from "./lib/ledgerData.js";
 import { TUTORIAL_EVENT, TUTORIAL_STEPS, markTutorialSeen, tutorialAlreadySeen } from "./lib/tutorial.js";
-import { formatMoney, uid } from "./lib/utils.js";
+import { formatMoney, todayISO, uid } from "./lib/utils.js";
 import { STYLES } from "./styles.js";
 import { AccountsView } from "./views/AccountsView.jsx";
 import { BackupView } from "./views/BackupView.jsx";
@@ -20,10 +20,16 @@ import { ReportsView } from "./views/ReportsView.jsx";
 import { PostUploadCategorizeView, TransactionsView } from "./views/TransactionsView.jsx";
 import { UploadView } from "./views/UploadView.jsx";
 import { reloadPage } from "./lib/browser.js";
+import { publishImportPrefs } from "./lib/importPrefs.js";
+import { buildInsights, findRecurring } from "./lib/recurring.js";
+import { addDaysISO } from "./lib/periods.js";
+import { InsightsView } from "./views/InsightsView.jsx";
+import { expandSplits, hasSplits, remapSplitCategory, splitsFitAmount } from "./lib/splits.js";
+import { dismissTransferPair, findTransferPairs, linkTransfers, removeBrokenTransferLinks, unlinkTransfer } from "./lib/transfers.js";
 
 const SIDEBAR_KEY = "coinrose-sidebar-collapsed-v1";
 
-function App({ householdName } = {}) {
+function App({ householdName, currentUserId = null, householdMembers = [] } = {}) {
   const [loaded, setLoaded] = useState(false);
   const [accounts, setAccounts] = useState([]);
   const [transactions, setTransactions] = useState([]);
@@ -38,6 +44,13 @@ function App({ householdName } = {}) {
   // save call having to pass it along.
   const [autoApplySuggestions, setAutoApplySuggestions] = useState(true);
   const autoApplyRef = useRef(true);
+  // Household setting: what to do with transactions already in the ledger
+  // when importing: "skip" them (the default), just "flag" them, or "off".
+  const [duplicateHandling, setDuplicateHandling] = useState("skip");
+  const duplicateRef = useRef("skip");
+  // Household setting: recurring items someone marked "not recurring".
+  const [hiddenRecurring, setHiddenRecurring] = useState([]);
+  const hiddenRecurringRef = useRef([]);
   const [view, setView] = useState("overview");
   const [saveError, setSaveError] = useState(null);
   const [toast, setToast] = useState(null);
@@ -174,6 +187,12 @@ function App({ householdName } = {}) {
     const autoApply = snap.autoApplySuggestions !== false;
     autoApplyRef.current = autoApply;
     setAutoApplySuggestions(autoApply);
+    const duplicates = ["skip", "flag", "off"].includes(snap.duplicateHandling) ? snap.duplicateHandling : "skip";
+    duplicateRef.current = duplicates;
+    setDuplicateHandling(duplicates);
+    const hiddenItems = Array.isArray(snap.hiddenRecurring) ? snap.hiddenRecurring : [];
+    hiddenRecurringRef.current = hiddenItems;
+    setHiddenRecurring(hiddenItems);
   }
 
   const handleSyncNow = useCallback(async () => {
@@ -215,6 +234,8 @@ function App({ householdName } = {}) {
         hiddenBudgetMonths: nextHiddenBudgetMonths,
         excludeUnassignedFromBudget: nextExcludeUnassignedFromBudget,
         autoApplySuggestions: autoApplyRef.current,
+        duplicateHandling: duplicateRef.current,
+        hiddenRecurring: hiddenRecurringRef.current,
       };
 
       // Show the edit immediately.
@@ -252,7 +273,45 @@ function App({ householdName } = {}) {
     []
   );
 
-  const duplicateInfo = useMemo(() => computeDuplicates(transactions), [transactions]);
+  // Skipped duplicates stay in the ledger (so they can be restored) but
+  // every screen sees only the real transactions.
+  const visibleTransactions = useMemo(() => transactions.filter((t) => !isSkippedDuplicate(t)), [transactions]);
+  const skippedTransactions = useMemo(() => transactions.filter(isSkippedDuplicate), [transactions]);
+  // Budgets, reports, and totals see each split transaction as its pieces
+  // (one per category), so none of those calculations need to know about
+  // splits. The Transactions and Accounts pages show the real transactions.
+  const countedTransactions = useMemo(() => expandSplits(visibleTransactions), [visibleTransactions]);
+  const duplicateInfo = useMemo(
+    () =>
+      duplicateHandling === "off"
+        ? { dupIds: new Set(), groupByKey: {}, keyByTxId: {} }
+        : computeDuplicates(visibleTransactions),
+    [visibleTransactions, duplicateHandling]
+  );
+  const transferPairs = useMemo(() => findTransferPairs(visibleTransactions, categories), [visibleTransactions, categories]);
+
+  // Patterns for the Insights page and the Overview's "Coming up".
+  const today = todayISO();
+  const recurring = useMemo(() => findRecurring(visibleTransactions, categories, today), [visibleTransactions, categories, today]);
+  const shownRecurring = useMemo(() => recurring.filter((r) => !hiddenRecurring.includes(r.key)), [recurring, hiddenRecurring]);
+  const insights = useMemo(
+    () =>
+      buildInsights(countedTransactions, categories, shownRecurring, today, formatMoney, new Set(transferPairs.flatMap((p) => [p.outId, p.inId]))),
+    [countedTransactions, categories, shownRecurring, today, transferPairs]
+  );
+  const upcomingBills = useMemo(
+    () =>
+      shownRecurring
+        .filter((r) => r.direction === "out" && r.nextDate >= today && r.nextDate <= addDaysISO(today, 14))
+        .sort((a, b) => a.nextDate.localeCompare(b.nextDate)),
+    [shownRecurring, today]
+  );
+
+  // Used by the upload screen, before importing, to show what would be skipped.
+  const sortDuplicatesForImport = useCallback(
+    (incoming) => (duplicateRef.current === "skip" ? sortImportDuplicates(transactions, incoming) : null),
+    [transactions]
+  );
 
   const goToUpload = useCallback((accountId) => {
     setUploadPrefill(accountId ? { mode: "append", accountId } : null);
@@ -261,7 +320,7 @@ function App({ householdName } = {}) {
   }, []);
 
   const handleImport = useCallback(
-    (accountMeta, valid) => {
+    (accountMeta, valid, plan = null) => {
       let nextAccounts;
       if (accountMeta.isNew) {
         nextAccounts = [
@@ -274,6 +333,7 @@ function App({ householdName } = {}) {
             outCol: accountMeta.outCol,
             inCol: accountMeta.inCol,
             invertSign: accountMeta.invertSign,
+            idCol: accountMeta.idCol || "",
             createdAt: new Date().toISOString(),
           },
         ];
@@ -287,11 +347,17 @@ function App({ householdName } = {}) {
                 outCol: accountMeta.outCol,
                 inCol: accountMeta.inCol,
                 invertSign: accountMeta.invertSign,
+                idCol: accountMeta.idCol || "",
               }
             : a
         );
       }
-      let nextTransactions = [...transactions, ...valid];
+      const skippedRecords = (plan ? plan.skipped : []).map(({ transaction, duplicateOf }) => ({
+        ...transaction,
+        skippedDuplicateOf: duplicateOf,
+      }));
+      if (plan) valid = plan.imported;
+      let nextTransactions = [...transactions, ...valid, ...skippedRecords];
       let suggested = 0;
       if (autoApplyRef.current) {
         const result = applyCategorySuggestions(nextTransactions, categories, new Set(valid.map((t) => t.id)));
@@ -306,9 +372,12 @@ function App({ householdName } = {}) {
       } else {
         setView("transactions");
       }
+      const alreadyThere = skippedRecords.length + (plan ? plan.alreadySkipped : 0);
       setToast(
         `Imported ${valid.length} transaction${valid.length === 1 ? "" : "s"} into ${accountMeta.name}` +
-          (suggested ? `; ${suggested} categorized from your past choices (marked Suggested).` : ".")
+          (suggested ? `; ${suggested} categorized from your past choices (marked Suggested)` : "") +
+          (alreadyThere ? `; skipped ${alreadyThere} already in Coinrose` : "") +
+          "."
       );
     },
     [accounts, transactions, categories, budgetGroups, plannedIncome, incomeWarningDismissed, hiddenBudgetMonths, excludeUnassignedFromBudget, persist]
@@ -400,12 +469,19 @@ function App({ householdName } = {}) {
 
   const handleUpdateTransaction = useCallback(
     (id, updates) => {
-      const nextTransactions = transactions.map((t) => {
+      let nextTransactions = transactions.map((t) => {
         if (t.id !== id) return t;
-        const updated = { ...t, ...updates };
+        let updated = { ...t, ...updates };
+        // Choosing a single category replaces a split; so does changing the
+        // amount so the split no longer adds up.
+        if (hasSplits(updated) && ("categoryId" in updates || !splitsFitAmount(updated))) {
+          const { splits, ...rest } = updated; // eslint-disable-line no-unused-vars
+          updated = rest;
+        }
         // Picking or confirming a category makes it a person's choice.
         return "categoryId" in updates ? withoutSuggestedFlag(updated) : updated;
       });
+      nextTransactions = removeBrokenTransferLinks(nextTransactions);
       persist(accounts, nextTransactions, categories, budgetGroups, plannedIncome, incomeWarningDismissed, hiddenBudgetMonths, excludeUnassignedFromBudget);
     },
     [accounts, transactions, categories, budgetGroups, plannedIncome, incomeWarningDismissed, hiddenBudgetMonths, excludeUnassignedFromBudget, persist]
@@ -431,6 +507,48 @@ function App({ householdName } = {}) {
     setToast(`Filled in ${applied} suggested categor${applied === 1 ? "y" : "ies"}. They're marked Suggested until confirmed.`);
   }, [accounts, transactions, categories, budgetGroups, plannedIncome, incomeWarningDismissed, hiddenBudgetMonths, excludeUnassignedFromBudget, persist]);
 
+  // Skipped duplicates: bring back (they become real transactions), or
+  // delete for good.
+  const handleRestoreSkipped = useCallback(
+    (ids) => {
+      const only = ids ? new Set(ids) : null;
+      const nextTransactions = transactions.map((t) => {
+        if (!isSkippedDuplicate(t) || (only && !only.has(t.id))) return t;
+        const { skippedDuplicateOf, ...rest } = t; // eslint-disable-line no-unused-vars
+        return { ...rest, notDuplicate: true }; // restored on purpose: don't flag it either
+      });
+      persist(accounts, nextTransactions, categories, budgetGroups, plannedIncome, incomeWarningDismissed, hiddenBudgetMonths, excludeUnassignedFromBudget);
+    },
+    [accounts, transactions, categories, budgetGroups, plannedIncome, incomeWarningDismissed, hiddenBudgetMonths, excludeUnassignedFromBudget, persist]
+  );
+  const handleDeleteSkipped = useCallback(
+    (ids) => {
+      const only = ids ? new Set(ids) : null;
+      const nextTransactions = transactions.filter((t) => !isSkippedDuplicate(t) || (only && !only.has(t.id)));
+      persist(accounts, nextTransactions, categories, budgetGroups, plannedIncome, incomeWarningDismissed, hiddenBudgetMonths, excludeUnassignedFromBudget);
+    },
+    [accounts, transactions, categories, budgetGroups, plannedIncome, incomeWarningDismissed, hiddenBudgetMonths, excludeUnassignedFromBudget, persist]
+  );
+  const handleSetHiddenRecurring = useCallback(
+    (key, hide) => {
+      const current = hiddenRecurringRef.current;
+      const next = hide ? [...new Set([...current, key])] : current.filter((k) => k !== key);
+      hiddenRecurringRef.current = next;
+      setHiddenRecurring(next);
+      persist(accounts, transactions, categories, budgetGroups, plannedIncome, incomeWarningDismissed, hiddenBudgetMonths, excludeUnassignedFromBudget);
+    },
+    [accounts, transactions, categories, budgetGroups, plannedIncome, incomeWarningDismissed, hiddenBudgetMonths, excludeUnassignedFromBudget, persist]
+  );
+
+  const handleSetDuplicateHandling = useCallback(
+    (mode) => {
+      duplicateRef.current = mode;
+      setDuplicateHandling(mode);
+      persist(accounts, transactions, categories, budgetGroups, plannedIncome, incomeWarningDismissed, hiddenBudgetMonths, excludeUnassignedFromBudget);
+    },
+    [accounts, transactions, categories, budgetGroups, plannedIncome, incomeWarningDismissed, hiddenBudgetMonths, excludeUnassignedFromBudget, persist]
+  );
+
   const handleToggleAutoApply = useCallback(
     (on) => {
       autoApplyRef.current = on;
@@ -440,10 +558,90 @@ function App({ householdName } = {}) {
     [accounts, transactions, categories, budgetGroups, plannedIncome, incomeWarningDismissed, hiddenBudgetMonths, excludeUnassignedFromBudget, persist]
   );
 
+  // Let the Settings panel show and change the import settings.
+  useEffect(() => {
+    publishImportPrefs({
+      duplicateHandling,
+      autoApplySuggestions,
+      skippedCount: skippedTransactions.length,
+      onSetDuplicateHandling: handleSetDuplicateHandling,
+      onToggleAutoApply: handleToggleAutoApply,
+    });
+  }, [duplicateHandling, autoApplySuggestions, skippedTransactions.length, handleSetDuplicateHandling, handleToggleAutoApply]);
+  useEffect(() => () => publishImportPrefs(null), []);
+
   const handleDeleteTransaction = useCallback(
     (id) => {
-      const nextTransactions = transactions.filter((t) => t.id !== id);
+      const nextTransactions = removeBrokenTransferLinks(transactions.filter((t) => t.id !== id));
       persist(accounts, nextTransactions, categories, budgetGroups, plannedIncome, incomeWarningDismissed, hiddenBudgetMonths, excludeUnassignedFromBudget);
+    },
+    [accounts, transactions, categories, budgetGroups, plannedIncome, incomeWarningDismissed, hiddenBudgetMonths, excludeUnassignedFromBudget, persist]
+  );
+
+  // Comments on a transaction, shared with the household. Authors are stored
+  // by account ID (shown by name from the member list), never by email.
+  const handleAddComment = useCallback(
+    (id, text) => {
+      const comment = { id: uid(), text, authorId: currentUserId, at: new Date().toISOString() };
+      const nextTransactions = transactions.map((t) => (t.id === id ? { ...t, comments: [...(t.comments || []), comment] } : t));
+      persist(accounts, nextTransactions, categories, budgetGroups, plannedIncome, incomeWarningDismissed, hiddenBudgetMonths, excludeUnassignedFromBudget);
+    },
+    [accounts, transactions, categories, budgetGroups, plannedIncome, incomeWarningDismissed, hiddenBudgetMonths, excludeUnassignedFromBudget, persist, currentUserId]
+  );
+  // People can delete only their own comments.
+  const handleDeleteComment = useCallback(
+    (id, commentId) => {
+      const nextTransactions = transactions.map((t) => {
+        if (t.id !== id || !Array.isArray(t.comments)) return t;
+        const comments = t.comments.filter((c) => !(c.id === commentId && c.authorId && c.authorId === currentUserId));
+        if (comments.length === t.comments.length) return t;
+        if (comments.length) return { ...t, comments };
+        const { comments: _gone, ...rest } = t; // eslint-disable-line no-unused-vars
+        return rest;
+      });
+      persist(accounts, nextTransactions, categories, budgetGroups, plannedIncome, incomeWarningDismissed, hiddenBudgetMonths, excludeUnassignedFromBudget);
+    },
+    [accounts, transactions, categories, budgetGroups, plannedIncome, incomeWarningDismissed, hiddenBudgetMonths, excludeUnassignedFromBudget, persist, currentUserId]
+  );
+
+  const commentProps = useMemo(
+    () => ({ currentUserId, members: householdMembers, onAdd: handleAddComment, onDelete: handleDeleteComment }),
+    [currentUserId, householdMembers, handleAddComment, handleDeleteComment]
+  );
+
+  // Split a transaction among categories (splits: [{ categoryId, amount }]),
+  // or remove its split (splits: null), leaving it uncategorized.
+  const handleSetSplits = useCallback(
+    (id, splits) => {
+      const nextTransactions = transactions.map((t) => {
+        if (t.id !== id) return t;
+        const { splits: _old, categorySuggested, ...rest } = t; // eslint-disable-line no-unused-vars
+        return splits && splits.length ? { ...rest, categoryId: null, splits } : { ...rest, categoryId: null };
+      });
+      persist(accounts, nextTransactions, categories, budgetGroups, plannedIncome, incomeWarningDismissed, hiddenBudgetMonths, excludeUnassignedFromBudget);
+    },
+    [accounts, transactions, categories, budgetGroups, plannedIncome, incomeWarningDismissed, hiddenBudgetMonths, excludeUnassignedFromBudget, persist]
+  );
+
+  // Transfers between the household's own accounts: suggested pairs, and
+  // marking, unpairing, or dismissing them.
+  const handleLinkTransfers = useCallback(
+    (pairs) => {
+      const next = linkTransfers(transactions, categories, pairs);
+      persist(accounts, next.transactions, next.categories, budgetGroups, plannedIncome, incomeWarningDismissed, hiddenBudgetMonths, excludeUnassignedFromBudget);
+      setToast(`Marked ${pairs.length} transfer${pairs.length === 1 ? "" : "s"}. Both sides no longer count as spending or income.`);
+    },
+    [accounts, transactions, categories, budgetGroups, plannedIncome, incomeWarningDismissed, hiddenBudgetMonths, excludeUnassignedFromBudget, persist]
+  );
+  const handleUnlinkTransfer = useCallback(
+    (id) => {
+      persist(accounts, unlinkTransfer(transactions, id), categories, budgetGroups, plannedIncome, incomeWarningDismissed, hiddenBudgetMonths, excludeUnassignedFromBudget);
+    },
+    [accounts, transactions, categories, budgetGroups, plannedIncome, incomeWarningDismissed, hiddenBudgetMonths, excludeUnassignedFromBudget, persist]
+  );
+  const handleDismissTransfer = useCallback(
+    (pair) => {
+      persist(accounts, dismissTransferPair(transactions, pair), categories, budgetGroups, plannedIncome, incomeWarningDismissed, hiddenBudgetMonths, excludeUnassignedFromBudget);
     },
     [accounts, transactions, categories, budgetGroups, plannedIncome, incomeWarningDismissed, hiddenBudgetMonths, excludeUnassignedFromBudget, persist]
   );
@@ -521,7 +719,7 @@ function App({ householdName } = {}) {
       const target = categories.find((c) => c.id === targetCategoryId);
       const nextCategories = categories.filter((c) => c.id !== sourceCategoryId);
       const nextTransactions = transactions.map((t) =>
-        t.categoryId === sourceCategoryId ? { ...t, categoryId: targetCategoryId } : t
+        remapSplitCategory(t.categoryId === sourceCategoryId ? { ...t, categoryId: targetCategoryId } : t, sourceCategoryId, targetCategoryId)
       );
       // In budget groups, the merged category is replaced by the one it
       // merged into, so the group keeps covering that spending.
@@ -697,7 +895,7 @@ function App({ householdName } = {}) {
     (categoryId) => {
       const nextCategories = categories.filter((c) => c.id !== categoryId);
       const nextTransactions = transactions.map((t) =>
-        t.categoryId === categoryId ? { ...t, categoryId: null } : t
+        remapSplitCategory(t.categoryId === categoryId ? { ...t, categoryId: null } : t, categoryId, null)
       );
       // Remove it from any budget group too, in the same save, so Data
       // History can put it back in its groups if the delete is undone.
@@ -811,6 +1009,12 @@ function App({ householdName } = {}) {
               Reports
             </button>
             <button
+              className={"nav-btn" + (view === "insights" ? " active" : "")}
+              onClick={() => setView("insights")}
+            >
+              Insights
+            </button>
+            <button
               className={"nav-btn" + (view === "accounts" ? " active" : "")}
               onClick={() => setView("accounts")}
             >
@@ -866,7 +1070,7 @@ function App({ householdName } = {}) {
             </div>
             <div className="stat-row">
               <span>Transactions</span>
-              <span>{transactions.length}</span>
+              <span>{visibleTransactions.length}</span>
             </div>
             <div className="stat-row stat-net">
               <span>Net</span>
@@ -888,19 +1092,28 @@ function App({ householdName } = {}) {
 
           {view === "overview" && (
             <OverviewView
-              transactions={transactions}
+              transactions={countedTransactions}
               categories={categories}
               budgetGroups={budgetGroups}
+              transferPairCount={transferPairs.length}
+              upcomingBills={upcomingBills}
               onNavigate={(v) => setView(v)}
             />
           )}
 
           {view === "upload" && (
-            <UploadView key={uploadKey} accounts={accounts} prefill={uploadPrefill} onImport={handleImport} />
+            <UploadView
+              key={uploadKey}
+              accounts={accounts}
+              prefill={uploadPrefill}
+              onImport={handleImport}
+              sortDuplicates={sortDuplicatesForImport}
+              duplicateHandling={duplicateHandling}
+            />
           )}
           {view === "categorize" && activeUploadBatch && (
             <PostUploadCategorizeView
-              transactions={transactions}
+              transactions={visibleTransactions}
               batchId={activeUploadBatch.batchId}
               accountName={activeUploadBatch.accountName}
               categories={categories}
@@ -908,12 +1121,14 @@ function App({ householdName } = {}) {
               onUpdate={handleUpdateTransaction}
               onDelete={handleDeleteTransaction}
               onConfirmSuggestions={handleConfirmSuggestions}
+              onSetSplits={handleSetSplits}
+              comments={commentProps}
               onSkip={() => setView("transactions")}
             />
           )}
           {view === "transactions" && (
             <TransactionsView
-              transactions={transactions}
+              transactions={visibleTransactions}
               accounts={accounts}
               categories={categories}
               duplicateInfo={duplicateInfo}
@@ -923,11 +1138,33 @@ function App({ householdName } = {}) {
               autoApplySuggestions={autoApplySuggestions}
               onConfirmSuggestions={handleConfirmSuggestions}
               onApplySuggestions={handleApplySuggestions}
+              skippedDuplicates={skippedTransactions}
+              transferPairs={transferPairs}
+              onLinkTransfers={handleLinkTransfers}
+              onDismissTransfer={handleDismissTransfer}
+              onUnlinkTransfer={handleUnlinkTransfer}
+              onSetSplits={handleSetSplits}
+              comments={commentProps}
+              onRestoreSkipped={handleRestoreSkipped}
+              onDeleteSkipped={handleDeleteSkipped}
+              duplicateHandling={duplicateHandling}
             />
           )}
+          {view === "insights" && (
+            <InsightsView
+              insights={insights}
+              recurring={recurring}
+              hiddenRecurring={hiddenRecurring}
+              categories={categories}
+              today={today}
+              onHideRecurring={(key) => handleSetHiddenRecurring(key, true)}
+              onShowRecurring={(key) => handleSetHiddenRecurring(key, false)}
+            />
+          )}
+
           {view === "reports" && (
             <ReportsView
-              transactions={transactions}
+              transactions={countedTransactions}
               accounts={accounts}
               categories={categories}
               onGoCategories={() => setView("categories")}
@@ -935,7 +1172,7 @@ function App({ householdName } = {}) {
           )}
           {view === "planning" && (
             <PlanningView
-              transactions={transactions}
+              transactions={countedTransactions}
               categories={categories}
               budgetGroups={budgetGroups}
               plannedIncome={plannedIncome}
@@ -949,7 +1186,7 @@ function App({ householdName } = {}) {
           )}
           {view === "budget" && (
             <BudgetView
-              transactions={transactions}
+              transactions={countedTransactions}
               categories={categories}
               budgetGroups={budgetGroups}
               hiddenBudgetMonths={hiddenBudgetMonths}
@@ -964,7 +1201,7 @@ function App({ householdName } = {}) {
             <BudgetGroupsView
               budgetGroups={budgetGroups}
               categories={categories}
-              transactions={transactions}
+              transactions={countedTransactions}
               onAdd={handleAddBudgetGroup}
               onRename={handleRenameBudgetGroup}
               onDelete={handleDeleteBudgetGroup}
@@ -976,7 +1213,7 @@ function App({ householdName } = {}) {
           {view === "accounts" && (
             <AccountsView
               accounts={accounts}
-              transactions={transactions}
+              transactions={visibleTransactions}
               onDelete={handleDeleteAccount}
               onRename={handleRenameAccount}
               onUpdateSettings={handleUpdateAccountSettings}
@@ -987,21 +1224,19 @@ function App({ householdName } = {}) {
           {view === "categories" && (
             <CategoriesView
               categories={categories}
-              transactions={transactions}
+              transactions={countedTransactions}
               onAdd={handleAddCategory}
               onRename={handleRenameCategory}
               onDelete={handleDeleteCategory}
               onToggleExcluded={handleToggleCategoryExcluded}
               onToggleIsIncome={handleToggleCategoryIsIncome}
               onMerge={handleMergeCategory}
-              autoApplySuggestions={autoApplySuggestions}
-              onToggleAutoApply={handleToggleAutoApply}
             />
           )}
           {view === "backup" && (
             <BackupView
               accounts={accounts}
-              transactions={transactions}
+              transactions={visibleTransactions}
               categories={categories}
               budgetGroups={budgetGroups}
               plannedIncome={plannedIncome}

@@ -10,22 +10,25 @@ A household budgeting app for real financial life: irregular pay schedules, shar
 
 Coinrose brings a household's accounts together in one place. Upload statements from your bank and card websites, categorize what matters, set budgets that match how you're actually paid, and share it all with the people you live with.
 
-Coinrose never connects to your bank and never asks for bank logins. You upload statement files yourself, and only the columns you choose (date, description, amounts) are kept.
+Coinrose never connects to your bank and never asks for bank logins. You upload statement files yourself, and only the columns you choose (date, description, amounts, and optionally the bank's transaction ID) are kept.
 
 ## Features
 
 ### Ledger and transactions
-- Upload CSV or Excel statements from any bank or card. A column-mapping step guesses the file's layout, and handles separate money-in and money-out columns or a single signed amount, with optional sign inversion.
+- Upload CSV, Excel, OFX, or QFX statements from any bank or card. A column-mapping step guesses the file's layout, and handles separate money-in and money-out columns or a single signed amount, with optional sign inversion.
 - Only the mapped columns are stored; everything else in the bank's file (account numbers, memos, balances) is discarded before saving.
-- Duplicate detection by date, amount, and direction, with a way to dismiss false alarms.
+- Duplicates skipped automatically on import: matched by the bank's transaction ID when the file has one (OFX/QFX files always do), otherwise by account, date, amount, and description. Skipped transactions can be reviewed and restored; a household setting switches to flag-only or off. Looser matches (same date and amount) are flagged for review.
 - Categories filled in automatically on import, learned from how you've categorized similar transactions before. They count right away and are marked Suggested until someone confirms or changes them; a household setting turns this off. Coinrose learns only from confirmed categories.
 - An explicit account choice when uploading: files are matched to an account only when the match is unambiguous (by file name or columns), with a warning if the file's columns don't fit the chosen account.
 - Filters by account, category, date range, uncategorized status, or a recent upload, plus search.
 - A dedicated screen for categorizing exactly what you just imported.
+- Split transactions: divide one purchase among several categories by amount, evenly (halves, thirds, quarters), or by percentage, always adding up to the cent. Budgets, reports, and totals count each piece in its own category.
+- Browsing shows one month at a time (starting with the newest), while searching and "find" filters look across all time; at most 200 rows show at once, with Show more.
 
 ### Categories
 - Add, rename, merge, and delete categories; names must be unique (ignoring capitalization).
 - Mark categories as income, or exclude them (for example, transfers between your own accounts).
+- Transfer detection: money leaving one account and the same amount arriving in another within 4 days is suggested as a transfer. Marking it puts both sides in an excluded Transfers category, linked, so moving money between your own accounts is never counted as spending or income. Pairs can be unpaired, or dismissed for good.
 
 ### Budgeting
 - **Spend** budgets: a limit that resets each period.
@@ -36,6 +39,11 @@ Coinrose never connects to your bank and never asks for bank logins. You upload 
 ### Reports
 - Weekly, monthly, every-X-days, or twice-a-month periods, to match how you're paid.
 - Bar or donut charts, a full category-by-period table, and one-click hiding of big steady categories.
+
+### Insights
+- Recurring bills, subscriptions, and income, found from a steady rhythm (weekly to yearly; at least three charges, or two for quarterly or yearly) after cleaning up merchant names. Shows how often, the usual amount, the monthly cost, and when each is next expected; flags price increases. Weekly shopping at the same store isn't mistaken for a bill. Items can be marked "not recurring" for the household.
+- Quick insights: this month so far against the same point last month, categories that changed notably, bills due in the next two weeks, what fixed-price services cost, price increases, and the biggest one-off purchase. Likely transfers still awaiting review are set aside.
+- The Overview's "Coming up" lists bills expected in the next two weeks.
 
 ### Overview
 - This period's money in and out, what needs attention, and top spending, with links into the details.

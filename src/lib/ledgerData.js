@@ -34,6 +34,8 @@ export function normalizeSnapshot(data) {
     hiddenBudgetMonths: data.hiddenBudgetMonths || [],
     excludeUnassignedFromBudget: !!data.excludeUnassignedFromBudget,
     autoApplySuggestions: data.autoApplySuggestions !== false, // on unless turned off
+    duplicateHandling: ["skip", "flag", "off"].includes(data.duplicateHandling) ? data.duplicateHandling : "skip",
+    hiddenRecurring: Array.isArray(data.hiddenRecurring) ? data.hiddenRecurring : [],
   };
 }
 
@@ -61,6 +63,8 @@ export function normalizeLoadedLedger(parsed) {
     hiddenBudgetMonths: Array.isArray(parsed.hiddenBudgetMonths) ? parsed.hiddenBudgetMonths : [],
     excludeUnassignedFromBudget: !!parsed.excludeUnassignedFromBudget,
     autoApplySuggestions: parsed.autoApplySuggestions !== false, // on unless turned off
+    duplicateHandling: ["skip", "flag", "off"].includes(parsed.duplicateHandling) ? parsed.duplicateHandling : "skip",
+    hiddenRecurring: Array.isArray(parsed.hiddenRecurring) ? parsed.hiddenRecurring : [],
   };
 }
 

@@ -22,7 +22,10 @@ export async function readFileAsRows(file) {
     const headers = rows.length > 0 ? Object.keys(rows[0]) : [];
     return { headers, rows };
   }
-  throw new Error("Unsupported file type. Please upload a .csv or .xlsx file.");
+  if (name.endsWith(".ofx") || name.endsWith(".qfx")) {
+    return parseOFX(await file.text());
+  }
+  throw new Error("Unsupported file type. Please upload a .csv, .xlsx, .ofx, or .qfx file.");
 }
 
 
@@ -76,7 +79,8 @@ export function mapRow(row, mapping) {
     reasons.push("no amount in either column");
   }
 
-  return { date, description, amountOut, amountIn, reasons };
+  const externalId = mapping.idCol && row[mapping.idCol] != null ? String(row[mapping.idCol]).trim() || null : null;
+  return { date, description, amountOut, amountIn, externalId, reasons };
 }
 
 
@@ -86,7 +90,7 @@ export function mapRow(row, mapping) {
 // is dropped before anything is saved.
 export function keepMappedColumns(row, mapping) {
   const kept = {};
-  for (const col of [mapping.dateCol, mapping.descriptionCol, mapping.outCol, mapping.inCol]) {
+  for (const col of [mapping.dateCol, mapping.descriptionCol, mapping.outCol, mapping.inCol, mapping.idCol]) {
     if (col && Object.prototype.hasOwnProperty.call(row, col)) kept[col] = row[col];
   }
   return kept;
@@ -98,7 +102,7 @@ export function buildTransactions(rows, mapping, accountId, accountName, uploadB
   const uploadedAt = new Date().toISOString();
 
   rows.forEach((row, idx) => {
-    const { date, description, amountOut, amountIn, reasons } = mapRow(row, mapping);
+    const { date, description, amountOut, amountIn, externalId, reasons } = mapRow(row, mapping);
 
     if (reasons.length > 0) {
       invalid.push({ rowIndex: idx, raw: row, reasons });
@@ -115,9 +119,70 @@ export function buildTransactions(rows, mapping, accountId, accountName, uploadB
         raw: keepMappedColumns(row, mapping),
         uploadedAt,
         uploadBatchId,
+        ...(externalId ? { externalId } : {}),
       });
     }
   });
 
   return { valid, invalid };
+}
+
+/* ------------------------------------------------------------------ */
+/* OFX and QFX files                                                    */
+/* ------------------------------------------------------------------ */
+
+// The columns an OFX/QFX file is turned into, and how they map.
+export const OFX_COLUMNS = { date: "Date", description: "Description", amount: "Amount", id: "Transaction ID" };
+export const OFX_MAPPING = {
+  dateCol: OFX_COLUMNS.date,
+  descriptionCol: OFX_COLUMNS.description,
+  outCol: OFX_COLUMNS.amount,
+  inCol: OFX_COLUMNS.amount,
+  idCol: OFX_COLUMNS.id,
+  invertSign: false, // OFX records money out as negative amounts
+};
+
+// Reads an OFX or QFX file (Quicken's version of OFX) into rows, like a
+// spreadsheet with Date, Description, Amount, and Transaction ID columns.
+// Handles both the older SGML style (where simple tags aren't closed) and
+// the newer XML style. The account number in the file is never kept: only
+// its last four digits are passed back, to help the person pick the right
+// account on screen.
+export function parseOFX(text) {
+  const field = (block, tag) => {
+    const m = block.match(new RegExp(`<${tag}>([^<\\r\\n]*)`, "i"));
+    return m ? decodeEntities(m[1].trim()) : "";
+  };
+  const rows = [];
+  const blocks = text.match(/<STMTTRN>[\s\S]*?<\/STMTTRN>/gi) || [];
+  blocks.forEach((block) => {
+    const posted = field(block, "DTPOSTED").match(/^(\d{4})(\d{2})(\d{2})/);
+    let amount = field(block, "TRNAMT").replace(/\s/g, "");
+    if (amount.includes(",") && !amount.includes(".")) amount = amount.replace(",", ".");
+    rows.push({
+      [OFX_COLUMNS.date]: posted ? `${posted[1]}-${posted[2]}-${posted[3]}` : "",
+      [OFX_COLUMNS.description]: field(block, "NAME") || field(block, "PAYEE") || field(block, "MEMO"),
+      [OFX_COLUMNS.amount]: amount,
+      [OFX_COLUMNS.id]: field(block, "FITID"),
+    });
+  });
+  if (blocks.length === 0 && !/<OFX>/i.test(text)) {
+    throw new Error("This doesn't look like an OFX or QFX file.");
+  }
+  const acct = field(text, "ACCTID").replace(/\D/g, "");
+  return {
+    headers: Object.values(OFX_COLUMNS),
+    rows,
+    format: "ofx",
+    accountHint: acct.length >= 4 ? acct.slice(-4) : null,
+  };
+}
+
+function decodeEntities(value) {
+  return value
+    .replace(/&amp;/gi, "&")
+    .replace(/&lt;/gi, "<")
+    .replace(/&gt;/gi, ">")
+    .replace(/&quot;/gi, '"')
+    .replace(/&apos;|&#39;/gi, "'");
 }

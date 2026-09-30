@@ -112,3 +112,44 @@ describe("filling in suggested categories", () => {
     expect(withoutSuggestedFlag(plain)).toBe(plain);
   });
 });
+
+import { sortImportDuplicates, computeDuplicates as flagDuplicates } from "../analysis.js";
+describe("skipping duplicates on import", () => {
+  const t = (id, extra = {}) => ({ id, accountId: "chk", date: "2026-09-02", description: "Thrifty Sprout", amountOut: 18, amountIn: null, ...extra });
+  it("skips exact matches (ignoring capitalization and spacing), and keeps anything that differs", () => {
+    const existing = [t("e1")];
+    const incoming = [t("n1", { description: "  THRIFTY   sprout " }), t("n2", { amountOut: 19 }), t("n3", { accountId: "card" }), t("n4", { date: "2026-09-03" }), t("n5", { amountOut: null, amountIn: 18 })];
+    const r = sortImportDuplicates(existing, incoming);
+    expect(r.skipped).toEqual([{ transaction: incoming[0], duplicateOf: "e1", by: "details" }]);
+    expect(r.imported.map((x) => x.id)).toEqual(["n2", "n3", "n4", "n5"]);
+  });
+  it("two identical purchases in the file, one already here: imports one, skips one", () => {
+    const r = sortImportDuplicates([t("e1")], [t("n1"), t("n2")]);
+    expect(r.skipped.map((s) => s.transaction.id)).toEqual(["n1"]);
+    expect(r.imported.map((x) => x.id)).toEqual(["n2"]);
+  });
+  it("bank transaction IDs decide when both sides have one", () => {
+    const existing = [t("e1", { externalId: "A" }), t("e2", { externalId: "B", description: "Other", date: "2026-09-10" })];
+    const r = sortImportDuplicates(existing, [
+      t("same-id", { externalId: "B" }), // same ID, different details: still the same transaction
+      t("different-id", { externalId: "C" }), // identical details, different ID: a different transaction
+    ]);
+    expect(r.skipped).toEqual([{ transaction: expect.objectContaining({ id: "same-id" }), duplicateOf: "e2", by: "id" }]);
+    expect(r.imported.map((x) => x.id)).toEqual(["different-id"]);
+  });
+  it("falls back to the exact match against transactions imported earlier without IDs", () => {
+    const r = sortImportDuplicates([t("old-csv")], [t("n1", { externalId: "Z9" })]);
+    expect(r.skipped[0]).toMatchObject({ duplicateOf: "old-csv", by: "details" }); // the file had an ID, but the match was on details
+  });
+  it("an ID listed twice in one file, or a match with something already skipped, isn't added again", () => {
+    const existing = [t("e1"), t("s1", { skippedDuplicateOf: "e1" })];
+    const r = sortImportDuplicates(existing, [t("n1"), t("n2"), t("x1", { externalId: "Q", date: "2026-09-20" }), t("x2", { externalId: "Q", date: "2026-09-20" })]);
+    expect(r.skipped.map((s) => s.transaction.id)).toEqual(["n1"]);
+    expect(r.alreadySkipped).toBe(2); // n2 matched the earlier skipped copy; x2 repeats x1's ID
+    expect(r.imported.map((x) => x.id)).toEqual(["x1"]);
+  });
+  it("flagging for review leaves alone transactions whose bank IDs all differ", () => {
+    const flagged = flagDuplicates([t("a", { externalId: "1" }), t("b", { externalId: "2" }), t("c"), t("d")].map((x, i) => (i < 2 ? x : { ...x, date: "2026-09-09" })));
+    expect([...flagged.dupIds].sort()).toEqual(["c", "d"]);
+  });
+});

@@ -36,7 +36,7 @@ describe("mapRow", () => {
   const split = { dateCol: "Date", descriptionCol: "Desc", outCol: "Out", inCol: "In" };
   it("separate money-out and money-in columns", () => {
     expect(mapRow({ Date: "9/5/2026", Desc: "  Thrifty Sprout  ", Out: "24.23", In: "" }, split))
-      .toEqual({ date: "2026-09-05", description: "Thrifty Sprout", amountOut: 24.23, amountIn: null, reasons: [] });
+      .toEqual({ date: "2026-09-05", description: "Thrifty Sprout", amountOut: 24.23, amountIn: null, externalId: null, reasons: [] });
     expect(mapRow({ Date: "9/5/2026", Desc: "Pay", Out: "", In: "$1,355.13" }, split).amountIn).toBe(1355.13);
   });
   it("a negative number in the money-out column is still money out", () => {
@@ -110,5 +110,47 @@ describe("keeping only mapped columns from the bank's file", () => {
     const mapping = { dateCol: "Post Date", descriptionCol: "Description", outCol: "Amount", inCol: "Amount" };
     const { valid } = buildTransactions([bankRow], mapping, "a", "Checking", "b");
     expect(mapRow(valid[0].raw, { ...mapping, invertSign: true })).toMatchObject({ date: "2026-09-05", amountOut: null, amountIn: 24.23 });
+  });
+});
+
+import { parseOFX, OFX_MAPPING } from "../importing.js";
+describe("OFX and QFX files", () => {
+  const sgml = "OFXHEADER:100\nDATA:OFXSGML\n\n<OFX><BANKMSGSRSV1><STMTTRNRS><STMTRS><BANKACCTFROM><ACCTID>000123456789<ACCTTYPE>CHECKING</BANKACCTFROM><BANKTRANLIST>\n"
+    + "<STMTTRN>\n<TRNTYPE>DEBIT\n<DTPOSTED>20260915120000.000[-7:MST]\n<TRNAMT>-42.17\n<FITID>2026091501\n<NAME>SUNNY GRIFFIN DINER\n</STMTTRN>\n"
+    + "<STMTTRN><TRNTYPE>CREDIT<DTPOSTED>20260918<TRNAMT>1355,13<FITID>2026091802<MEMO>THORNWICK &amp; VALE PAYROLL</STMTTRN>\n</BANKTRANLIST></STMTRS></STMTTRNRS></BANKMSGSRSV1></OFX>";
+  it("reads the older (SGML) style into dated, signed rows with the bank's IDs", () => {
+    const r = parseOFX(sgml);
+    expect(r.headers).toEqual(["Date", "Description", "Amount", "Transaction ID"]);
+    expect(r.rows).toEqual([
+      { Date: "2026-09-15", Description: "SUNNY GRIFFIN DINER", Amount: "-42.17", "Transaction ID": "2026091501" },
+      { Date: "2026-09-18", Description: "THORNWICK & VALE PAYROLL", Amount: "1355.13", "Transaction ID": "2026091802" },
+    ]);
+  });
+  it("keeps only the last four digits of the account number, for display", () => {
+    const r = parseOFX(sgml);
+    expect(r.accountHint).toBe("6789");
+    expect(JSON.stringify(r)).not.toMatch(/000123456789/);
+  });
+  it("reads the newer (XML) style too, and its rows become transactions with IDs", () => {
+    const xml = '<?xml version="1.0"?><OFX><CREDITCARDMSGSRSV1><CCSTMTTRNRS><CCSTMTRS><CCACCTFROM><ACCTID>4111</ACCTID></CCACCTFROM><BANKTRANLIST>'
+      + "<STMTTRN><TRNTYPE>DEBIT</TRNTYPE><DTPOSTED>20260901</DTPOSTED><TRNAMT>-10.99</TRNAMT><FITID>X1</FITID><NAME>Whisperwire Music</NAME></STMTTRN></BANKTRANLIST></CCSTMTRS></CCSTMTTRNRS></CREDITCARDMSGSRSV1></OFX>";
+    const { rows } = parseOFX(xml);
+    const { valid } = buildTransactions(rows, OFX_MAPPING, "card", "Card", "b");
+    expect(valid[0]).toMatchObject({ date: "2026-09-01", description: "Whisperwire Music", amountOut: 10.99, amountIn: null, externalId: "X1" });
+    expect(valid[0].raw).toEqual({ Date: "2026-09-01", Description: "Whisperwire Music", Amount: "-10.99", "Transaction ID": "X1" });
+  });
+  it("rejects files that aren't OFX", () => {
+    expect(() => parseOFX("Date,Description\n2026-09-01,x")).toThrow(/doesn't look like an OFX or QFX file/);
+  });
+  it("opens .qfx files, and still rejects unknown types", async () => {
+    const r = await readFileAsRows(new File([sgml], "export.QFX"));
+    expect(r.format).toBe("ofx");
+    await expect(readFileAsRows(new File(["x"], "notes.txt"))).rejects.toThrow(/\.ofx, or \.qfx/);
+  });
+  it("a CSV's transaction ID column is read, trimmed, and kept only when chosen", () => {
+    const map = { dateCol: "D", descriptionCol: "N", outCol: "O", inCol: "", idCol: "Ref" };
+    expect(mapRow({ D: "2026-09-01", N: "x", O: "5", Ref: "  R-77 " }, map).externalId).toBe("R-77");
+    expect(mapRow({ D: "2026-09-01", N: "x", O: "5", Ref: "" }, map).externalId).toBeNull();
+    expect(keepMappedColumns({ D: "1", Ref: "R", X: "secret" }, map)).toEqual({ D: "1", Ref: "R" });
   });
 });

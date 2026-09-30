@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import React from "react";
 import { render, screen, fireEvent, within, act, waitFor } from "@testing-library/react";
 import * as F from "./fixtures.js";
+import { getImportPrefs } from "../lib/importPrefs.js";
 
 // An in-memory stand-in for the database. The app's own change detection
 // (computeLedgerChanges) is the real one; only loading and saving are fake.
@@ -382,8 +383,7 @@ describe("suggested categories fill in automatically", () => {
 
   it("with the setting off, imports don't fill anything in, and the setting is saved for the household", async () => {
     const { nav, lastSave } = await openApp();
-    nav("Categories");
-    fireEvent.click(screen.getByLabelText(/Fill in suggested categories automatically/));
+    await act(async () => getImportPrefs().onToggleAutoApply(false)); // what Settings → Importing does
     await flush();
     expect(lastSave().settings.props.autoApplySuggestions).toBe(false);
     nav("Upload");
@@ -418,5 +418,216 @@ describe("suggested categories fill in automatically", () => {
     fireEvent.change(within(rows[0]).getByRole("combobox"), { target: { value: "cat-dine" } });
     await flush();
     expect(lastSave().upserts.transactions).toEqual([expect.objectContaining({ id: "t7", category_id: "cat-dine", props: {} })]);
+  });
+});
+
+describe("duplicates skipped on import", () => {
+  const importCsv = async (csv) => {
+    fireEvent.change(document.querySelector('input[type="file"]'), { target: { files: [new File([csv], "export.csv")] } });
+    fireEvent.click(await screen.findByRole("button", { name: /^Check \d+ rows$/ }));
+    fireEvent.click(await screen.findByRole("button", { name: /^Import \d+ transactions? into/ }));
+    await flush();
+  };
+  const csv = "Date,Description,Money Out,Money In\n2026-09-02,THRIFTY SPROUT MARKET,180.00,\n2026-09-22,New Place,5.00,\n";
+
+  it("skips what's already here, keeps it for review, and it can be restored or deleted", async () => {
+    const { nav, lastSave } = await openApp();
+    nav("Upload");
+    await importCsv(csv);
+    const saved = lastSave().upserts.transactions;
+    const skipped = saved.find((t) => t.description === "THRIFTY SPROUT MARKET");
+    expect(skipped.props.skippedDuplicateOf).toBe("t1");
+    expect(saved.find((t) => t.description === "New Place").props.skippedDuplicateOf).toBeUndefined();
+    expect(document.body.textContent).toMatch(/skipped 1 already in Coinrose/);
+    nav("Transactions");
+    expect(document.querySelectorAll("tr.tx-row-full")).toHaveLength(9); // September's 8 + the new one, not the skipped one
+    fireEvent.click(screen.getByRole("button", { name: /Skipped duplicates \(1\)/ }));
+    expect(document.body.textContent).toMatch(/Matched Thrifty Sprout Market on Sep 2, 2026/);
+    fireEvent.click(screen.getByRole("button", { name: /^Restore THRIFTY SPROUT MARKET/ }));
+    await flush();
+    const restored = lastSave().upserts.transactions[0];
+    expect(restored.props).toEqual(expect.objectContaining({ notDuplicate: true }));
+    expect(restored.props.skippedDuplicateOf).toBeUndefined();
+    expect(document.querySelectorAll("tr.tx-row-full")).toHaveLength(10);
+  });
+
+  it("skipped ones can be deleted for good, one at a time or all together", async () => {
+    const { nav, lastSave, store } = await openApp();
+    nav("Upload");
+    await importCsv(csv);
+    nav("Transactions");
+    fireEvent.click(screen.getByRole("button", { name: /Skipped duplicates \(1\)/ }));
+    fireEvent.click(screen.getByRole("button", { name: "Delete all" }));
+    fireEvent.click(screen.getByRole("button", { name: "Yes, delete them" }));
+    await flush();
+    expect(lastSave().deletes.transactions).toHaveLength(1);
+    expect(screen.queryByRole("button", { name: /Skipped duplicates/ })).toBeNull();
+  });
+
+  it("'Flag only' imports everything; 'Off' imports everything and flags nothing", async () => {
+    const { nav, lastSave } = await openApp();
+    await act(async () => getImportPrefs().onSetDuplicateHandling("flag"));
+    await flush();
+    expect(lastSave().settings.props.duplicateHandling).toBe("flag");
+    nav("Upload");
+    await importCsv(csv);
+    expect(lastSave().upserts.transactions.every((t) => !t.props.skippedDuplicateOf)).toBe(true);
+    nav("Transactions");
+    expect(document.body.textContent).toMatch(/Possible duplicates only \(4\)/); // t9/t10, and t1 with its new twin
+    await act(async () => getImportPrefs().onSetDuplicateHandling("off"));
+    await flush();
+    expect(document.body.textContent).not.toMatch(/Possible duplicates only/);
+  });
+});
+
+describe("transfers between accounts", () => {
+  const addCardPayment = () => {
+    db.data.transactions.push(
+      { id: "pay-out", accountId: "acct-chk", accountName: "Millbrook Checking", date: "2026-09-20", description: "Card Payment", amountOut: 300, amountIn: null, categoryId: null, raw: null },
+      { id: "pay-in", accountId: "acct-card", accountName: "Griffon Card", date: "2026-09-21", description: "Payment Thank You", amountOut: null, amountIn: 300, categoryId: null, raw: null }
+    );
+  };
+  it("suggests the pair, and marking it moves both sides into Transfers, linked", async () => {
+    addCardPayment();
+    const { nav, lastSave } = await openApp();
+    expect(document.body.textContent).toMatch(/1 possible transfer between your accounts/); // on the Overview
+    nav("Transactions");
+    fireEvent.click(screen.getByRole("button", { name: "Review" }));
+    expect(document.body.textContent).toMatch(/from Millbrook Checking/);
+    fireEvent.click(screen.getByRole("button", { name: /^Mark as transfer: \$300\.00 from Millbrook Checking to Griffon Card/ }));
+    await flush();
+    const saved = lastSave().upserts.transactions;
+    expect(saved).toEqual(expect.arrayContaining([
+      expect.objectContaining({ id: "pay-out", category_id: "cat-xfer", props: expect.objectContaining({ transferWith: "pay-in" }) }),
+      expect.objectContaining({ id: "pay-in", category_id: "cat-xfer", props: expect.objectContaining({ transferWith: "pay-out" }) }),
+    ]));
+    expect(screen.queryByText(/possible transfer/)).toBeNull();
+    expect(screen.getAllByText(/↔ Transfer (to|from)/)).toHaveLength(2);
+    expect(screen.getByText("↔ Transfer to Griffon Card")).toBeTruthy();
+  });
+  it("Unpair puts both back to uncategorized; 'Not a transfer' is never suggested again", async () => {
+    addCardPayment();
+    const { nav, lastSave } = await openApp();
+    nav("Transactions");
+    fireEvent.click(screen.getByRole("button", { name: "Mark all 1 as transfers" }));
+    await flush();
+    fireEvent.click(screen.getByRole("button", { name: "Unpair this transfer: Card Payment" }));
+    await flush();
+    expect(lastSave().upserts.transactions.map((t) => [t.id, t.category_id, t.props.transferWith]).sort()).toEqual([["pay-in", null, undefined], ["pay-out", null, undefined]]);
+    fireEvent.click(screen.getByRole("button", { name: "Review" }));
+    fireEvent.click(screen.getByRole("button", { name: /^Not a transfer:/ }));
+    await flush();
+    expect(lastSave().upserts.transactions.find((t) => t.id === "pay-out").props.notTransferWith).toEqual(["pay-in"]);
+    expect(screen.queryByText(/possible transfer/)).toBeNull();
+  });
+  it("giving one side a different category unpairs both", async () => {
+    addCardPayment();
+    const { nav, lastSave } = await openApp();
+    nav("Transactions");
+    fireEvent.click(screen.getByRole("button", { name: "Mark all 1 as transfers" }));
+    await flush();
+    const row = [...document.querySelectorAll("tr.tx-row-full")].find((r) => r.textContent.includes("Card Payment"));
+    fireEvent.change(within(row).getByRole("combobox"), { target: { value: "cat-groc" } });
+    await flush();
+    const saved = lastSave().upserts.transactions;
+    expect(saved.find((t) => t.id === "pay-out")).toEqual(expect.objectContaining({ category_id: "cat-groc" }));
+    expect(saved.every((t) => t.props.transferWith === undefined)).toBe(true);
+  });
+});
+
+describe("split transactions", () => {
+  const splitNoodle = async (dine, groc) => {
+    const row = [...document.querySelectorAll("tr.tx-row-full")].find((r) => r.textContent.includes("Noodle & Newt"));
+    fireEvent.click(within(row).getByRole("button", { name: /^Split Noodle/ }));
+    fireEvent.change(screen.getByLabelText("Amount for part 1"), { target: { value: String(dine) } });
+    fireEvent.change(screen.getByLabelText("Category for part 2"), { target: { value: "cat-groc" } });
+    fireEvent.change(screen.getByLabelText("Amount for part 2"), { target: { value: String(groc) } });
+    fireEvent.click(screen.getByRole("button", { name: "Save split" }));
+    await flush();
+  };
+  it("saving a split stores its lines, and budgets and totals count each piece", async () => {
+    const { nav, lastSave } = await openApp();
+    nav("Transactions");
+    await splitNoodle(30, 15);
+    expect(lastSave().upserts.transactions).toEqual([expect.objectContaining({ id: "t2", category_id: null,
+      props: expect.objectContaining({ splits: [{ categoryId: "cat-dine", amount: 30 }, { categoryId: "cat-groc", amount: 15 }] }) })]);
+    nav("Overview");
+    const top = document.querySelector(".overview-grid").textContent;
+    expect(top).toMatch(/Groceries\$195\.00/); // t1's $180 plus the $15 piece
+  });
+  it("changing the amount so the split no longer adds up clears it", async () => {
+    const { nav, lastSave } = await openApp();
+    nav("Transactions");
+    await splitNoodle(30, 15);
+    const row = [...document.querySelectorAll("tr.tx-row-full")].find((r) => r.textContent.includes("Noodle & Newt"));
+    fireEvent.click(within(row).getByRole("button", { name: "Edit" }));
+    fireEvent.change(within(row).getByDisplayValue("45"), { target: { value: "50" } });
+    fireEvent.click(within(row).getByRole("button", { name: "Save" }));
+    await flush();
+    const saved = lastSave().upserts.transactions[0];
+    expect(saved.amount_out).toBe(50);
+    expect(saved.props.splits).toBeUndefined();
+  });
+});
+
+describe("recurring bills and insights", () => {
+  const addSubscription = () => {
+    ["2026-06-03", "2026-07-03", "2026-08-03", "2026-09-03"].forEach((date, i) =>
+      db.data.transactions.push({ id: `sub${i}`, accountId: "acct-card", accountName: "Griffon Card", date, description: `WHISPERWIRE MUSIC ${1000 + i}`, amountOut: 10.99, amountIn: null, categoryId: "cat-dine", raw: null })
+    );
+  };
+  it("the Overview shows what's coming up, and Insights lists it; 'Not recurring' is saved for the household", async () => {
+    addSubscription();
+    const { nav, lastSave } = await openApp();
+    const coming = screen.getByRole("heading", { name: "Coming up" }).closest(".panel");
+    expect(coming.textContent).toMatch(/WHISPERWIRE MUSIC 1003.*Oct 3, 2026.*\$10\.99/);
+    fireEvent.click(within(coming).getByRole("button", { name: "See Insights" }));
+    expect(screen.getByRole("heading", { name: "Insights", level: 1 })).toBeTruthy();
+    await waitFor(() => expect(document.title).toBe("Insights | Coinrose"));
+    const bills = screen.getByRole("table", { name: "Recurring bills and subscriptions" });
+    expect(bills.textContent).toMatch(/Every month/);
+    expect(document.body.textContent).toMatch(/1 fixed-price service/);
+    fireEvent.click(screen.getByRole("button", { name: /^Not recurring: hide WHISPERWIRE/ }));
+    await flush();
+    expect(lastSave().settings.props.hiddenRecurring).toEqual(["out|whisperwire music"]);
+    expect(screen.queryByRole("table", { name: "Recurring bills and subscriptions" })).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: /Marked not recurring \(1\)/ }));
+    fireEvent.click(screen.getByRole("button", { name: /^Show WHISPERWIRE MUSIC 1003 again/ }));
+    await flush();
+    expect(lastSave().settings.props.hiddenRecurring).toEqual([]);
+    nav("Overview");
+    expect(screen.getByRole("heading", { name: "Coming up" })).toBeTruthy();
+  });
+});
+
+describe("comments", () => {
+  const openAs = async (currentUserId) => {
+    localStorage.setItem(TUTORIAL_SEEN_KEY, "true");
+    const utils = render(<App householdName="Alchemist Household" currentUserId={currentUserId} householdMembers={[{ user_id: "me", email: "morgan@example.com" }]} />);
+    await screen.findByRole("heading", { name: "Overview" });
+    fireEvent.click(within(utils.container.querySelector(".sidebar")).getByRole("button", { name: "Transactions" }));
+    return () => db.saves[db.saves.length - 1];
+  };
+  it("posting saves the comment on the transaction with your account ID (not your email); deleting removes it", async () => {
+    const lastSave = await openAs("me");
+    fireEvent.click(screen.getByRole("button", { name: "Comment on Noodle & Newt" }));
+    fireEvent.change(screen.getByLabelText("Add a comment"), { target: { value: "Birthday dinner" } });
+    fireEvent.click(screen.getByRole("button", { name: "Post comment" }));
+    await flush();
+    const saved = lastSave().upserts.transactions[0];
+    expect(saved.id).toBe("t2");
+    expect(saved.props.comments).toEqual([{ id: expect.any(String), text: "Birthday dinner", authorId: "me", at: expect.stringMatching(/^\d{4}-\d{2}-\d{2}T/) }]);
+    expect(JSON.stringify(saved.props)).not.toMatch(/morgan@example\.com/);
+    expect(screen.getByRole("button", { name: "1 comment on Noodle & Newt" })).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: /^Delete your comment: Birthday dinner/ }));
+    await flush();
+    expect(lastSave().upserts.transactions[0].props.comments).toBeUndefined();
+  });
+  it("someone else's comment can't be deleted", async () => {
+    db.data.transactions = db.data.transactions.map((t) => (t.id === "t2" ? { ...t, comments: [{ id: "c", text: "Mine", authorId: "sam", at: "2026-09-05T20:00:00Z" }] } : t));
+    await openAs("me");
+    fireEvent.click(screen.getByRole("button", { name: "1 comment on Noodle & Newt" }));
+    expect(screen.getByRole("group", { name: "Comments on Noodle & Newt" }).textContent).toMatch(/Former member/);
+    expect(screen.queryByRole("button", { name: /^Delete your comment/ })).toBeNull();
   });
 });

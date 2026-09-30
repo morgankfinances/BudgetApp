@@ -2,6 +2,7 @@ export const VIEW_TITLES = {
   overview: "Overview",
   transactions: "Transactions",
   reports: "Reports",
+  insights: "Insights",
   accounts: "Accounts",
   categories: "Categories",
   upload: "Upload",

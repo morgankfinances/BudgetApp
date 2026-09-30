@@ -5,7 +5,7 @@
 
 import React, { Suspense, lazy } from "react";
 import { startDemo } from "../ledgerStore.js";
-import { buildDemoLedger } from "../lib/demoData.js";
+import { buildDemoLedger, DEMO_MEMBERS, DEMO_YOU } from "../lib/demoData.js";
 import { LoadingIndicator } from "../householdGate.jsx";
 
 const App = lazy(() => import("../App.jsx"));
@@ -38,7 +38,7 @@ export default function DemoMode({ onExit, onGetStarted }) {
           </div>
         }
       >
-        <App householdName="Sample Household" />
+        <App householdName="Sample Household" currentUserId={DEMO_YOU} householdMembers={DEMO_MEMBERS} />
       </Suspense>
     </>
   );
