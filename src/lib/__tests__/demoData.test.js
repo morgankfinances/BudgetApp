@@ -99,3 +99,16 @@ describe("the demo's paychecks", () => {
     expect(twice).toEqual(["2026-06-15", "2026-06-30", "2026-07-15", "2026-07-31", "2026-08-14", "2026-08-31", "2026-09-15"]);
   });
 });
+
+import { estimateBalance } from "../balances.js";
+describe("the demo's balances", () => {
+  it("every account has a starting balance from just before its history, so the estimates use every transaction", () => {
+    const d = buildDemoLedger("2026-09-28");
+    for (const a of d.accounts) {
+      expect(a.startingBalance.date).toBe("2026-05-31");
+      const e = estimateBalance(a, d.transactions);
+      expect(e.count).toBe(d.transactions.filter((t) => t.accountId === a.id).length);
+    }
+    expect(d.accounts.find((a) => a.id === "demo-card").startingBalance.owed).toBe(true);
+  });
+});

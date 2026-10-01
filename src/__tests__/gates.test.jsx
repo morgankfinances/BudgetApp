@@ -553,3 +553,166 @@ describe("the household screen tells the app who's who", () => {
     expect(received.householdName).toBe(household.name);
   });
 });
+
+describe("two-step sign-in", () => {
+  const signedInNeedingCode = () => {
+    fake.state.session = { user: { id: "u1" } };
+    fake.state.mfaFactors = [{ id: "f1", status: "verified" }];
+    fake.state.mfaLevel = { currentLevel: "aal1", nextLevel: "aal2" };
+  };
+  it("after the password, someone with two-step on enters their code before Coinrose opens", async () => {
+    signedInNeedingCode();
+    render(<AuthGate><div>the app</div></AuthGate>);
+    expect(await screen.findByRole("heading", { name: "Enter your code" })).toBeTruthy();
+    await waitFor(() => expect(document.title).toBe("Two-Step Sign-In | Coinrose"));
+    expect(screen.queryByText("the app")).toBeNull();
+    fireEvent.change(screen.getByLabelText("6-digit code"), { target: { value: "12 34" } });
+    fireEvent.click(screen.getByRole("button", { name: "Continue" }));
+    expect(screen.getByRole("alert").textContent).toMatch(/Enter the 6-digit code/);
+    fireEvent.change(screen.getByLabelText("6-digit code"), { target: { value: "123 456" } });
+    fireEvent.click(screen.getByRole("button", { name: "Continue" }));
+    expect(await screen.findByText("the app")).toBeTruthy();
+    expect(fake.called("mfa:challengeAndVerify")[0].args).toEqual({ factorId: "f1", code: "123456" });
+  });
+  it("a wrong code says so, and signing out is always available", async () => {
+    signedInNeedingCode();
+    fake.state.mfaVerifyFails = true;
+    render(<AuthGate><div>the app</div></AuthGate>);
+    fireEvent.change(await screen.findByLabelText("6-digit code"), { target: { value: "000000" } });
+    fireEvent.click(screen.getByRole("button", { name: "Continue" }));
+    expect((await screen.findByRole("alert")).textContent).toMatch(/That code didn't work/);
+    expect(screen.queryByText("the app")).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Sign out" }));
+    expect(fake.called("auth:signOut")).toHaveLength(1);
+  });
+  it("people without two-step go straight in", async () => {
+    fake.state.session = { user: { id: "u1" } };
+    render(<AuthGate><div>the app</div></AuthGate>);
+    expect(await screen.findByText("the app")).toBeTruthy();
+  });
+
+  const openSettings = async () => {
+    fake.reset({ membership: { household_id: "h1", role: "owner", households: household }, members: [owner] });
+    render(<HouseholdGate><TheApp /></HouseholdGate>);
+    await screen.findByText("the app");
+    fireEvent.click(screen.getByRole("button", { name: /^Settings/ }));
+    await screen.findByText("Members");
+  };
+  it("Settings: turning it on shows the QR code and setup key, and only switches on after a code checks out", async () => {
+    await openSettings();
+    fireEvent.click(await screen.findByRole("button", { name: "Turn on two-step sign-in" }));
+    const qr = await screen.findByAltText("QR code for setting up two-step sign-in");
+    expect(qr.getAttribute("src")).toMatch(/^data:image\/svg\+xml/);
+    expect(screen.getByText("JBSWY3DPEHPK3PXP")).toBeTruthy();
+    fireEvent.change(screen.getByLabelText(/Enter the 6-digit code it shows/), { target: { value: "12" } });
+    fireEvent.click(screen.getByRole("button", { name: "Turn it on" }));
+    expect(screen.getByRole("alert").textContent).toMatch(/Enter the 6-digit code/);
+    fake.state.rpc.create_two_step_recovery_codes = { data: CODES, error: null };
+    fake.state.rpc.two_step_recovery_codes_left = { data: 10, error: null };
+    fireEvent.change(screen.getByLabelText(/Enter the 6-digit code it shows/), { target: { value: "654321" } });
+    fireEvent.click(screen.getByRole("button", { name: "Turn it on" }));
+    // The backup codes come next, shown once, and must be confirmed as saved.
+    const codes = await screen.findByRole("group", { name: "Your backup codes" });
+    expect([...codes.querySelectorAll("li")].map((li) => li.textContent)).toEqual(CODES);
+    expect(codes.textContent).toMatch(/This is the only time they'll be shown/);
+    const done = within(codes).getByRole("button", { name: "Done" });
+    expect(done.disabled).toBe(true);
+    fireEvent.click(within(codes).getByLabelText("I've saved these codes somewhere safe"));
+    fireEvent.click(done);
+    expect(await screen.findByText(/Two-step sign-in is now on\./)).toBeTruthy();
+    expect(await screen.findByText("Backup codes: 10 of 10 left.")).toBeTruthy();
+  });
+  it("Settings: an abandoned setup is cleaned up, and turning it off asks first", async () => {
+    await openSettings();
+    fake.state.mfaFactors = [{ id: "stale", status: "unverified" }];
+    fireEvent.click(await screen.findByRole("button", { name: "Turn on two-step sign-in" }));
+    await screen.findByAltText("QR code for setting up two-step sign-in");
+    expect(fake.called("mfa:unenroll")[0].args).toEqual({ factorId: "stale" });
+    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+    expect(await screen.findByRole("button", { name: "Turn on two-step sign-in" })).toBeTruthy();
+    fake.state.mfaFactors = [{ id: "f1", status: "verified" }];
+    cleanupAndReopen: {
+      fireEvent.keyDown(window, { key: "Escape" });
+    }
+    fireEvent.click(screen.getByRole("button", { name: /^Settings/ }));
+    fireEvent.click(await screen.findByRole("button", { name: "Turn off two-step sign-in" }));
+    fake.state.mfaUnenrollFails = true;
+    fireEvent.click(screen.getByRole("button", { name: "Yes, turn it off" }));
+    expect((await screen.findByRole("alert")).textContent).toMatch(/sign out and sign back in with your code first/);
+    fake.state.mfaUnenrollFails = false;
+    fireEvent.click(screen.getByRole("button", { name: "Turn off two-step sign-in" }));
+    fireEvent.click(screen.getByRole("button", { name: "Yes, turn it off" }));
+    expect(await screen.findByRole("button", { name: "Turn on two-step sign-in" })).toBeTruthy();
+  });
+});
+
+
+const CODES = ["UZ3JK-3SBYG", "RRDMB-7565X", "QWERT-23456", "ASDFG-34567", "ZXCVB-45678", "POIUY-56789", "LKJHG-67892", "MNBVC-78923", "TREWQ-89234", "YTREW-92345"];
+describe("two-step backup codes", () => {
+  const signedInNeedingCode = () => {
+    fake.state.session = { user: { id: "u1" } };
+    fake.state.mfaFactors = [{ id: "f1", status: "verified" }];
+    fake.state.mfaLevel = { currentLevel: "aal1", nextLevel: "aal2" };
+  };
+  it("lost phone: a backup code gets you in, and explains that two-step is now off until it's set up again", async () => {
+    signedInNeedingCode();
+    fake.state.rpc.redeem_two_step_recovery_code = { data: true, error: null };
+    render(<AuthGate><div>the app</div></AuthGate>);
+    fireEvent.click(await screen.findByRole("button", { name: "Lost your phone? Use a backup code" }));
+    expect(screen.getByRole("heading", { name: "Use a backup code" })).toBeTruthy();
+    fireEvent.change(screen.getByLabelText("Backup code"), { target: { value: "abc" } });
+    fireEvent.click(screen.getByRole("button", { name: "Use backup code" }));
+    expect(screen.getByRole("alert").textContent).toMatch(/10 letters and numbers/);
+    fireEvent.change(screen.getByLabelText("Backup code"), { target: { value: "uz3jk 3sbyg" } });
+    fireEvent.click(screen.getByRole("button", { name: "Use backup code" }));
+    expect(await screen.findByRole("heading", { name: "You're in" })).toBeTruthy();
+    expect(fake.called("rpc:redeem_two_step_recovery_code")[0].args).toEqual({ p_code: "uz3jk 3sbyg" });
+    expect(fake.called("auth:refreshSession")).toHaveLength(1);
+    expect(document.body.textContent).toMatch(/set it up again with your new device in Settings/);
+    fake.state.mfaLevel = { currentLevel: "aal1", nextLevel: "aal1" }; // two-step is off now
+    fireEvent.click(screen.getByRole("button", { name: "Continue to Coinrose" }));
+    expect(await screen.findByText("the app")).toBeTruthy();
+  });
+  it("a wrong backup code, or too many tries, says so; you can go back to the authenticator code", async () => {
+    signedInNeedingCode();
+    fake.state.rpc.redeem_two_step_recovery_code = { data: false, error: null };
+    render(<AuthGate><div>the app</div></AuthGate>);
+    fireEvent.click(await screen.findByRole("button", { name: "Lost your phone? Use a backup code" }));
+    fireEvent.change(screen.getByLabelText("Backup code"), { target: { value: "AAAAA-AAAAA" } });
+    fireEvent.click(screen.getByRole("button", { name: "Use backup code" }));
+    expect((await screen.findByRole("alert")).textContent).toMatch(/didn't work\. Each code works only once/);
+    fake.state.rpc.redeem_two_step_recovery_code = { data: null, error: new Error("Too many tries. Wait an hour, then try again.") };
+    fireEvent.click(screen.getByRole("button", { name: "Use backup code" }));
+    await waitFor(() => expect(screen.getByRole("alert").textContent).toMatch(/Too many tries/));
+    expect(screen.queryByText("the app")).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Back to the authenticator code" }));
+    expect(screen.getByRole("heading", { name: "Enter your code" })).toBeTruthy();
+  });
+  it("Settings shows how many backup codes are left, warns when low, and makes a new set", async () => {
+    fake.reset({ membership: { household_id: "h1", role: "owner", households: household }, members: [owner] });
+    fake.state.mfaFactors = [{ id: "f1", status: "verified" }];
+    fake.state.rpc.two_step_recovery_codes_left = { data: 2, error: null };
+    render(<HouseholdGate><TheApp /></HouseholdGate>);
+    await screen.findByText("the app");
+    fireEvent.click(screen.getByRole("button", { name: /^Settings/ }));
+    expect(await screen.findByText(/Backup codes: 2 of 10 left\. Running low/)).toBeTruthy();
+    fake.state.rpc.create_two_step_recovery_codes = { data: CODES, error: null };
+    fireEvent.click(screen.getByRole("button", { name: "Make new backup codes (replaces the old ones)" }));
+    const codes = await screen.findByRole("group", { name: "Your backup codes" });
+    expect(codes.querySelectorAll("li")).toHaveLength(10);
+    Object.assign(navigator, { clipboard: { writeText: vi.fn().mockResolvedValue() } });
+    fireEvent.click(within(codes).getByRole("button", { name: "Copy" }));
+    await waitFor(() => expect(navigator.clipboard.writeText).toHaveBeenCalledWith(CODES.join("\n")));
+    expect(within(codes).getByRole("button", { name: "Copied" })).toBeTruthy();
+  });
+  it("with no codes left, it says so plainly", async () => {
+    fake.reset({ membership: { household_id: "h1", role: "owner", households: household }, members: [owner] });
+    fake.state.mfaFactors = [{ id: "f1", status: "verified" }];
+    fake.state.rpc.two_step_recovery_codes_left = { data: 0, error: null };
+    render(<HouseholdGate><TheApp /></HouseholdGate>);
+    await screen.findByText("the app");
+    fireEvent.click(screen.getByRole("button", { name: /^Settings/ }));
+    expect(await screen.findByText(/You have no backup codes left/)).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Make backup codes" })).toBeTruthy();
+  });
+});

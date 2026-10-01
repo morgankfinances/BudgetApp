@@ -1,6 +1,7 @@
 import React, { useRef, useState } from "react";
 import { StatBlock } from "../components/common.jsx";
-import { BACKUP_COLUMNS, buildBudgetFromRows, buildFromBackupRows, exportBackupCSV, exportBudgetCSV } from "../lib/backup.js";
+import { BACKUP_COLUMNS, buildBudgetFromRows, buildFromBackupRows, exportBackupCSV, exportBudgetCSV, exportFullBackup, readFullBackup } from "../lib/backup.js";
+import { formatDateDisplay, todayISO } from "../lib/utils.js";
 import { readFileAsRows } from "../lib/importing.js";
 import { formatMoney } from "../lib/utils.js";
 
@@ -8,7 +9,23 @@ import { formatMoney } from "../lib/utils.js";
 /* Backup view                                                          */
 /* ------------------------------------------------------------------ */
 
-export function BackupView({ accounts, transactions, categories, budgetGroups, plannedIncome, onRestore, onRestoreBudget }) {
+export function BackupView({ accounts, transactions, categories, budgetGroups, plannedIncome, onRestore, onRestoreBudget, completeLedger = null, onRestoreComplete }) {
+  // Complete backups: one file with everything.
+  const [fullPreview, setFullPreview] = useState(null);
+  const [fullError, setFullError] = useState("");
+  const fullInputRef = useRef(null);
+  async function handleFullFile(e) {
+    const file = e.target.files && e.target.files[0];
+    if (!file) return;
+    setFullError("");
+    setFullPreview(null);
+    try {
+      setFullPreview(readFullBackup(await file.text()));
+    } catch (err) {
+      setFullError(err.message);
+    }
+    if (fullInputRef.current) fullInputRef.current.value = "";
+  }
   const [fileInfo, setFileInfo] = useState(null);
   const [preview, setPreview] = useState(null);
   const [parseError, setParseError] = useState(null);
@@ -105,8 +122,83 @@ export function BackupView({ accounts, transactions, categories, budgetGroups, p
     <div>
       <div className="view-header">
         <h1>Backup</h1>
-        <p>Download everything as one CSV file, or rebuild the app's data from a backup file.</p>
+        <p>Download a copy of everything, or restore from one.</p>
       </div>
+
+      {completeLedger && (
+        <div className="panel">
+          <h3 style={{ marginTop: 0 }}>Complete backup (recommended)</h3>
+          <p className="hint" style={{ marginBottom: 12 }}>
+            One file with everything: accounts and their balances, every transaction (with splits, transfer pairs,
+            comments, and bank transaction IDs), categories, budgets, and your household's settings. Keep it somewhere
+            safe; it contains your financial records.
+          </p>
+          <div className="actions-row">
+            <button
+              className="btn btn-primary"
+              onClick={() => exportFullBackup(completeLedger, todayISO())}
+              disabled={completeLedger.transactions.length === 0 && completeLedger.accounts.length === 0}
+            >
+              Download complete backup
+            </button>
+            <label className="btn btn-secondary" style={{ cursor: "pointer" }}>
+              Restore from a complete backup…
+              <input ref={fullInputRef} type="file" accept=".json,application/json" onChange={handleFullFile} className="visually-hidden" />
+            </label>
+          </div>
+          {fullError && (
+            <div className="error-banner" role="alert" style={{ marginTop: 12 }}>
+              {fullError}
+            </div>
+          )}
+          {fullPreview && (
+            <div className="duplicate-review" role="region" aria-label="Backup to restore">
+              <p style={{ margin: "0 0 6px" }}>
+                <strong>This backup{fullPreview.exportedAt ? ` from ${formatDateDisplay(fullPreview.exportedAt.slice(0, 10))}` : ""} contains:</strong>{" "}
+                {[
+                  `${fullPreview.summary.transactions} transaction${fullPreview.summary.transactions === 1 ? "" : "s"}`,
+                  `${fullPreview.summary.accounts} account${fullPreview.summary.accounts === 1 ? "" : "s"}`,
+                  `${fullPreview.summary.categories} categor${fullPreview.summary.categories === 1 ? "y" : "ies"}`,
+                  fullPreview.summary.budgetGroups ? `${fullPreview.summary.budgetGroups} budget group${fullPreview.summary.budgetGroups === 1 ? "" : "s"}` : null,
+                  fullPreview.summary.splits ? `${fullPreview.summary.splits} split transaction${fullPreview.summary.splits === 1 ? "" : "s"}` : null,
+                  fullPreview.summary.transferPairs ? `${fullPreview.summary.transferPairs} transfer pair${fullPreview.summary.transferPairs === 1 ? "" : "s"}` : null,
+                  fullPreview.summary.comments ? `${fullPreview.summary.comments} comment${fullPreview.summary.comments === 1 ? "" : "s"}` : null,
+                  fullPreview.summary.trackedBalances ? `${fullPreview.summary.trackedBalances} tracked balance${fullPreview.summary.trackedBalances === 1 ? "" : "s"}` : null,
+                  fullPreview.summary.skippedDuplicates ? `${fullPreview.summary.skippedDuplicates} skipped duplicate${fullPreview.summary.skippedDuplicates === 1 ? "" : "s"}` : null,
+                ]
+                  .filter(Boolean)
+                  .join(", ")}
+                .
+              </p>
+              <p className="hint" style={{ margin: "0 0 10px" }}>
+                Restoring replaces everything currently in Coinrose for your household. You can undo it for 7 days from
+                Settings → Data History.
+              </p>
+              <div className="actions-row">
+                <button
+                  className="btn btn-danger"
+                  onClick={() => {
+                    onRestoreComplete(fullPreview.ledger);
+                    setFullPreview(null);
+                  }}
+                >
+                  Replace everything with this backup
+                </button>
+                <button className="btn btn-ghost" onClick={() => setFullPreview(null)}>
+                  Cancel
+                </button>
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+
+      <h2 className="backup-subheading">Spreadsheet copies</h2>
+      <p className="hint" style={{ marginTop: 0 }}>
+        CSV files for opening in Excel or Google Sheets. They don't include splits, transfer pairs, comments, bank
+        transaction IDs, starting balances, skipped duplicates, or your import settings, so restoring from them loses
+        those. To restore everything, use the complete backup above.
+      </p>
 
       <div className="excluded-note" style={{ justifyContent: "flex-start", marginBottom: 16, marginTop: 0 }}>
         <span>

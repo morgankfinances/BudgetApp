@@ -295,7 +295,7 @@ describe("the app's actions each save exactly what changed", () => {
     nav("Backup");
     const file = "Row Type,Item Type,Name,Budget Amount,Budget Period,Budget Type,Accumulate Target,Group,Members,Period,Amount\n" +
       "Settings,,,,,,,,,,3200\nCategory,Category,Rent,1100,monthly,spend,,,,,\n";
-    fireEvent.change(document.querySelectorAll('input[type="file"]')[1], { target: { files: [new File([file], "budget.csv")] } });
+    fireEvent.change(document.querySelectorAll('input[type="file"]:not([accept*="json"])')[1], { target: { files: [new File([file], "budget.csv")] } }); // the spreadsheet (CSV) pickers
     fireEvent.click(await screen.findByRole("button", { name: /Apply/ }));
     await flush();
     expect(lastSave().settings.props.plannedIncome).toBe(3200);
@@ -307,7 +307,7 @@ describe("the app's actions each save exactly what changed", () => {
     nav("Backup");
     const file = "Account,Date,Description,Money Out,Money In,Category,Category Excluded,Category Income,Uploaded At,Upload Batch,Not A Duplicate,Counts Toward Period\n" +
       "Vault,2026-09-01,Only row,5,,Misc,No,No,,,No,\n";
-    fireEvent.change(document.querySelectorAll('input[type="file"]')[0], { target: { files: [new File([file], "ledger.csv")] } });
+    fireEvent.change(document.querySelectorAll('input[type="file"]:not([accept*="json"])')[0], { target: { files: [new File([file], "ledger.csv")] } }); // the spreadsheet (CSV) pickers
     fireEvent.click(await screen.findByRole("button", { name: "Replace everything with this backup" }));
     fireEvent.click(screen.getByRole("button", { name: "Yes, replace everything" }));
     await flush();
@@ -631,3 +631,56 @@ describe("comments", () => {
     expect(screen.queryByRole("button", { name: /^Delete your comment/ })).toBeNull();
   });
 });
+
+describe("the guided tour, start to finish", () => {
+  it("visits every page it describes, in order, including Accounts and Insights, and ends on the Overview", async () => {
+    localStorage.clear();
+    await openApp({ seenTutorial: false });
+    fireEvent.click(await screen.findByRole("button", { name: "Start the tour" }));
+    const titles = [];
+    for (let i = 0; i < 20; i += 1) {
+      await waitFor(() => expect(document.title).toMatch(/\| Coinrose$/));
+      titles.push(document.title.replace(" | Coinrose", ""));
+      const next = screen.queryByRole("button", { name: "Next" });
+      if (!next) break;
+      fireEvent.click(next);
+    }
+    const pages = titles.filter((t, i) => t !== titles[i - 1]); // each page once, in the order visited
+    expect(pages).toEqual(["Overview", "Upload", "Accounts", "Transactions", "Categories", "Reports", "Insights", "Planning", "Budget Groups", "Budget", "Backup", "Overview"]);
+    expect(document.body.textContent).toMatch(/turn on two-step sign-in/);
+  });
+});
+
+describe("balances and complete backups, through the app", () => {
+  it("a starting balance is saved with the account, and removing it stops tracking", async () => {
+    const { nav, lastSave } = await openApp();
+    nav("Accounts");
+    fireEvent.click(screen.getByRole("button", { name: "Track the balance of Millbrook Checking" }));
+    fireEvent.change(screen.getByLabelText("Balance"), { target: { value: "1500" } });
+    fireEvent.change(screen.getByLabelText("At the end of"), { target: { value: "2026-09-01" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save starting balance" }));
+    await flush();
+    expect(lastSave().upserts.accounts).toEqual([expect.objectContaining({ id: "acct-chk", props: expect.objectContaining({ startingBalance: { amount: 1500, date: "2026-09-01", owed: false } }) })]);
+    expect(document.querySelector(".balance-row").textContent).toMatch(/Estimated balance/);
+    fireEvent.click(screen.getByRole("button", { name: "Change the starting balance for Millbrook Checking" }));
+    fireEvent.click(screen.getByRole("button", { name: "Stop tracking" }));
+    await flush();
+    expect(lastSave().upserts.accounts[0].props.startingBalance).toBeUndefined();
+  });
+  it("restoring a complete backup replaces everything, including the household's settings", async () => {
+    const { nav, lastSave } = await openApp();
+    nav("Backup");
+    const backup = buildFullBackup({ accounts: [{ id: "new-acct", name: "Restored Checking" }], categories: [{ id: "c-new", name: "Restored Category" }], budgetGroups: [],
+      transactions: [{ id: "r1", accountId: "new-acct", date: "2026-09-10", description: "Restored", amountOut: 5, amountIn: null, categoryId: "c-new", comments: [{ id: "k", text: "kept", authorId: "u", at: "2026-09-10T00:00:00Z" }] }],
+      plannedIncome: 1234, duplicateHandling: "off", autoApplySuggestions: false, hiddenRecurring: ["out|x"] });
+    fireEvent.change(document.querySelector('input[type="file"][accept*="json"]'), { target: { files: [new File([JSON.stringify(backup)], "coinrose-backup.json")] } });
+    fireEvent.click(await screen.findByRole("button", { name: "Replace everything with this backup" }));
+    await flush();
+    const save = lastSave();
+    expect(save.upserts.transactions).toEqual([expect.objectContaining({ id: "r1", props: expect.objectContaining({ comments: [expect.objectContaining({ text: "kept" })] }) })]);
+    expect(save.deletes.transactions).toHaveLength(10);
+    expect(save.settings.props).toEqual(expect.objectContaining({ plannedIncome: 1234, duplicateHandling: "off", autoApplySuggestions: false, hiddenRecurring: ["out|x"] }));
+    expect(document.body.textContent).toMatch(/Restored everything from the complete backup/);
+  });
+});
+import { buildFullBackup } from "../lib/backup.js";

@@ -736,6 +736,23 @@ export const STYLES = `
 .comment-input { font: inherit; font-size: 13.5px; padding: 8px 10px; border: 1px solid var(--border); border-radius: var(--radius); background: var(--panel); color: var(--ink); resize: vertical; }
 .comment-input:focus { outline: 2px solid var(--accent); outline-offset: 1px; }
 
+/* Backup page. */
+.ledger-root .backup-subheading { font-size: 17px; margin: 36px 0 6px; }
+
+/* Accounts: estimated balances. */
+.balance-summary { margin-bottom: 16px; }
+.balance-row { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; flex-wrap: wrap; padding: 10px 14px 12px; border-top: 1px dashed var(--border); }
+.balance-label { font-size: 11.5px; text-transform: uppercase; letter-spacing: .04em; color: var(--ink-muted); }
+.balance-value { font-size: 20px; font-weight: 600; font-family: 'Coinrose Heading', -apple-system, 'Segoe UI', sans-serif; }
+.balance-editor { flex-basis: 100%; display: grid; gap: 10px; max-width: 640px; }
+.balance-editor-fields { display: flex; gap: 14px; flex-wrap: wrap; align-items: flex-end; font-size: 13.5px; }
+.balance-editor-fields > label, .balance-field { display: grid; gap: 4px; font-weight: 600; }
+.balance-editor-fields input[type="number"], .balance-editor-fields input[type="date"] {
+  font: inherit; font-weight: 400; padding: 6px 8px; border: 1px solid var(--border); border-radius: var(--radius); background: var(--panel); color: var(--ink);
+}
+.balance-input { display: inline-flex; align-items: center; gap: 4px; font-weight: 400; }
+.balance-input input { width: 130px; }
+
 /* Suggested categories: what was filled in automatically, with one-click
    confirm and apply. */
 .suggest-banner {

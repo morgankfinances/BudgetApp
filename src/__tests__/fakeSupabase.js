@@ -53,6 +53,33 @@ export function makeFakeSupabase() {
       updateUser: async (args) => { record("auth:updateUser", args); return result("updateUser", { error: null }); },
       reauthenticate: async () => { record("auth:reauthenticate"); return result("reauthenticate", { error: null }); },
       signOut: async (args) => { record("auth:signOut", args); return { error: null }; },
+      refreshSession: async () => { record("auth:refreshSession"); return { data: {}, error: null }; },
+      // Two-step sign-in (authenticator app codes), like Supabase's.
+      mfa: {
+        getAuthenticatorAssuranceLevel: async () => ({ data: sb.state.mfaLevel || { currentLevel: "aal1", nextLevel: "aal1" }, error: null }),
+        listFactors: async () => {
+          const all = sb.state.mfaFactors || [];
+          return { data: { totp: all.filter((f) => f.status === "verified"), all }, error: null };
+        },
+        enroll: async (args) => {
+          record("mfa:enroll", args);
+          sb.state.mfaFactors = [...(sb.state.mfaFactors || []), { id: "f-new", status: "unverified" }];
+          return { data: { id: "f-new", totp: { qr_code: "<svg xmlns='http://www.w3.org/2000/svg'/>", secret: "JBSWY3DPEHPK3PXP", uri: "otpauth://totp/Coinrose" } }, error: null };
+        },
+        challengeAndVerify: async (args) => {
+          record("mfa:challengeAndVerify", args);
+          if (sb.state.mfaVerifyFails) return { data: null, error: new Error("Invalid TOTP code entered") };
+          sb.state.mfaFactors = (sb.state.mfaFactors || []).map((f) => (f.id === args.factorId ? { ...f, status: "verified" } : f));
+          sb.state.mfaLevel = { currentLevel: "aal2", nextLevel: "aal2" };
+          return { data: {}, error: null };
+        },
+        unenroll: async (args) => {
+          record("mfa:unenroll", args);
+          if (sb.state.mfaUnenrollFails) return { data: null, error: new Error("AAL2 required") };
+          sb.state.mfaFactors = (sb.state.mfaFactors || []).filter((f) => f.id !== args.factorId);
+          return { data: {}, error: null };
+        },
+      },
     },
   };
   sb.reset();

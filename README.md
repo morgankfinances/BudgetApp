@@ -25,6 +25,9 @@ Coinrose never connects to your bank and never asks for bank logins. You upload 
 - Split transactions: divide one purchase among several categories by amount, evenly (halves, thirds, quarters), or by percentage, always adding up to the cent. Budgets, reports, and totals count each piece in its own category.
 - Browsing shows one month at a time (starting with the newest), while searching and "find" filters look across all time; at most 200 rows show at once, with Show more.
 
+### Accounts
+- Estimated balances: enter a starting balance as of a date (or the amount owed, for a card or loan), and Coinrose adds and subtracts every uploaded transaction after it. Clearly labeled as an estimate, since Coinrose never connects to a bank. Totals across tracked accounts.
+
 ### Categories
 - Add, rename, merge, and delete categories; names must be unique (ignoring capitalization).
 - Mark categories as income, or exclude them (for example, transfers between your own accounts).
@@ -49,14 +52,15 @@ Coinrose never connects to your bank and never asks for bank logins. You upload 
 - This period's money in and out, what needs attention, and top spending, with links into the details.
 
 ### Households
-- Sign in with an emailed link or a password.
+- Sign in with an emailed link or a password, with optional two-step sign-in (an authenticator app code), enforced by the database as well as the app. Ten one-time backup codes (stored only as hashes) let people back in if they lose their phone; using one turns two-step off so they can set it up again with a new device.
 - Create a household, or join one with an invite code. **Owners** approve join requests (choosing whether the new person is an owner or a member), change roles, remove people, and rename the household. Every household keeps at least one owner.
 - Someone who leaves or is removed keeps a copy of the household's data up to that point, unless an owner removes them without one.
 - **Data History:** save points from the last 7 days; restoring one undoes everything after it, and the restore can itself be undone.
 - Full account deletion from Settings.
 
 ### Backup and restore
-- Export the ledger or the budget setup as CSV files; restore either one. Exported cells that could run as spreadsheet formulas are neutralized, and restored exactly.
+- Complete backups: one JSON file with everything (accounts and balances, every transaction with its splits, transfer pair, comments, and bank ID, categories, budgets, and household settings), previewed before restoring, and undoable from Data History. Files from newer versions are refused rather than half-read.
+- Spreadsheet copies: the ledger or the budget setup as CSV files. Exported cells that could run as spreadsheet formulas are neutralized, and restored exactly.
 
 ### Appearance and accessibility
 - Three themes (Slate, Natural, and Midnight), a hideable sidebar on desktop, and a phone layout with a menu drawer.

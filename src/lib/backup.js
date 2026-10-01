@@ -511,3 +511,109 @@ export function buildBudgetFromRows(rows, currentCategories, currentBudgetGroups
     groupCount: Object.keys(groupDefs).length,
   };
 }
+
+/* ------------------------------------------------------------------ */
+/* Complete backups                                                     */
+/* ------------------------------------------------------------------ */
+// One file with everything Coinrose stores: accounts (with column settings
+// and starting balances), every transaction (with bank IDs, splits,
+// transfer pairs, comments, and suggested or skipped marks), categories,
+// budget groups, and the household's settings. The CSV backups above are
+// spreadsheet-friendly copies, but they can't hold all of that.
+
+export const FULL_BACKUP_FORMAT = "coinrose-backup";
+export const FULL_BACKUP_VERSION = 1;
+
+// The settings a complete backup carries (the same ones saved for the
+// household).
+const SETTINGS_KEYS = [
+  "plannedIncome",
+  "incomeWarningDismissed",
+  "hiddenBudgetMonths",
+  "excludeUnassignedFromBudget",
+  "autoApplySuggestions",
+  "duplicateHandling",
+  "hiddenRecurring",
+];
+
+export function buildFullBackup(ledger, exportedAt = new Date().toISOString()) {
+  const settings = Object.fromEntries(SETTINGS_KEYS.map((k) => [k, ledger[k] === undefined ? null : ledger[k]]));
+  return {
+    format: FULL_BACKUP_FORMAT,
+    version: FULL_BACKUP_VERSION,
+    exportedAt,
+    data: {
+      accounts: ledger.accounts || [],
+      categories: ledger.categories || [],
+      budgetGroups: ledger.budgetGroups || [],
+      // The account name comes from the account itself, so it isn't repeated.
+      transactions: (ledger.transactions || []).map(({ accountName, ...t }) => t), // eslint-disable-line no-unused-vars
+      settings,
+    },
+  };
+}
+
+export function downloadJSON(value, filename) {
+  const blob = new Blob([JSON.stringify(value, null, 2)], { type: "application/json" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+}
+
+export function exportFullBackup(ledger, today) {
+  downloadJSON(buildFullBackup(ledger), `coinrose-backup-${today}.json`);
+}
+
+// Reads a complete backup file's text. Returns { ledger, summary }, where
+// ledger is ready to restore (the same shape the app loads), or throws an
+// Error with a message meant for the person restoring.
+export function readFullBackup(text) {
+  let parsed;
+  try {
+    parsed = JSON.parse(text);
+  } catch (e) {
+    throw new Error("This file isn't a Coinrose complete backup (it couldn't be read as one).");
+  }
+  if (!parsed || parsed.format !== FULL_BACKUP_FORMAT) {
+    throw new Error("This file isn't a Coinrose complete backup.");
+  }
+  if (typeof parsed.version !== "number" || parsed.version > FULL_BACKUP_VERSION) {
+    throw new Error("This backup was made by a newer version of Coinrose. Refresh the page to get the latest version, then try again.");
+  }
+  const data = parsed.data || {};
+  const list = (x) => (Array.isArray(x) ? x.filter((item) => item && typeof item === "object" && typeof item.id === "string") : []);
+  const accounts = list(data.accounts);
+  const accountName = new Map(accounts.map((a) => [a.id, a.name || ""]));
+  const transactions = list(data.transactions)
+    .filter((t) => typeof t.accountId === "string")
+    .map((t) => ({ ...t, accountName: accountName.get(t.accountId) || "" }));
+  const settings = data.settings && typeof data.settings === "object" ? data.settings : {};
+  const ledger = {
+    accounts,
+    categories: list(data.categories),
+    budgetGroups: list(data.budgetGroups),
+    transactions,
+    ...Object.fromEntries(SETTINGS_KEYS.filter((k) => settings[k] !== undefined && settings[k] !== null).map((k) => [k, settings[k]])),
+  };
+  const count = (pred) => transactions.filter(pred).length;
+  return {
+    ledger,
+    exportedAt: typeof parsed.exportedAt === "string" ? parsed.exportedAt : null,
+    summary: {
+      accounts: accounts.length,
+      transactions: count((t) => !t.skippedDuplicateOf),
+      categories: ledger.categories.length,
+      budgetGroups: ledger.budgetGroups.length,
+      splits: count((t) => Array.isArray(t.splits) && t.splits.length > 0),
+      transferPairs: count((t) => t.transferWith) / 2,
+      comments: transactions.reduce((s, t) => s + (Array.isArray(t.comments) ? t.comments.length : 0), 0),
+      skippedDuplicates: count((t) => t.skippedDuplicateOf),
+      trackedBalances: accounts.filter((a) => a.startingBalance).length,
+    },
+  };
+}

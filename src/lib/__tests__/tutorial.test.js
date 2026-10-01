@@ -1,7 +1,9 @@
 import { describe, it, expect, beforeEach } from "vitest";
 import { TUTORIAL_SEEN_KEY, TUTORIAL_EVENT, tutorialAlreadySeen, markTutorialSeen, TUTORIAL_STEPS } from "../tutorial.js";
 
-const VIEWS = ["overview", "transactions", "reports", "accounts", "categories", "upload", "planning", "budgetGroups", "budget", "backup"];
+import { VIEW_TITLES } from "../../constants.js";
+// Every real page, straight from the app (so a new page is never missing).
+const VIEWS = Object.keys(VIEW_TITLES);
 
 describe("tutorial", () => {
   beforeEach(() => localStorage.clear());

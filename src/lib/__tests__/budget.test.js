@@ -64,7 +64,12 @@ describe("computeBudgetPeriodData", () => {
     { categoryId: null, date: "2026-09-06", amountOut: 999 },                    // uncategorized: ignored
     { categoryId: "groc", date: null, amountOut: 999 },                          // no date: ignored
   ];
-  const data = computeBudgetPeriodData(tx, buildBudgetItems(categories, groups), "monthly");
+  // Computed after the fixed test date is set (not when the file loads, which
+  // would use the real calendar and break when the real month changes).
+  let data;
+  beforeEach(() => {
+    data = computeBudgetPeriodData(tx, buildBudgetItems(categories, groups), "monthly");
+  });
 
   it("includes only items budgeted on this cadence", () => {
     expect(data.budgeted.map((b) => b.id).sort()).toEqual(["cat:dine", "cat:fund", "cat:groc", "group:g1"]);

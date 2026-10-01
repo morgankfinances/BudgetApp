@@ -5,7 +5,7 @@ import { DecoRing, LoadingIndicator, ThemedLogo } from "./householdGate.jsx";
 import { computeLedgerChanges, fetchLedgerVersion, hasChanges, saveLedgerChanges } from "./ledgerStore.js";
 import { applyCategorySuggestions, computeDuplicates, isSkippedDuplicate, isUnconfirmedSuggestion, sortImportDuplicates, withoutSuggestedFlag } from "./lib/analysis.js";
 import { mapRow } from "./lib/importing.js";
-import { loadData } from "./lib/ledgerData.js";
+import { loadData, normalizeLoadedLedger } from "./lib/ledgerData.js";
 import { TUTORIAL_EVENT, TUTORIAL_STEPS, markTutorialSeen, tutorialAlreadySeen } from "./lib/tutorial.js";
 import { formatMoney, todayISO, uid } from "./lib/utils.js";
 import { STYLES } from "./styles.js";
@@ -405,6 +405,21 @@ function App({ householdName, currentUserId = null, householdMembers = [] } = {}
     [accounts, transactions, categories, budgetGroups, plannedIncome, incomeWarningDismissed, hiddenBudgetMonths, excludeUnassignedFromBudget, persist]
   );
 
+  // An account's starting balance ({ amount, date, owed }), or null to stop
+  // tracking its balance.
+  const handleSetStartingBalance = useCallback(
+    (accountId, startingBalance) => {
+      const nextAccounts = accounts.map((a) => {
+        if (a.id !== accountId) return a;
+        if (startingBalance) return { ...a, startingBalance };
+        const { startingBalance: _gone, ...rest } = a; // eslint-disable-line no-unused-vars
+        return rest;
+      });
+      persist(nextAccounts, transactions, categories, budgetGroups, plannedIncome, incomeWarningDismissed, hiddenBudgetMonths, excludeUnassignedFromBudget);
+    },
+    [accounts, transactions, categories, budgetGroups, plannedIncome, incomeWarningDismissed, hiddenBudgetMonths, excludeUnassignedFromBudget, persist]
+  );
+
   const handleUpdateAccountSettings = useCallback(
     (accountId, mapping) => {
       const nextAccounts = accounts.map((a) =>
@@ -448,6 +463,24 @@ function App({ householdName, currentUserId = null, householdMembers = [] } = {}
       );
     },
     [budgetGroups, plannedIncome, incomeWarningDismissed, hiddenBudgetMonths, excludeUnassignedFromBudget, persist]
+  );
+
+  // Restore a complete backup: replaces everything, settings included. (It's
+  // recorded in Data History like any save, so it can be undone for 7 days.)
+  const handleRestoreComplete = useCallback(
+    (ledger) => {
+      const snap = normalizeLoadedLedger(ledger);
+      autoApplyRef.current = snap.autoApplySuggestions !== false;
+      setAutoApplySuggestions(autoApplyRef.current);
+      duplicateRef.current = snap.duplicateHandling || "skip";
+      setDuplicateHandling(duplicateRef.current);
+      hiddenRecurringRef.current = snap.hiddenRecurring || [];
+      setHiddenRecurring(hiddenRecurringRef.current);
+      persist(snap.accounts, snap.transactions, snap.categories, snap.budgetGroups, snap.plannedIncome, snap.incomeWarningDismissed, snap.hiddenBudgetMonths, snap.excludeUnassignedFromBudget);
+      setToast("Restored everything from the complete backup. You can undo this from Settings → Data History for 7 days.");
+      setView("overview");
+    },
+    [persist]
   );
 
   const handleRestoreBudget = useCallback(
@@ -1217,6 +1250,7 @@ function App({ householdName, currentUserId = null, householdMembers = [] } = {}
               onDelete={handleDeleteAccount}
               onRename={handleRenameAccount}
               onUpdateSettings={handleUpdateAccountSettings}
+              onSetStartingBalance={handleSetStartingBalance}
               onAddTransactions={goToUpload}
               onGoUpload={goToUpload}
             />
@@ -1242,6 +1276,8 @@ function App({ householdName, currentUserId = null, householdMembers = [] } = {}
               plannedIncome={plannedIncome}
               onRestore={handleRestoreFromBackup}
               onRestoreBudget={handleRestoreBudget}
+              completeLedger={{ accounts, transactions, categories, budgetGroups, plannedIncome, incomeWarningDismissed, hiddenBudgetMonths, excludeUnassignedFromBudget, autoApplySuggestions, duplicateHandling, hiddenRecurring }}
+              onRestoreComplete={handleRestoreComplete}
             />
           )}
         </div>

@@ -775,3 +775,75 @@ describe("Insights: dates in order, and the full list behind a card", () => {
     ]);
   });
 });
+
+describe("Accounts: estimated balances", () => {
+  const open = (accounts, onSetStartingBalance = vi.fn()) =>
+    render(<AccountsView accounts={accounts} transactions={F.transactions} onDelete={vi.fn()} onAddTransactions={vi.fn()} onRename={vi.fn()}
+      onUpdateSettings={vi.fn()} onGoUpload={vi.fn()} onSetStartingBalance={onSetStartingBalance} />);
+  it("always explains that balances are estimates, not a bank connection", () => {
+    open(F.accounts);
+    expect(document.body.textContent).toMatch(/Balances are estimates\. Coinrose isn't connected to your bank\./);
+    expect(document.body.textContent).toMatch(/pending transactions, fees, or statements you haven't uploaded yet/);
+  });
+  it("tracking a balance: a starting amount as of a day, saved only when both are valid", () => {
+    const onSet = vi.fn();
+    open(F.accounts, onSet);
+    fireEvent.click(screen.getByRole("button", { name: "Track the balance of Griffon Card" }));
+    const editor = screen.getByRole("group", { name: "Starting balance for Griffon Card" });
+    expect(within(editor).getByText(/It's an estimate: Coinrose isn't connected to\s+your bank/)).toBeTruthy();
+    const save = within(editor).getByRole("button", { name: "Save starting balance" });
+    fireEvent.change(within(editor).getByLabelText("Balance"), { target: { value: "" } });
+    expect(save.disabled).toBe(true);
+    fireEvent.change(within(editor).getByLabelText("Balance"), { target: { value: "750.555" } });
+    fireEvent.change(within(editor).getByLabelText("At the end of"), { target: { value: "2026-09-01" } });
+    fireEvent.click(within(editor).getByLabelText(/This is a credit card or loan/));
+    expect(within(editor).getByLabelText("Amount owed")).toBeTruthy();
+    fireEvent.click(save);
+    expect(onSet).toHaveBeenCalledWith("acct-card", { amount: 750.56, date: "2026-09-01", owed: true });
+  });
+  it("shows the estimate, how it was worked out, the total, and can stop tracking", () => {
+    const onSet = vi.fn();
+    open(F.accounts.map((a) => (a.id === "acct-chk" ? { ...a, startingBalance: { amount: 1000, date: "2026-09-01", owed: false } } : a)), onSet);
+    const est = estimateNumbers();
+    expect(est).toMatch(/Estimated balance/);
+    expect(est).toMatch(/From \$1,000\.00 on Sep 1, 2026, plus \d+ transactions? since \(newest uploaded: Sep \d+, 2026\)\./);
+    expect(screen.getByText("In accounts (estimated)")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Change the starting balance for Millbrook Checking" }));
+    fireEvent.click(screen.getByRole("button", { name: "Stop tracking" }));
+    expect(onSet).toHaveBeenCalledWith("acct-chk", null);
+  });
+  const estimateNumbers = () => document.querySelector(".balance-row").textContent;
+});
+
+describe("Backup: complete backups", () => {
+  const complete = { accounts: F.accounts, transactions: F.transactions, categories: F.categories, budgetGroups: F.budgetGroups, plannedIncome: 2700 };
+  const open = (onRestoreComplete = vi.fn()) =>
+    render(<BackupView accounts={F.accounts} transactions={F.transactions} categories={F.categories} budgetGroups={F.budgetGroups} plannedIncome={2700}
+      onRestore={vi.fn()} onRestoreBudget={vi.fn()} completeLedger={complete} onRestoreComplete={onRestoreComplete} />);
+  const pick = (text, name = "coinrose-backup.json") =>
+    fireEvent.change(document.querySelector('input[type="file"][accept*="json"]'), { target: { files: [new File([text], name)] } });
+  it("recommends the complete backup, and says what the spreadsheet copies leave out", () => {
+    open();
+    expect(screen.getByRole("heading", { name: "Complete backup (recommended)" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Download complete backup" }).disabled).toBe(false);
+    expect(document.body.textContent).toMatch(/They don't include splits, transfer pairs, comments, bank\s+transaction IDs, starting balances/);
+  });
+  it("previews what a backup contains, then replaces everything only when confirmed", async () => {
+    const onRestoreComplete = vi.fn();
+    open(onRestoreComplete);
+    const file = buildFullBackup({ ...complete, transactions: F.transactions.map((t, i) => (i === 0 ? { ...t, comments: [{ id: "c", text: "hi", authorId: "u", at: "2026-09-01T00:00:00Z" }] } : t)) }, "2026-09-20T08:00:00Z");
+    pick(JSON.stringify(file));
+    const preview = await screen.findByRole("region", { name: "Backup to restore" });
+    expect(preview.textContent).toMatch(/This backup from Sep 20, 2026 contains: 10 transactions, 2 accounts, \d+ categories, 1 budget group, 1 comment\./);
+    expect(onRestoreComplete).not.toHaveBeenCalled();
+    fireEvent.click(within(preview).getByRole("button", { name: "Replace everything with this backup" }));
+    expect(onRestoreComplete).toHaveBeenCalledTimes(1);
+    expect(onRestoreComplete.mock.calls[0][0].transactions).toHaveLength(10);
+  });
+  it("explains a file that isn't a complete backup", async () => {
+    open();
+    pick("Date,Description\n1,2", "ledger.csv");
+    expect((await screen.findByRole("alert")).textContent).toMatch(/isn't a Coinrose complete backup/);
+  });
+});
+import { buildFullBackup } from "../lib/backup.js";

@@ -49,32 +49,47 @@ export const TUTORIAL_STEPS = [
   {
     view: "overview",
     title: "Your Overview",
-    body: "This is your home page. Once you've added transactions, it shows this period's money in and out, your top spending categories, and anything that needs attention, like a budget running over or transactions waiting to be categorized.",
+    body: "This is your home page. It shows this period's money in and out, your top spending, bills coming up in the next two weeks, and anything that needs attention, like a budget running over or transactions waiting for a category. The arrows step back to earlier periods.",
   },
   {
     view: "overview",
     title: "Getting around",
-    body: "Every page lives in the sidebar on the left, grouped into Ledger, Budgeting, and Data. On a phone, tap the ☰ button at the top of the screen to open it.",
+    body: "Every page lives in the sidebar on the left, grouped into Ledger, Budgeting, and Data. On a computer, the arrow at its top corner hides it for more room. On a phone, tap the ☰ button at the top of the screen to open it.",
   },
   {
     view: "upload",
     title: "Start by uploading a statement",
-    body: "Download your transactions from your bank or credit card's website (as CSV, Excel, or, best of all, OFX or QFX), then upload it here. Coinrose guesses which columns hold the date, description, and amounts, and you confirm. Each bank account or card becomes its own account in Coinrose.",
+    body: "Download your transactions from your bank or card's website (as CSV, Excel, or, best of all, OFX or QFX) and upload them here. Choose the file, then confirm which account it's from. Anything already in Coinrose is skipped automatically, so overlapping statements are fine.",
+  },
+  {
+    view: "accounts",
+    title: "Your accounts",
+    body: "Each bank account or card is listed here. To track a balance, enter a starting balance as of a date, and Coinrose adds and subtracts everything you upload after it. It's an estimate from your uploads, since Coinrose never connects to your bank.",
   },
   {
     view: "transactions",
     title: "Categorize your transactions",
-    body: "Everything you upload lands here. Choose a category for each transaction from its dropdown. As you go, Coinrose learns from your choices and fills in categories for similar transactions you import later. Those count right away and are marked Suggested until you confirm or change them. Filters at the top find uncategorized transactions, a date range, or a recent upload.",
+    body: "Everything you upload lands here, a month at a time (searching looks across all months). Pick a category for each transaction; Coinrose learns from your choices and fills in categories it recognizes, marked Suggested until you confirm. Split divides a purchase among categories, and 💬 leaves a comment for your household.",
+  },
+  {
+    view: "transactions",
+    title: "Transfers between your accounts",
+    body: "Moving money between your own accounts, like paying the credit card, isn't spending or income. When Coinrose spots a likely transfer, it asks you to confirm it here, so it isn't counted twice.",
   },
   {
     view: "categories",
     title: "Shape your categories",
-    body: "Add, rename, or merge categories to match how you actually spend. Mark paychecks and other income as income, and exclude transfers between your own accounts so they don't count as spending.",
+    body: "Add, rename, or merge categories to match how you actually spend. Mark paychecks and other income as income, and exclude anything that shouldn't count as spending.",
   },
   {
     view: "reports",
     title: "See where your money goes",
     body: "Reports charts your spending by category over time. Choose weekly, monthly, or custom periods to match how you're paid, switch between bar and donut charts, and hide big, steady categories like rent to see everything else more clearly.",
+  },
+  {
+    view: "insights",
+    title: "Insights",
+    body: "Insights spots patterns for you: recurring bills, subscriptions, and paychecks, with when each is next expected, plus quick observations like how this month compares with last. It only reads your transactions; nothing there changes them.",
   },
   {
     view: "planning",
@@ -94,11 +109,11 @@ export const TUTORIAL_STEPS = [
   {
     view: "backup",
     title: "Keep a backup",
-    body: "Now and then, download a copy of your transactions and budget setup here. The same page can restore from those files if you ever need to.",
+    body: "Now and then, download a complete backup here: one file with everything, including splits, comments, and balances. If you ever need it, the same page restores from it.",
   },
   {
     view: "overview",
     title: "You're all set",
-    body: "Settings, in the bottom-right corner, is where you invite household members, choose a light or dark theme, set a password, and replay this tour.",
+    body: "Settings, in the bottom-right corner, is where you invite household members, choose a theme, set a password, turn on two-step sign-in, choose how imports handle duplicates and suggestions, and replay this tour.",
   },
 ];

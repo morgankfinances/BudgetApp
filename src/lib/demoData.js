@@ -34,6 +34,12 @@ const ACCOUNTS = [
   { id: "demo-card", name: "Griffon Reserve Credit Card", dateCol: "Date", descriptionCol: "Description", outCol: "Amount", inCol: "Amount", invertSign: true },
 ];
 
+const STARTING_BALANCES = {
+  "demo-chk": { amount: 3180.42, owed: false },
+  "demo-sav": { amount: 8250, owed: false },
+  "demo-card": { amount: 912.37, owed: true },
+};
+
 const category = (id, name, extra = {}) => ({
   id,
   name,
@@ -64,6 +70,8 @@ function buildCategories(historyStart) {
       createdAt: historyStart,
     }),
     category("demo-fun", "Fun & Hobbies", { budgetAmount: 90, budgetPeriod: "monthly" }),
+    category("demo-car", "Car & Insurance"),
+    category("demo-kids", "Childcare"),
     category("demo-xfer", "Transfers", { excluded: true }),
   ];
 }
@@ -149,18 +157,26 @@ export function buildDemoLedger(today = todayISO()) {
     // Monthly bills and subscriptions
     if (dom === 1) add("demo-chk", day, "Hearthside Property Management", 1450, null, "demo-rent");
     if (dom === 2) {
-      add("demo-chk", day, "Transfer to Savings", 400, null, "demo-xfer");
-      add("demo-sav", day, "Transfer from Checking", null, 400, "demo-xfer");
+      add("demo-chk", day, "Transfer to Savings", 1500, null, "demo-xfer");
+      add("demo-sav", day, "Transfer from Checking", null, 1500, "demo-xfer");
       transferPairs.push([transactions.at(-2), transactions.at(-1)]);
     }
     if (dom === 3) add("demo-card", day, "Whisperwire Music", 10.99, null, "demo-subs");
     if (dom === 6) add("demo-chk", day, "Glowlight Electric", between(78, 142), null, "demo-elec");
+    if (dom === 5) add("demo-chk", day, "Little Acorns Childcare", 1480, null, "demo-kids");
+    if (dom === 10) add("demo-chk", day, "Summit Auto Loan", 412.18, null, "demo-car");
+    if (dom === 20) add("demo-chk", day, "Evergreen Insurance", 186.5, null, "demo-car");
     if (dom === 9) add("demo-card", day, "Almanac Streaming", 15.49, null, "demo-subs");
     if (dom === 12) add("demo-chk", day, "Riverbend Water Utility", between(36, 58), null, "demo-water");
     if (dom === 18) add("demo-chk", day, "Starlane Fiber", 69.99, null, "demo-net");
     if (dom === 21) add("demo-card", day, "Cloudnest Storage", 2.99, null, "demo-subs");
     if (dom === 25) {
-      const payment = between(900, 1300);
+      // Pays the card's charges from last month in full, like a statement.
+      const lastMonth = getMonthStartISO(addDaysISO(getMonthStartISO(day), -1)).slice(0, 7);
+      const charged = transactions
+        .filter((t) => t.accountId === "demo-card" && t.amountOut && t.date.slice(0, 7) === lastMonth)
+        .reduce((sum, t) => sum + t.amountOut, 0);
+      const payment = money(charged || between(900, 1300));
       add("demo-chk", day, "Griffon Reserve Card Payment", payment, null, "demo-xfer");
       add("demo-card", addDaysISO(day, 1) <= today ? addDaysISO(day, 1) : day, "Payment Received - Thank You", null, payment, "demo-xfer");
       transferPairs.push([transactions.at(-2), transactions.at(-1)]);
@@ -216,11 +232,16 @@ export function buildDemoLedger(today = todayISO()) {
   });
 
   return {
-    accounts: ACCOUNTS.map((a) => ({ ...a })),
+    // Starting balances as of the day before the history begins, so every
+    // transaction counts toward the estimate.
+    accounts: ACCOUNTS.map((a) => ({
+      ...a,
+      startingBalance: { amount: STARTING_BALANCES[a.id].amount, date: addDaysISO(historyStart, -1), owed: STARTING_BALANCES[a.id].owed },
+    })),
     categories: buildCategories(historyStart),
     budgetGroups: BUDGET_GROUPS.map((g) => ({ ...g, categoryIds: [...g.categoryIds] })),
     transactions,
-    plannedIncome: 7600,
+    plannedIncome: 7950,
     incomeWarningDismissed: false,
     hiddenBudgetMonths: [],
     excludeUnassignedFromBudget: false,

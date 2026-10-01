@@ -176,3 +176,49 @@ describe("downloading", () => {
     expect(document.querySelectorAll("a").length).toBe(0);
   });
 });
+
+import { buildFullBackup, readFullBackup, FULL_BACKUP_FORMAT, FULL_BACKUP_VERSION } from "../backup.js";
+import { normalizeLoadedLedger } from "../ledgerData.js";
+describe("complete backups", () => {
+  const ledger = {
+    accounts: [{ id: "a1", name: "Checking", dateCol: "Date", idCol: "Ref", startingBalance: { amount: 2400, date: "2026-06-01", owed: false } }],
+    categories: [{ id: "c1", name: "Groceries", budgetAmount: 500 }, { id: "x", name: "Transfers", excluded: true }],
+    budgetGroups: [{ id: "g1", name: "Food", categoryIds: ["c1"] }],
+    transactions: [
+      { id: "t1", accountId: "a1", accountName: "Checking", date: "2026-09-02", description: "Market", amountOut: 80, amountIn: null, categoryId: null,
+        splits: [{ categoryId: "c1", amount: 50 }, { categoryId: "x", amount: 30 }], externalId: "FIT1", comments: [{ id: "k1", text: "Party food", authorId: "u1", at: "2026-09-02T20:00:00Z" }] },
+      { id: "t2", accountId: "a1", accountName: "Checking", date: "2026-09-03", description: "Market", amountOut: 80, amountIn: null, categoryId: null, skippedDuplicateOf: "t1" },
+      { id: "t3", accountId: "a1", accountName: "Checking", date: "2026-09-04", description: "To savings", amountOut: 100, amountIn: null, categoryId: "x", transferWith: "t4" },
+      { id: "t4", accountId: "a1", accountName: "Checking", date: "2026-09-04", description: "From checking", amountOut: null, amountIn: 100, categoryId: "x", transferWith: "t3", categorySuggested: true },
+    ],
+    plannedIncome: 5000, autoApplySuggestions: false, duplicateHandling: "flag", hiddenRecurring: ["out|gym"], hiddenBudgetMonths: ["2026-06"],
+  };
+  it("carries everything, and restores it exactly", () => {
+    const file = buildFullBackup(ledger, "2026-09-28T12:00:00Z");
+    expect(file).toMatchObject({ format: FULL_BACKUP_FORMAT, version: FULL_BACKUP_VERSION, exportedAt: "2026-09-28T12:00:00Z" });
+    expect(JSON.stringify(file)).not.toMatch(/accountName/); // names come from the accounts
+    const { ledger: restored, summary, exportedAt } = readFullBackup(JSON.stringify(file));
+    expect(exportedAt).toBe("2026-09-28T12:00:00Z");
+    expect(restored.transactions).toEqual(ledger.transactions);
+    expect(restored.accounts).toEqual(ledger.accounts);
+    const settled = normalizeLoadedLedger(restored);
+    expect([settled.plannedIncome, settled.autoApplySuggestions, settled.duplicateHandling, settled.hiddenRecurring, settled.hiddenBudgetMonths]).toEqual([5000, false, "flag", ["out|gym"], ["2026-06"]]);
+    expect(summary).toEqual({ accounts: 1, transactions: 3, categories: 2, budgetGroups: 1, splits: 1, transferPairs: 1, comments: 1, skippedDuplicates: 1, trackedBalances: 1 });
+  });
+  it("refuses files that aren't complete backups, or come from a newer version", () => {
+    expect(() => readFullBackup("Date,Description\n1,2")).toThrow(/isn't a Coinrose complete backup/);
+    expect(() => readFullBackup(JSON.stringify({ format: "something-else" }))).toThrow(/isn't a Coinrose complete backup/);
+    expect(() => readFullBackup(JSON.stringify({ format: FULL_BACKUP_FORMAT, version: FULL_BACKUP_VERSION + 1, data: {} }))).toThrow(/newer version of Coinrose/);
+  });
+  it("skips damaged entries instead of failing, and fills in what's missing", () => {
+    const { ledger: l } = readFullBackup(JSON.stringify({ format: FULL_BACKUP_FORMAT, version: 1, data: {
+      accounts: [{ id: "a1", name: "Checking" }, null, { name: "no id" }],
+      transactions: [{ id: "t1", accountId: "a1", date: "2026-09-01" }, { id: "t2" }, "junk"],
+      categories: "not a list",
+    } }));
+    expect(l.accounts.map((a) => a.id)).toEqual(["a1"]);
+    expect(l.transactions).toEqual([{ id: "t1", accountId: "a1", date: "2026-09-01", accountName: "Checking" }]);
+    expect(l.categories).toEqual([]);
+    expect(l.budgetGroups).toEqual([]);
+  });
+});

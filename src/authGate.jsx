@@ -269,6 +269,179 @@ function ErrorMessage({ text }) {
   ) : null;
 }
 
+// Two-step sign-in: after a password or email link, accounts with two-step
+// turned on enter the 6-digit code from their authenticator app before
+// Coinrose opens. (The database enforces this too; see two_step_signin.sql.)
+function TwoStepCodeForm({ onVerified }) {
+  const [code, setCode] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState(null);
+  // "app" (authenticator code), "backup" (a one-time backup code), or
+  // "recovered" (a backup code worked and two-step sign-in is now off).
+  const [mode, setMode] = useState("app");
+  const [backupCode, setBackupCode] = useState("");
+
+  async function handleBackup(e) {
+    e.preventDefault();
+    setError(null);
+    if (backupCode.replace(/[^A-Za-z0-9]/g, "").length !== 10) {
+      setError("Backup codes are 10 letters and numbers, like ABCDE-23456.");
+      return;
+    }
+    setBusy(true);
+    const { data, error: redeemError } = await supabase.rpc("redeem_two_step_recovery_code", { p_code: backupCode });
+    if (redeemError) {
+      setBusy(false);
+      setError(/too many tries/i.test(redeemError.message) ? "Too many tries. Wait an hour, then try again." : redeemError.message);
+      return;
+    }
+    if (data !== true) {
+      setBusy(false);
+      setError("That backup code didn't work. Each code works only once, so check for typos or try another one.");
+      return;
+    }
+    // Two-step sign-in is now off for this account: refresh the sign-in so
+    // it knows the authenticator is gone.
+    await supabase.auth.refreshSession();
+    setBusy(false);
+    setMode("recovered");
+  }
+
+  if (mode === "recovered") {
+    return (
+      <AuthShell>
+        <div className="auth-card">
+          <h2>You're in</h2>
+          <p className="auth-sub">
+            That backup code worked, and it can't be used again. To keep your account protected, two-step sign-in has been
+            turned off for now: set it up again with your new device in Settings → Two-step sign-in. You'll get a fresh set
+            of backup codes too.
+          </p>
+          <button type="button" className="auth-primary" onClick={onVerified}>
+            Continue to Coinrose
+          </button>
+        </div>
+      </AuthShell>
+    );
+  }
+
+  if (mode === "backup") {
+    return (
+      <AuthShell>
+        <div className="auth-card">
+          <h2>Use a backup code</h2>
+          <p className="auth-sub">
+            Enter one of the backup codes you saved when you turned on two-step sign-in. Each works once. Using one turns
+            two-step sign-in off, so you can set it up again with your new device.
+          </p>
+          <form onSubmit={handleBackup}>
+            <div className="auth-field">
+              <label htmlFor="two-step-backup-code">Backup code</label>
+              <input
+                id="two-step-backup-code"
+                type="text"
+                autoComplete="off"
+                autoCapitalize="characters"
+                spellCheck={false}
+                autoFocus
+                value={backupCode}
+                onChange={(e) => setBackupCode(e.target.value)}
+              />
+            </div>
+            {error && (
+              <p className="auth-message error" role="alert">
+                {error}
+              </p>
+            )}
+            <button type="submit" className="auth-primary" disabled={busy}>
+              {busy ? "Checking…" : "Use backup code"}
+            </button>
+          </form>
+          <p className="auth-footnote">
+            <button type="button" className="auth-link" onClick={() => { setMode("app"); setError(null); }}>
+              Back to the authenticator code
+            </button>
+          </p>
+          <p className="auth-footnote">
+            No backup codes either? Email <a href="mailto:morgankfinances@gmail.com">morgankfinances@gmail.com</a> for
+            help.{" "}
+            <button type="button" className="auth-link" onClick={() => supabase.auth.signOut()}>
+              Sign out
+            </button>
+          </p>
+        </div>
+      </AuthShell>
+    );
+  }
+
+  async function handleSubmit(e) {
+    e.preventDefault();
+    setError(null);
+    const digits = code.replace(/\s/g, "");
+    if (!/^\d{6}$/.test(digits)) {
+      setError("Enter the 6-digit code from your authenticator app.");
+      return;
+    }
+    setBusy(true);
+    const { data: factors, error: listError } = await supabase.auth.mfa.listFactors();
+    const factor = factors && factors.totp && factors.totp.find((f) => f.status === "verified");
+    if (listError || !factor) {
+      setBusy(false);
+      setError(listError ? listError.message : "Two-step sign-in isn't set up for this account.");
+      return;
+    }
+    const { error: verifyError } = await supabase.auth.mfa.challengeAndVerify({ factorId: factor.id, code: digits });
+    setBusy(false);
+    if (verifyError) {
+      setError("That code didn't work. Codes change every 30 seconds, so try the current one. If it keeps failing, check that your phone's clock is set automatically.");
+      setCode("");
+      return;
+    }
+    onVerified();
+  }
+  return (
+    <AuthShell>
+      <div className="auth-card">
+        <h2>Enter your code</h2>
+        <p className="auth-sub">Two-step sign-in is on for this account. Open your authenticator app and enter the 6-digit code for Coinrose.</p>
+        <form onSubmit={handleSubmit}>
+          <div className="auth-field">
+            <label htmlFor="two-step-code">6-digit code</label>
+            <input
+              id="two-step-code"
+              type="text"
+              inputMode="numeric"
+              autoComplete="one-time-code"
+              maxLength={7}
+              autoFocus
+              value={code}
+              onChange={(e) => setCode(e.target.value)}
+            />
+          </div>
+          {error && (
+            <p className="auth-message error" role="alert">
+              {error}
+            </p>
+          )}
+          <button type="submit" className="auth-primary" disabled={busy}>
+            {busy ? "Checking…" : "Continue"}
+          </button>
+        </form>
+        <p className="auth-footnote">
+          <button type="button" className="auth-link" onClick={() => { setMode("backup"); setError(null); }}>
+            Lost your phone? Use a backup code
+          </button>
+        </p>
+        <p className="auth-footnote">
+          <button type="button" className="auth-link" onClick={() => supabase.auth.signOut()}>
+            Sign out
+          </button>
+        </p>
+      </div>
+    </AuthShell>
+  );
+}
+
 function SetNewPasswordForm({ onDone }) {
   const [password, setPassword] = useState("");
   const [confirm, setConfirm] = useState("");
@@ -409,6 +582,31 @@ function TurnstileWidget({ onToken, resetKey }) {
 
 export default function AuthGate({ children }) {
   const [session, setSession] = useState(undefined); // undefined = checking, null = signed out
+  // "checking", "required" (enter the 6-digit code), or "ok".
+  const [twoStep, setTwoStep] = useState("checking");
+  const [twoStepCheck, setTwoStepCheck] = useState(0);
+  useEffect(() => {
+    let cancelled = false;
+    if (!session || !supabase.auth.mfa) {
+      setTwoStep("ok");
+      return undefined;
+    }
+    setTwoStep("checking");
+    supabase.auth.mfa
+      .getAuthenticatorAssuranceLevel()
+      .then(({ data }) => {
+        if (cancelled) return;
+        setTwoStep(data && data.nextLevel === "aal2" && data.currentLevel !== "aal2" ? "required" : "ok");
+      })
+      .catch(() => {
+        // If the check itself fails, carry on: the database still refuses a
+        // password-only sign-in for accounts with two-step turned on.
+        if (!cancelled) setTwoStep("ok");
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [session, twoStepCheck]);
   const [recovering, setRecovering] = useState(urlHasResetMarker);
   const [mode, setMode] = useState("password"); // "password" | "link" | "forgot"
   // Signed-out visitors see the home page first, unless the address asks
@@ -457,9 +655,10 @@ export default function AuthGate({ children }) {
   // (and not mid-password-reset), the app sets its own titles, so this
   // leaves the title alone.
   useEffect(() => {
-    if (session && !recovering) return;
+    if (session && !recovering && twoStep !== "required") return;
     let page = null; // still checking the session
     if (session && recovering) page = "Choose a New Password";
+    else if (session && twoStep === "required") page = "Two-Step Sign-In";
     else if (session === null && demo) {
       document.title = "Demo | Coinrose";
       return;
@@ -468,7 +667,7 @@ export default function AuthGate({ children }) {
       return;
     } else if (session === null) page = mode === "forgot" ? "Reset Password" : "Sign In";
     document.title = page ? `${page} | Coinrose` : "Coinrose";
-  }, [session, recovering, mode, showHome, demo]);
+  }, [session, recovering, mode, showHome, demo, twoStep]);
 
   // Leaving the demo, or signing in, puts the data layer back on the real
   // database.
@@ -569,6 +768,16 @@ export default function AuthGate({ children }) {
           setRecovering(false);
         }}
       />
+    );
+  }
+
+  if (session && twoStep !== "ok") {
+    if (twoStep === "required") return <TwoStepCodeForm onVerified={() => setTwoStepCheck((n) => n + 1)} />;
+    return (
+      <div className="auth-root">
+        <style>{AUTH_STYLES}</style>
+        <LoadingIndicator />
+      </div>
     );
   }
 

@@ -444,6 +444,268 @@ function formatRelativeTime(iso) {
 // servers, so this UI can't be used to skip it.
 const MIN_PASSWORD_LENGTH = 12;
 
+// Settings → Two-step sign-in (an authenticator app code after the password
+// or email link). It only switches on once a code has been verified, and
+// turning it off needs a sign-in that used the code.
+function qrImageSource(qr) {
+  if (!qr) return "";
+  return qr.startsWith("data:") ? qr : `data:image/svg+xml;utf-8,${encodeURIComponent(qr)}`;
+}
+
+function TwoStepSection() {
+  const [state, setState] = useState({ status: "loading" });
+  const [code, setCode] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState(null);
+  const [confirmOff, setConfirmOff] = useState(false);
+  const [codesLeft, setCodesLeft] = useState(null); // unused backup codes, when known
+  const [savedConfirmed, setSavedConfirmed] = useState(false);
+  const [copied, setCopied] = useState(false);
+  const mfa = supabase.auth.mfa;
+
+  async function refreshCodesLeft() {
+    const { data, error: countError } = await supabase.rpc("two_step_recovery_codes_left");
+    setCodesLeft(!countError && typeof data === "number" ? data : null);
+  }
+  // Backup codes: made right after turning two-step on (and on request
+  // later), and shown only this once.
+  async function makeCodes(factorId) {
+    const { data, error: codesError } = await supabase.rpc("create_two_step_recovery_codes");
+    if (codesError || !Array.isArray(data)) {
+      setError("Two-step sign-in is on, but backup codes couldn't be made right now. Use \"Make backup codes\" below to try again.");
+      setState({ status: "on", factorId });
+      refreshCodesLeft();
+      return;
+    }
+    setSavedConfirmed(false);
+    setCopied(false);
+    setState({ status: "codes", factorId, codes: data });
+  }
+  function downloadCodes(codes) {
+    const text = [
+      "Coinrose backup codes for two-step sign-in",
+      "",
+      "If you can't use your authenticator app, sign in with your password, then",
+      "choose \"Use a backup code\". Each code works once.",
+      "",
+      ...codes,
+      "",
+      `Made ${new Date().toLocaleDateString("en-US", { year: "numeric", month: "long", day: "numeric" })}.`,
+    ].join("\n");
+    const url = URL.createObjectURL(new Blob([text], { type: "text/plain" }));
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = "coinrose-backup-codes.txt";
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  }
+  async function copyCodes(codes) {
+    try {
+      await navigator.clipboard.writeText(codes.join("\n"));
+      setCopied(true);
+    } catch (e) {
+      setError("Couldn't copy automatically. Select the codes and copy them, or download them instead.");
+    }
+  }
+
+  async function load() {
+    const { data, error: listError } = await mfa.listFactors();
+    if (listError) {
+      setState({ status: "error" });
+      return;
+    }
+    const verified = (data.totp || []).find((f) => f.status === "verified");
+    setState(verified ? { status: "on", factorId: verified.id } : { status: "off" });
+    if (verified) refreshCodesLeft();
+  }
+  useEffect(() => {
+    if (mfa) load();
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  if (!mfa) return null;
+
+  async function start() {
+    setError(null);
+    setBusy(true);
+    // Clear out any setup that was started and never finished.
+    const { data } = await mfa.listFactors();
+    for (const f of (data && data.all) || []) {
+      if (f.status !== "verified") await mfa.unenroll({ factorId: f.id });
+    }
+    const { data: enrolled, error: enrollError } = await mfa.enroll({ factorType: "totp", friendlyName: "Coinrose" });
+    setBusy(false);
+    if (enrollError) {
+      setError(enrollError.message);
+      return;
+    }
+    setCode("");
+    setState({ status: "setup", factorId: enrolled.id, qr: qrImageSource(enrolled.totp.qr_code), secret: enrolled.totp.secret });
+  }
+  async function confirm() {
+    const digits = code.replace(/\s/g, "");
+    if (!/^\d{6}$/.test(digits)) {
+      setError("Enter the 6-digit code your authenticator app shows for Coinrose.");
+      return;
+    }
+    setError(null);
+    setBusy(true);
+    const { error: verifyError } = await mfa.challengeAndVerify({ factorId: state.factorId, code: digits });
+    setBusy(false);
+    if (verifyError) {
+      setError("That code didn't work. Codes change every 30 seconds, so try the current one.");
+      return;
+    }
+    // Now signed in with the code, so backup codes can be made.
+    await makeCodes(state.factorId);
+  }
+  async function cancelSetup() {
+    await mfa.unenroll({ factorId: state.factorId });
+    setError(null);
+    setState({ status: "off" });
+  }
+  async function turnOff() {
+    setBusy(true);
+    const { error: offError } = await mfa.unenroll({ factorId: state.factorId });
+    setBusy(false);
+    setConfirmOff(false);
+    if (offError) {
+      setError("To turn this off, sign out and sign back in with your code first, then try again.");
+      return;
+    }
+    setError(null);
+    setState({ status: "off" });
+  }
+
+  return (
+    <>
+      <div style={sectionLabelStyle}>Two-step sign-in</div>
+      {state.status === "loading" && <p style={{ fontSize: 13, color: "var(--ink-muted)" }}>Checking…</p>}
+      {state.status === "error" && <p style={{ fontSize: 13, color: "var(--danger)" }}>Couldn't check two-step sign-in right now.</p>}
+      {state.status === "off" && (
+        <>
+          <p style={{ fontSize: 13, margin: "0 0 8px" }}>
+            Optional extra protection: after your password or email link, you'll also enter a 6-digit code from an
+            authenticator app on your phone (like Google Authenticator, 1Password, or Authy).
+          </p>
+          <button style={{ ...buttonStyle, marginBottom: 12 }} onClick={start} disabled={busy}>
+            {busy ? "Starting…" : "Turn on two-step sign-in"}
+          </button>
+        </>
+      )}
+      {state.status === "setup" && (
+        <div style={{ margin: "0 0 12px" }}>
+          <p style={{ fontSize: 13, margin: "0 0 8px" }}>
+            1. In your authenticator app, add an account by scanning this code:
+          </p>
+          <img src={state.qr} alt="QR code for setting up two-step sign-in" width={180} height={180} style={{ display: "block", background: "#fff", padding: 8, borderRadius: 6, marginBottom: 8 }} />
+          <p style={{ fontSize: 12.5, margin: "0 0 10px", color: "var(--ink-muted)" }}>
+            Can't scan it? Enter this setup key instead:{" "}
+            <code style={{ fontFamily: "monospace", wordBreak: "break-all", color: "var(--ink)" }}>{state.secret}</code>
+          </p>
+          <label htmlFor="two-step-setup-code" style={{ display: "block", fontSize: 13, margin: "0 0 4px" }}>
+            2. Enter the 6-digit code it shows:
+          </label>
+          <input
+            id="two-step-setup-code"
+            style={{ ...inputStyle, marginBottom: 8 }}
+            inputMode="numeric"
+            autoComplete="one-time-code"
+            maxLength={7}
+            value={code}
+            onChange={(e) => setCode(e.target.value)}
+          />
+          <div style={{ display: "flex", gap: 8 }}>
+            <button style={buttonStyle} onClick={confirm} disabled={busy}>
+              {busy ? "Checking…" : "Turn it on"}
+            </button>
+            <button style={buttonStyle} onClick={cancelSetup} disabled={busy}>
+              Cancel
+            </button>
+          </div>
+        </div>
+      )}
+      {state.status === "codes" && (
+        <div style={{ margin: "0 0 12px" }} role="group" aria-label="Your backup codes">
+          <p style={{ fontSize: 13, margin: "0 0 6px", fontWeight: 600 }}>Save your backup codes</p>
+          <p style={{ fontSize: 12.5, margin: "0 0 8px", color: "var(--ink-muted)" }}>
+            If you lose your phone, sign in with your password and use one of these instead of a code. Each works once.
+            This is the only time they'll be shown, so keep them somewhere safe, like a password manager or a printed copy.
+          </p>
+          <ul style={{ listStyle: "none", padding: "10px 12px", margin: "0 0 8px", display: "grid", gridTemplateColumns: "1fr 1fr", gap: "4px 16px", fontFamily: "monospace", fontSize: 14, background: "var(--subtle-bg)", borderRadius: 6 }}>
+            {state.codes.map((c) => (
+              <li key={c}>{c}</li>
+            ))}
+          </ul>
+          <div style={{ display: "flex", gap: 8, marginBottom: 8, flexWrap: "wrap" }}>
+            <button style={buttonStyle} onClick={() => downloadCodes(state.codes)}>
+              Download as a text file
+            </button>
+            <button style={buttonStyle} onClick={() => copyCodes(state.codes)}>
+              {copied ? "Copied" : "Copy"}
+            </button>
+          </div>
+          <label style={{ display: "flex", gap: 8, alignItems: "flex-start", fontSize: 13, margin: "0 0 8px", cursor: "pointer" }}>
+            <input type="checkbox" checked={savedConfirmed} onChange={(e) => setSavedConfirmed(e.target.checked)} style={{ marginTop: 3 }} />
+            I've saved these codes somewhere safe
+          </label>
+          <button
+            style={{ ...buttonStyle, opacity: savedConfirmed ? 1 : 0.5, cursor: savedConfirmed ? "pointer" : "not-allowed" }}
+            disabled={!savedConfirmed}
+            onClick={() => {
+              setState({ status: "on", factorId: state.factorId, justTurnedOn: true });
+              refreshCodesLeft();
+            }}
+          >
+            Done
+          </button>
+        </div>
+      )}
+      {state.status === "on" && (
+        <>
+          <p style={{ fontSize: 13, margin: "0 0 8px" }}>
+            {state.justTurnedOn ? "Two-step sign-in is now on. " : "Two-step sign-in is on. "}
+            You'll enter a code from your authenticator app each time you sign in.
+          </p>
+          {codesLeft !== null && (
+            <p
+              style={{ fontSize: 12.5, margin: "0 0 8px", color: codesLeft <= 3 ? "var(--warn-ink)" : "var(--ink-muted)", fontWeight: codesLeft <= 3 ? 600 : 400 }}
+            >
+              {codesLeft === 0
+                ? "You have no backup codes left. Make new ones, so you can still get in if you lose your phone."
+                : `Backup codes: ${codesLeft} of 10 left${codesLeft <= 3 ? ". Running low: consider making new ones." : "."}`}
+            </p>
+          )}
+          <button style={{ ...buttonStyle, marginBottom: 8 }} onClick={() => makeCodes(state.factorId)} disabled={busy}>
+            {codesLeft === 0 || codesLeft === null ? "Make backup codes" : "Make new backup codes (replaces the old ones)"}
+          </button>
+          {confirmOff ? (
+            <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", marginBottom: 12 }}>
+              <span style={{ fontSize: 13 }}>Turn off two-step sign-in?</span>
+              <button style={buttonStyle} onClick={turnOff} disabled={busy}>
+                Yes, turn it off
+              </button>
+              <button style={buttonStyle} onClick={() => setConfirmOff(false)}>
+                Keep it on
+              </button>
+            </div>
+          ) : (
+            <button style={{ ...buttonStyle, marginBottom: 12 }} onClick={() => setConfirmOff(true)}>
+              Turn off two-step sign-in
+            </button>
+          )}
+        </>
+      )}
+      {error && (
+        <p role="alert" style={{ fontSize: 13, color: "var(--danger)", margin: "0 0 12px" }}>
+          {error}
+        </p>
+      )}
+    </>
+  );
+}
+
 function PasswordSection() {
   const [open, setOpen] = useState(false);
   const [password, setPassword] = useState("");
@@ -1307,6 +1569,8 @@ function HouseholdPanel({ onClose, onDataChanged, onRoleKnown, theme, onThemeCha
         <ThemePicker theme={theme} onChange={onThemeChange} />
 
         <PasswordSection />
+
+        <TwoStepSection />
 
         <div style={sectionLabelStyle}>About</div>
         <button

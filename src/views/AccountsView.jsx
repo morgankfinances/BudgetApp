@@ -1,17 +1,26 @@
 import React, { useState } from "react";
 import { EmptyState } from "../components/common.jsx";
-import { formatMoney } from "../lib/utils.js";
+import { formatDateDisplay, formatMoney, todayISO } from "../lib/utils.js";
+import { estimateBalance, totalBalances } from "../lib/balances.js";
+import { StatBlock } from "../components/common.jsx";
 
 /* ------------------------------------------------------------------ */
 /* Accounts view                                                       */
 /* ------------------------------------------------------------------ */
 
-export function AccountCard({ account, txCount, totalIn, totalOut, sampleRaw, onDelete, onAddTransactions, onRename, onUpdateSettings }) {
+export function AccountCard({ account, txCount, totalIn, totalOut, sampleRaw, onDelete, onAddTransactions, onRename, onUpdateSettings, estimate = null, onSetStartingBalance }) {
   const [editing, setEditing] = useState(false);
   const [draftName, setDraftName] = useState(account.name);
   const [confirming, setConfirming] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [settingsForm, setSettingsForm] = useState(null);
+  const [balanceForm, setBalanceForm] = useState(null); // open editor: { amount, date, owed }
+  const openBalance = () => {
+    const b = account.startingBalance;
+    setBalanceForm(b ? { amount: String(b.amount), date: b.date, owed: !!b.owed } : { amount: "", date: todayISO(), owed: false });
+  };
+  const balanceAmountOk = balanceForm && balanceForm.amount.trim() !== "" && Number.isFinite(Number(balanceForm.amount));
+  const balanceDateOk = balanceForm && /^\d{4}-\d{2}-\d{2}$/.test(balanceForm.date);
   const net = totalIn - totalOut;
   const headers = sampleRaw ? Object.keys(sampleRaw) : [];
 
@@ -116,6 +125,95 @@ export function AccountCard({ account, txCount, totalIn, totalOut, sampleRaw, on
         </div>
       </div>
 
+      {onSetStartingBalance && (
+        <div className="balance-row">
+          {estimate ? (
+            <>
+              <div>
+                <div className="balance-label">{estimate.owed ? "Estimated amount owed" : "Estimated balance"}</div>
+                <div className={"balance-value " + (estimate.owed ? "money-out" : estimate.current >= 0 ? "money-in" : "money-out")}>
+                  {formatMoney(estimate.current)}
+                </div>
+                <div className="meta">
+                  From {formatMoney(estimate.startAmount)} {estimate.owed ? "owed " : ""}on {formatDateDisplay(estimate.startDate)}, plus{" "}
+                  {estimate.count} transaction{estimate.count === 1 ? "" : "s"} since
+                  {estimate.latestDate ? ` (newest uploaded: ${formatDateDisplay(estimate.latestDate)})` : ""}.
+                </div>
+              </div>
+              {!balanceForm && (
+                <button className="btn btn-ghost btn-sm" onClick={openBalance} aria-label={`Change the starting balance for ${account.name}`}>
+                  Change starting balance
+                </button>
+              )}
+            </>
+          ) : (
+            !balanceForm && (
+              <button className="btn btn-ghost btn-sm" onClick={openBalance} aria-label={`Track the balance of ${account.name}`}>
+                Track this account's balance
+              </button>
+            )
+          )}
+          {balanceForm && (
+            <div className="balance-editor" role="group" aria-label={`Starting balance for ${account.name}`}>
+              <p className="hint" style={{ margin: 0 }}>
+                Enter the balance from a statement or your bank's website, and the day it was for. Coinrose adds and
+                subtracts every transaction you've uploaded after that day. It's an estimate: Coinrose isn't connected to
+                your bank.
+              </p>
+              <div className="balance-editor-fields">
+                <div className="balance-field">
+                  <label htmlFor={`balance-amount-${account.id}`}>{balanceForm.owed ? "Amount owed" : "Balance"}</label>
+                  <span className="balance-input">
+                    <span aria-hidden="true">$</span>
+                    <input
+                      id={`balance-amount-${account.id}`}
+                      type="number"
+                      inputMode="decimal"
+                      step="0.01"
+                      value={balanceForm.amount}
+                      onChange={(e) => setBalanceForm({ ...balanceForm, amount: e.target.value })}
+                    />
+                  </span>
+                </div>
+                <label>
+                  At the end of
+                  <input type="date" value={balanceForm.date} onChange={(e) => setBalanceForm({ ...balanceForm, date: e.target.value })} />
+                </label>
+                <label className="checkbox-filter">
+                  <input type="checkbox" checked={balanceForm.owed} onChange={(e) => setBalanceForm({ ...balanceForm, owed: e.target.checked })} />
+                  This is a credit card or loan (the amount is what's owed)
+                </label>
+              </div>
+              <div className="actions-row">
+                <button
+                  className="btn btn-primary btn-sm"
+                  disabled={!balanceAmountOk || !balanceDateOk}
+                  onClick={() => {
+                    onSetStartingBalance(account.id, { amount: Math.round(Number(balanceForm.amount) * 100) / 100, date: balanceForm.date, owed: balanceForm.owed });
+                    setBalanceForm(null);
+                  }}
+                >
+                  Save starting balance
+                </button>
+                <button className="btn btn-ghost btn-sm" onClick={() => setBalanceForm(null)}>
+                  Cancel
+                </button>
+                {account.startingBalance && (
+                  <button
+                    className="btn btn-danger btn-sm"
+                    onClick={() => {
+                      onSetStartingBalance(account.id, null);
+                      setBalanceForm(null);
+                    }}
+                  >
+                    Stop tracking
+                  </button>
+                )}
+              </div>
+            </div>
+          )}
+        </div>
+      )}
       {settingsOpen && settingsForm && (
         <div className="account-settings-panel">
           {headers.length === 0 ? (
@@ -227,7 +325,7 @@ export function AccountCard({ account, txCount, totalIn, totalOut, sampleRaw, on
 }
 
 
-export function AccountsView({ accounts, transactions, onDelete, onAddTransactions, onRename, onUpdateSettings, onGoUpload }) {
+export function AccountsView({ accounts, transactions, onDelete, onAddTransactions, onRename, onUpdateSettings, onGoUpload, onSetStartingBalance }) {
   if (accounts.length === 0) {
     return (
       <EmptyState
@@ -245,6 +343,26 @@ export function AccountsView({ accounts, transactions, onDelete, onAddTransactio
         <h1>Accounts</h1>
         <p>Every account you're tracking, and how its balance nets out so far.</p>
       </div>
+      {onSetStartingBalance && (() => {
+        const totals = totalBalances(accounts, transactions);
+        return (
+          <div className="panel balance-summary">
+            {totals.tracked > 0 && (
+              <div className="summary-row" style={{ marginBottom: 8 }}>
+                <StatBlock value={formatMoney(totals.have)} label="In accounts (estimated)" />
+                {totals.owe !== 0 && <StatBlock value={formatMoney(totals.owe)} label="Owed on cards and loans" />}
+                <StatBlock value={formatMoney(totals.net)} label="Difference" />
+              </div>
+            )}
+            <p className="hint" style={{ margin: 0 }}>
+              <strong>Balances are estimates.</strong> Coinrose isn't connected to your bank. Each balance is the starting
+              amount you entered plus the transactions you've uploaded since, so it can differ from your real balance: for
+              example, because of pending transactions, fees, or statements you haven't uploaded yet.
+              {totals.tracked === 0 && " Use \"Track this account's balance\" on an account to start."}
+            </p>
+          </div>
+        );
+      })()}
       <div className="panel">
         {accounts.map((a) => {
           const txs = transactions.filter((t) => t.accountId === a.id);
@@ -262,6 +380,8 @@ export function AccountsView({ accounts, transactions, onDelete, onAddTransactio
               onAddTransactions={onAddTransactions}
               onRename={onRename}
               onUpdateSettings={onUpdateSettings}
+              estimate={estimateBalance(a, transactions)}
+              onSetStartingBalance={onSetStartingBalance}
             />
           );
         })}
