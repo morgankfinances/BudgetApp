@@ -3,6 +3,7 @@ import { EmptyState } from "../components/common.jsx";
 import { formatDateDisplay, formatMoney, todayISO } from "../lib/utils.js";
 import { estimateBalance, totalBalances } from "../lib/balances.js";
 import { StatBlock } from "../components/common.jsx";
+import { BalanceChart } from "../components/BalanceChart.jsx";
 
 /* ------------------------------------------------------------------ */
 /* Accounts view                                                       */
@@ -353,6 +354,12 @@ export function AccountsView({ accounts, transactions, onDelete, onAddTransactio
                 {totals.owe !== 0 && <StatBlock value={formatMoney(totals.owe)} label="Owed on cards and loans" />}
                 <StatBlock value={formatMoney(totals.net)} label="Difference" />
               </div>
+            )}
+            {totals.tracked > 0 && (
+              <>
+                <h2 className="balance-chart-title">Balance over time</h2>
+                <BalanceChart accounts={accounts} transactions={transactions} />
+              </>
             )}
             <p className="hint" style={{ margin: 0 }}>
               <strong>Balances are estimates.</strong> Coinrose isn't connected to your bank. Each balance is the starting

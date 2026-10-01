@@ -7,8 +7,9 @@ import { buildBudgetItems, computeBudgetPeriodData, flagForBudgetItem } from "..
 import { addDaysISO, loadReportPeriodConfig, periodFnsForConfig } from "../lib/periods.js";
 import { formatDateDisplay, formatMoney, todayISO } from "../lib/utils.js";
 import { isUnconfirmedSuggestion } from "../lib/analysis.js";
+import { estimateBalance, hasStartingBalance, totalBalances } from "../lib/balances.js";
 
-export function OverviewView({ transactions, categories, budgetGroups, onNavigate, transferPairCount = 0, upcomingBills = [] }) {
+export function OverviewView({ transactions, categories, budgetGroups, onNavigate, transferPairCount = 0, upcomingBills = [], accounts = [] }) {
   const periodConfig = useMemo(() => loadReportPeriodConfig(), []);
   const { keyFn: periodKeyFn, labelFn: periodLabelFn } = useMemo(() => periodFnsForConfig(periodConfig), [periodConfig]);
 
@@ -306,6 +307,42 @@ export function OverviewView({ transactions, categories, budgetGroups, onNavigat
             See full Reports
           </button>
         </div>
+
+        {accounts.some(hasStartingBalance) && (() => {
+          const totals = totalBalances(accounts, transactions);
+          return (
+            <div className="panel">
+              <h3 style={{ marginTop: 0, marginBottom: 4, fontSize: 15 }}>Account balances</h3>
+              <p className="hint" style={{ marginTop: 0 }}>Estimated from your starting balances and uploads.</p>
+              <ul className="coming-up-list">
+                {accounts.filter(hasStartingBalance).map((a) => {
+                  const e = estimateBalance(a, transactions);
+                  return (
+                    <li key={a.id}>
+                      <span>
+                        {a.name}
+                        <span className="hint" style={{ display: "block" }}>
+                          {e.owed ? "Owed" : "Balance"}
+                          {e.latestDate ? ` as of ${formatDateDisplay(e.latestDate)}` : ""}
+                        </span>
+                      </span>
+                      <span className={e.owed ? "money-out" : e.current >= 0 ? "money-in" : "money-out"}>{formatMoney(e.current)}</span>
+                    </li>
+                  );
+                })}
+                {totals.tracked > 1 && (
+                  <li>
+                    <strong>In accounts minus owed</strong>
+                    <strong>{formatMoney(totals.net)}</strong>
+                  </li>
+                )}
+              </ul>
+              <button className="btn btn-ghost btn-sm" style={{ marginTop: 8 }} onClick={() => onNavigate("accounts")}>
+                See balance history
+              </button>
+            </div>
+          );
+        })()}
 
         {upcomingBills.length > 0 && (
           <div className="panel">

@@ -847,3 +847,45 @@ describe("Backup: complete backups", () => {
   });
 });
 import { buildFullBackup } from "../lib/backup.js";
+
+import { BalanceChart } from "../components/BalanceChart.jsx";
+describe("balance over time", () => {
+  const withBalances = F.accounts.map((a) => ({ ...a, startingBalance: a.id === "acct-card" ? { amount: 300, date: "2026-08-31", owed: true } : { amount: 1000, date: "2026-08-31", owed: false } }));
+  const summary = () => document.querySelector(".balance-chart-summary").textContent;
+  it("shows one account at a time, described in words, and can switch to all accounts combined", () => {
+    render(<BalanceChart accounts={withBalances} transactions={F.transactions} />);
+    const select = screen.getByLabelText("Show");
+    expect([...select.options].map((o) => o.textContent)).toEqual(["Millbrook Checking", "Griffon Card", "All tracked accounts combined"]);
+    expect(summary()).toMatch(/^Balance: \$1,000\.00 on Aug 31, 2026, now \$[\d,.]+ as of Sep \d+, 2026 \((up|down) \$[\d,.]+\)\. Lowest .* highest .*\.$/);
+    fireEvent.change(select, { target: { value: "acct-card" } });
+    expect(summary()).toMatch(/^Amount owed: \$300\.00 on Aug 31, 2026.*For a card or loan, lower is better\.$/);
+    fireEvent.change(select, { target: { value: "__all__" } });
+    expect(summary()).toMatch(/^In accounts minus owed: \$700\.00 on Aug 31, 2026/);
+  });
+  it("with one tracked account there's no 'combined' choice; with none, no chart", () => {
+    const { unmount } = render(<BalanceChart accounts={[withBalances[0], F.accounts[1]]} transactions={F.transactions} />);
+    expect([...screen.getByLabelText("Show").options].map((o) => o.value)).toEqual(["acct-chk"]);
+    unmount();
+    const { container } = render(<BalanceChart accounts={F.accounts} transactions={F.transactions} />);
+    expect(container.innerHTML).toBe("");
+  });
+});
+
+describe("Overview: account balances", () => {
+  it("lists each tracked account's estimate and the total, and links to the history", () => {
+    const onNavigate = vi.fn();
+    const accounts = F.accounts.map((a) => ({ ...a, startingBalance: { amount: a.id === "acct-card" ? 300 : 1000, date: "2026-08-31", owed: a.id === "acct-card" } }));
+    render(<OverviewView transactions={F.transactions} categories={F.categories} budgetGroups={F.budgetGroups} onNavigate={onNavigate} accounts={accounts} />);
+    const panel = screen.getByRole("heading", { name: "Account balances" }).closest(".panel");
+    expect(panel.textContent).toMatch(/Estimated from your starting balances and uploads\./);
+    expect(panel.textContent).toMatch(/Millbrook CheckingBalance as of Sep \d+, 2026\$/);
+    expect(panel.textContent).toMatch(/Griffon CardOwed as of/);
+    expect(panel.textContent).toMatch(/In accounts minus owed/);
+    fireEvent.click(within(panel).getByRole("button", { name: "See balance history" }));
+    expect(onNavigate).toHaveBeenCalledWith("accounts");
+  });
+  it("isn't shown until a balance is being tracked", () => {
+    render(<OverviewView transactions={F.transactions} categories={F.categories} budgetGroups={F.budgetGroups} onNavigate={vi.fn()} accounts={F.accounts} />);
+    expect(screen.queryByRole("heading", { name: "Account balances" })).toBeNull();
+  });
+});

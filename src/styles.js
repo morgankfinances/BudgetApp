@@ -741,6 +741,11 @@ export const STYLES = `
 
 /* Accounts: estimated balances. */
 .balance-summary { margin-bottom: 16px; }
+.ledger-root .balance-chart-title { font-size: 16px; margin: 20px 0 8px; }
+.balance-chart { margin-bottom: 14px; }
+.balance-chart-head { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; font-size: 13.5px; font-weight: 600; }
+.balance-chart-head select { font: inherit; font-weight: 400; padding: 6px 8px; border: 1px solid var(--border); border-radius: var(--radius); background: var(--panel); color: var(--ink); }
+.balance-chart-summary { font-size: 13px; color: var(--ink-muted); margin: 0 0 8px; max-width: 760px; }
 .balance-row { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; flex-wrap: wrap; padding: 10px 14px 12px; border-top: 1px dashed var(--border); }
 .balance-label { font-size: 11.5px; text-transform: uppercase; letter-spacing: .04em; color: var(--ink-muted); }
 .balance-value { font-size: 20px; font-weight: 600; font-family: 'Coinrose Heading', -apple-system, 'Segoe UI', sans-serif; }
@@ -775,7 +780,9 @@ export const STYLES = `
 .ledger-root .sidebar-collapse-btn:hover,
 .ledger-root .sidebar-expand-btn:hover { color: var(--ink); background: var(--subtle-bg); }
 .sidebar-collapse-btn { position: absolute; top: 12px; right: 10px; }
-.sidebar-expand-btn { position: fixed; top: 16px; left: 12px; z-index: 20; }
+/* Below anything pinned across the top of the screen, like the demo's
+   banner (which sets --top-banner-height to its own height). */
+.sidebar-expand-btn { position: fixed; top: calc(16px + var(--top-banner-height, 0px)); left: 12px; z-index: 20; }
 @media (min-width: 761px) {
   .app-shell.sidebar-collapsed { grid-template-columns: minmax(0, 1fr); }
   .app-shell.sidebar-collapsed .sidebar { display: none; }

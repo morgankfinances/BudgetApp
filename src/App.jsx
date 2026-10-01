@@ -1130,6 +1130,7 @@ function App({ householdName, currentUserId = null, householdMembers = [] } = {}
               budgetGroups={budgetGroups}
               transferPairCount={transferPairs.length}
               upcomingBills={upcomingBills}
+              accounts={accounts}
               onNavigate={(v) => setView(v)}
             />
           )}

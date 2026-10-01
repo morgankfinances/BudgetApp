@@ -36,3 +36,34 @@ describe("estimated balances", () => {
     expect(totalBalances([chk, card, { id: "untracked" }], list)).toEqual({ tracked: 2, have: 1334.62, owe: 470.5, net: 864.12 });
   });
 });
+
+import { balanceHistory, combinedHistory, summarizeHistory } from "../balances.js";
+describe("balance history", () => {
+  it("starts at the starting balance, then one point per day with transactions after it", () => {
+    expect(balanceHistory(chk, list)).toEqual([
+      { date: "2026-09-01", value: 1000 },
+      { date: "2026-09-05", value: 3184.62 },
+      { date: "2026-09-06", value: 1734.62 },
+      { date: "2026-09-07", value: 1334.62 }, // the skipped duplicate on Sep 8 isn't a point
+    ]);
+    expect(balanceHistory({ id: "x" }, list)).toEqual([]);
+  });
+  it("for a card or loan, it tracks what's owed", () => {
+    expect(balanceHistory(card, list).map((p) => p.value)).toEqual([750, 870.5, 470.5]);
+  });
+  it("combined: what's in accounts minus what's owed, from the first day every balance is known", () => {
+    const later = { ...card, startingBalance: { ...card.startingBalance, date: "2026-09-04" } };
+    const c = combinedHistory([chk, later], list);
+    expect(c[0]).toEqual({ date: "2026-09-04", value: 1000 - 750 }); // the card's Sep 3 purchase was already in its balance
+    expect(c.map((p) => p.date)).toEqual(["2026-09-04", "2026-09-05", "2026-09-06", "2026-09-07", "2026-09-10"]);
+    expect(c.at(-1).value).toBe(984.62); // exact to the cent (1,334.62 in checking, 350.00 owed)
+    expect(combinedHistory([{ id: "untracked" }], list)).toEqual([]);
+  });
+  it("summaries: start, end, change, and the lowest and highest points", () => {
+    expect(summarizeHistory(balanceHistory(chk, list))).toEqual({
+      start: { date: "2026-09-01", value: 1000 }, end: { date: "2026-09-07", value: 1334.62 }, change: 334.62,
+      low: { date: "2026-09-01", value: 1000 }, high: { date: "2026-09-05", value: 3184.62 },
+    });
+    expect(summarizeHistory([])).toBeNull();
+  });
+});

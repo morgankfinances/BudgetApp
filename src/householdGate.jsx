@@ -45,7 +45,7 @@ const THEMES = [
 ];
 const DEFAULT_THEME = "light-slate";
 
-function loadTheme() {
+export function loadTheme() {
   try {
     const raw = window.localStorage.getItem(THEME_KEY);
     if (raw && THEMES.some((t) => t.id === raw)) return raw;
@@ -55,7 +55,7 @@ function loadTheme() {
   return DEFAULT_THEME;
 }
 
-function saveTheme(themeId) {
+export function saveTheme(themeId) {
   try {
     window.localStorage.setItem(THEME_KEY, themeId);
   } catch (e) {
@@ -229,7 +229,7 @@ const DUPLICATE_OPTIONS = [
   },
 ];
 
-function ImportSettings() {
+export function ImportSettings() {
   const prefs = useImportPrefs();
   if (!prefs) return null;
   return (
@@ -306,7 +306,7 @@ export function applySavedTheme() {
   }
 }
 
-function ThemePicker({ theme, onChange }) {
+export function ThemePicker({ theme, onChange }) {
   return (
     <div className="theme-picker-grid">
       {THEMES.map((t) => (
@@ -348,7 +348,7 @@ const inputStyle = {
   borderRadius: 5,
 };
 
-const buttonStyle = {
+export const buttonStyle = {
   fontFamily: "inherit",
   width: "100%",
   padding: 10,
@@ -360,7 +360,7 @@ const buttonStyle = {
   cursor: "pointer",
 };
 
-const overlayStyle = {
+export const overlayStyle = {
   position: "fixed",
   inset: 0,
   background: "rgba(0,0,0,0.45)",
@@ -371,7 +371,7 @@ const overlayStyle = {
   fontFamily: "'Coinrose Body', -apple-system, 'Segoe UI', sans-serif",
 };
 
-const cardStyle = {
+export const cardStyle = {
   width: "min(380px, 92vw)",
   maxHeight: "85vh",
   overflowY: "auto",
@@ -383,7 +383,7 @@ const cardStyle = {
   boxSizing: "border-box",
 };
 
-const sectionLabelStyle = {
+export const sectionLabelStyle = {
   fontSize: 11.5,
   textTransform: "uppercase",
   letterSpacing: 0.5,

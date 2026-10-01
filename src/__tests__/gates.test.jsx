@@ -716,3 +716,52 @@ describe("two-step backup codes", () => {
     expect(screen.getByRole("button", { name: "Make backup codes" })).toBeTruthy();
   });
 });
+
+describe("the demo's banner and Settings", () => {
+  const openDemo = async () => {
+    // A returning visitor who has seen the tour, so it doesn't open by itself
+    // and take focus while these tests check Settings.
+    localStorage.setItem("coinrose-tutorial-seen-v1", "true");
+    window.history.replaceState({}, "", "/#demo");
+    render(<AuthGate><div>the app</div></AuthGate>);
+    await screen.findByText("Sample Household Ledger", {}, { timeout: 4000 });
+  };
+  it("the banner tells pinned buttons its height (so it can't cover 'Show sidebar'), and stops when the demo closes", async () => {
+    await openDemo();
+    expect(document.documentElement.style.getPropertyValue("--top-banner-height")).toMatch(/^\d+px$/);
+    fireEvent.click(screen.getByRole("button", { name: "Exit demo" }));
+    expect(document.documentElement.style.getPropertyValue("--top-banner-height")).toBe("");
+  });
+  it("Settings: themes really change, the tour replays, and the invite code is a sample that can't be real", async () => {
+    await openDemo();
+    fireEvent.click(screen.getByRole("button", { name: "Settings" }));
+    const dialog = screen.getByRole("dialog", { name: /Settings/ });
+    // Focus moves in just after the panel appears (React 19 may do this a
+    // moment later than React 18, so wait for it).
+    await waitFor(() => expect(dialog.contains(document.activeElement)).toBe(true));
+    expect(within(dialog).getByText("DEMO-CODE")).toBeTruthy();
+    expect(/^[0-9A-F]{8}$/.test("DEMO-CODE")).toBe(false); // real codes are 8 characters of 0-9 and A-F
+    expect(dialog.textContent).toMatch(/you@example\.com \(you\) · Owner/);
+    expect(dialog.textContent).toMatch(/They're not part of the demo\./);
+    fireEvent.click(within(dialog).getByRole("button", { name: /Dark — Midnight/ }));
+    expect(document.documentElement.getAttribute("data-theme")).toBe("dark-midnight");
+    expect(localStorage.getItem("ledger-theme-v1")).toBe("dark-midnight");
+    const tour = vi.fn();
+    window.addEventListener("coinrose:start-tutorial", tour);
+    fireEvent.click(within(dialog).getByRole("button", { name: "View tutorial" }));
+    expect(tour).toHaveBeenCalledTimes(1);
+    window.removeEventListener("coinrose:start-tutorial", tour);
+    expect(screen.queryByRole("dialog", { name: /Settings/ })).toBeNull(); // Settings closed...
+    expect(await screen.findByText("Welcome to Coinrose")).toBeTruthy(); // ...and the tour opened
+  });
+  it("Settings closes with Escape, returning focus to its button, and 'Create your account' leaves the demo", async () => {
+    await openDemo();
+    fireEvent.click(screen.getByRole("button", { name: "Settings" }));
+    fireEvent.keyDown(window, { key: "Escape" });
+    expect(screen.queryByRole("dialog")).toBeNull();
+    await waitFor(() => expect(document.activeElement.textContent).toBe("Settings"));
+    fireEvent.click(screen.getByRole("button", { name: "Settings" }));
+    fireEvent.click(within(screen.getByRole("dialog")).getByRole("button", { name: "Create your account" }));
+    expect(await screen.findByText("Welcome back")).toBeTruthy();
+  });
+});
