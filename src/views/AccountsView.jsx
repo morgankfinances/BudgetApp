@@ -139,6 +139,8 @@ export function AccountCard({ account, txCount, totalIn, totalOut, sampleRaw, on
                   From {formatMoney(estimate.startAmount)} {estimate.owed ? "owed " : ""}on {formatDateDisplay(estimate.startDate)}, plus{" "}
                   {estimate.count} transaction{estimate.count === 1 ? "" : "s"} since
                   {estimate.latestDate ? ` (newest uploaded: ${formatDateDisplay(estimate.latestDate)})` : ""}.
+                  {estimate.earlierCount > 0 &&
+                    ` The balance history also works back through ${estimate.earlierCount} earlier transaction${estimate.earlierCount === 1 ? "" : "s"}.`}
                 </div>
               </div>
               {!balanceForm && (
@@ -362,9 +364,9 @@ export function AccountsView({ accounts, transactions, onDelete, onAddTransactio
               </>
             )}
             <p className="hint" style={{ margin: 0 }}>
-              <strong>Balances are estimates.</strong> Coinrose isn't connected to your bank. Each balance is the starting
-              amount you entered plus the transactions you've uploaded since, so it can differ from your real balance: for
-              example, because of pending transactions, fees, or statements you haven't uploaded yet.
+              <strong>Balances are estimates.</strong> Coinrose isn't connected to your bank. Each balance is worked out from
+              the starting amount you entered and the transactions you've uploaded, before and after it, so it can differ from
+              your real balance: for example, because of pending transactions, fees, or statements you haven't uploaded yet.
               {totals.tracked === 0 && " Use \"Track this account's balance\" on an account to start."}
             </p>
           </div>

@@ -17,7 +17,7 @@ const card = { id: "card", name: "Card", startingBalance: { amount: 750, date: "
 
 describe("estimated balances", () => {
   it("start from the balance at the end of the chosen day, then add money in and subtract money out after it", () => {
-    expect(estimateBalance(chk, list)).toEqual({ startAmount: 1000, startDate: "2026-09-01", owed: false, current: 1334.62, count: 3, latestDate: "2026-09-07" });
+    expect(estimateBalance(chk, list)).toEqual({ startAmount: 1000, startDate: "2026-09-01", owed: false, current: 1334.62, count: 3, earlierCount: 2, latestDate: "2026-09-07" });
   });
   it("for a card or loan, the amount is what's owed: purchases raise it and payments lower it", () => {
     expect(estimateBalance(card, list)).toMatchObject({ owed: true, current: 470.5, count: 2 });
@@ -39,9 +39,11 @@ describe("estimated balances", () => {
 
 import { balanceHistory, combinedHistory, summarizeHistory } from "../balances.js";
 describe("balance history", () => {
-  it("starts at the starting balance, then one point per day with transactions after it", () => {
+  it("works backward and forward from the starting balance: one point per day with transactions", () => {
     expect(balanceHistory(chk, list)).toEqual([
-      { date: "2026-09-01", value: 1000 },
+      { date: "2026-08-30", value: 1540, edge: true },   // before the earliest upload: Aug 31's $500 and Sep 1's $40 undone
+      { date: "2026-08-31", value: 1040 },               // end of Aug 31: Sep 1's $40 undone
+      { date: "2026-09-01", value: 1000, anchor: true }, // the starting balance (Sep 1's $40 already in it)
       { date: "2026-09-05", value: 3184.62 },
       { date: "2026-09-06", value: 1734.62 },
       { date: "2026-09-07", value: 1334.62 }, // the skipped duplicate on Sep 8 isn't a point
@@ -54,16 +56,31 @@ describe("balance history", () => {
   it("combined: what's in accounts minus what's owed, from the first day every balance is known", () => {
     const later = { ...card, startingBalance: { ...card.startingBalance, date: "2026-09-04" } };
     const c = combinedHistory([chk, later], list);
-    expect(c[0]).toEqual({ date: "2026-09-04", value: 1000 - 750 }); // the card's Sep 3 purchase was already in its balance
-    expect(c.map((p) => p.date)).toEqual(["2026-09-04", "2026-09-05", "2026-09-06", "2026-09-07", "2026-09-10"]);
+    // The card's Sep 3 purchase is worked out backward: it owed $629.50 before it.
+    expect(c[0]).toEqual({ date: "2026-09-02", value: 370.5 }); // 1,000.00 in checking minus 629.50 owed
+    expect(c.map((p) => p.date)).toEqual(["2026-09-02", "2026-09-03", "2026-09-04", "2026-09-05", "2026-09-06", "2026-09-07", "2026-09-10"]);
     expect(c.at(-1).value).toBe(984.62); // exact to the cent (1,334.62 in checking, 350.00 owed)
     expect(combinedHistory([{ id: "untracked" }], list)).toEqual([]);
   });
   it("summaries: start, end, change, and the lowest and highest points", () => {
     expect(summarizeHistory(balanceHistory(chk, list))).toEqual({
-      start: { date: "2026-09-01", value: 1000 }, end: { date: "2026-09-07", value: 1334.62 }, change: 334.62,
-      low: { date: "2026-09-01", value: 1000 }, high: { date: "2026-09-05", value: 3184.62 },
+      start: { date: "2026-08-30", value: 1540, edge: true }, end: { date: "2026-09-07", value: 1334.62 }, change: -205.38,
+      low: { date: "2026-09-01", value: 1000, anchor: true }, high: { date: "2026-09-05", value: 3184.62 },
     });
     expect(summarizeHistory([])).toBeNull();
+  });
+});
+
+describe("balance history: the card case worked backward", () => {
+  it("for a card, undoing a payment raises what was owed, and undoing a purchase lowers it", () => {
+    const owed = { id: "card", startingBalance: { amount: 500, date: "2026-09-01", owed: true } };
+    const tx = [t("p", "card", "2026-08-20", 120, null), t("q", "card", "2026-08-25", null, 300), t("r", "card", "2026-09-03", 60, null)];
+    expect(balanceHistory(owed, tx)).toEqual([
+      { date: "2026-08-19", value: 680, edge: true },
+      { date: "2026-08-20", value: 800 },
+      { date: "2026-08-25", value: 500 },
+      { date: "2026-09-01", value: 500, anchor: true },
+      { date: "2026-09-03", value: 560 },
+    ]);
   });
 });

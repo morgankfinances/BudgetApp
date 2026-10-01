@@ -497,6 +497,17 @@ export const STYLES = `
 
 .toggle-group { display: inline-flex; border: 1px solid var(--border); border-radius: var(--radius); overflow: hidden; }
 .overview-grid { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 20px; margin-top: 4px; }
+/* Panels side by side: the grid spaces them, so no stacked-panel margin
+   (which pushed the right-hand panel down), and panels in a row share a
+   height. Each panel is a column so leftover space collects at its bottom. */
+.overview-grid > .panel { margin-top: 0; display: flex; flex-direction: column; }
+.overview-grid > .panel > button { align-self: flex-start; }
+/* That leftover space: a faint star when there's room for one, nothing when
+   the gap is small (the browser measures the actual space). */
+.panel-filler { flex: 1 1 0; min-height: 0; container-type: size; display: flex; align-items: center; justify-content: center; }
+.panel-filler-star { width: 52px; height: 52px; opacity: 0.16; }
+.panel-filler-star img { width: 100%; height: 100%; }
+@container (max-height: 90px) { .panel-filler-star { display: none; } }
 .toggle-btn {
   padding: 7px 16px; font-family: inherit; font-size: 13px; font-weight: 600;
   border: none; background: var(--panel); color: var(--ink-muted); cursor: pointer;

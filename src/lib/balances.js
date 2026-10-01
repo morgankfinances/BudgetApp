@@ -8,6 +8,8 @@
 // where `owed` marks a credit card or loan: the amount is what's owed, so
 // purchases (money out) increase it and payments (money in) reduce it.
 
+import { addDaysISO } from "./periods.js";
+
 const cents = (n) => Math.round(Number(n || 0) * 100);
 
 export function hasStartingBalance(account) {
@@ -24,11 +26,15 @@ export function estimateBalance(account, transactions) {
   const { amount, date, owed } = account.startingBalance;
   let net = 0;
   let count = 0;
+  let earlierCount = 0; // on or before the starting date: worked out backward
   let latestDate = null;
   transactions.forEach((t) => {
     if (t.accountId !== account.id || t.skippedDuplicateOf || !t.date) return;
     if (!latestDate || t.date > latestDate) latestDate = t.date;
-    if (t.date <= date) return;
+    if (t.date <= date) {
+      earlierCount += 1;
+      return;
+    }
     net += cents(t.amountIn) - cents(t.amountOut);
     count += 1;
   });
@@ -39,6 +45,7 @@ export function estimateBalance(account, transactions) {
     owed: !!owed,
     current: current / 100,
     count,
+    earlierCount,
     // The newest transaction uploaded for this account: the estimate can't
     // know about anything after it.
     latestDate,
@@ -61,35 +68,64 @@ export function totalBalances(accounts, transactions) {
   return { tracked, have: have / 100, owe: owe / 100, net: (have - owe) / 100 };
 }
 
-// An account's estimated balance over time: the starting balance, then the
-// balance at the end of each day that had transactions after it. Returns
-// [{ date, value }], oldest first (empty without a starting balance). For a
-// card or loan, the value is what's owed.
+// An account's estimated balance over time, worked out in both directions
+// from the starting balance (as of the end of its date):
+//   - forward: each later transaction is added or subtracted;
+//   - backward: the balance at the end of an earlier day is the starting
+//     balance with every transaction since then undone.
+// So the history reaches back to just before the earliest uploaded
+// transaction. That first point is marked `edge` (the real account goes
+// back further; Coinrose just has no earlier data), and the starting
+// balance's own point is marked `anchor`. Returns [{ date, value, edge?,
+// anchor? }], oldest first (empty without a starting balance). For a card
+// or loan, the value is what's owed.
 export function balanceHistory(account, transactions) {
   if (!hasStartingBalance(account)) return [];
   const { amount, date, owed } = account.startingBalance;
+  const sign = owed ? -1 : 1; // money in lowers what's owed
   const byDay = new Map();
   transactions.forEach((t) => {
-    if (t.accountId !== account.id || t.skippedDuplicateOf || !t.date || t.date <= date) return;
+    if (t.accountId !== account.id || t.skippedDuplicateOf || !t.date) return;
     byDay.set(t.date, (byDay.get(t.date) || 0) + cents(t.amountIn) - cents(t.amountOut));
   });
-  let running = cents(amount);
-  const points = [{ date, value: running / 100 }];
-  [...byDay.keys()].sort().forEach((day) => {
-    running += owed ? -byDay.get(day) : byDay.get(day);
-    points.push({ date: day, value: running / 100 });
-  });
-  return points;
+  const days = [...byDay.keys()].sort();
+  const anchor = cents(amount);
+
+  // Backward: undo each day's transactions, from the starting date back.
+  const earlier = [];
+  let back = anchor;
+  days
+    .filter((d) => d <= date)
+    .reverse()
+    .forEach((d) => {
+      if (d < date) earlier.unshift({ date: d, value: back / 100 }); // end of that day
+      back -= sign * byDay.get(d);
+    });
+  const before = [];
+  if (days.length && days[0] <= date) {
+    before.push({ date: addDaysISO(days[0], -1), value: back / 100, edge: true });
+  }
+
+  // Forward: add each later day's transactions.
+  const later = [];
+  let forward = anchor;
+  days
+    .filter((d) => d > date)
+    .forEach((d) => {
+      forward += sign * byDay.get(d);
+      later.push({ date: d, value: forward / 100 });
+    });
+  return [...before, ...earlier, { date, value: anchor / 100, anchor: true }, ...later];
 }
 
 // All tracked accounts together: what's in accounts minus what's owed, over
-// time. It starts on the latest of the accounts' starting dates, the first
-// day every tracked account's balance is known.
+// time, from the first day every tracked account's balance is known.
 export function combinedHistory(accounts, transactions) {
   const tracked = accounts.filter(hasStartingBalance);
   if (!tracked.length) return [];
   const histories = tracked.map((a) => ({ owed: !!a.startingBalance.owed, points: balanceHistory(a, transactions) }));
-  const start = tracked.reduce((latest, a) => (a.startingBalance.date > latest ? a.startingBalance.date : latest), "");
+  // The first day every tracked account's balance is known.
+  const start = histories.reduce((latest, h) => (h.points[0].date > latest ? h.points[0].date : latest), "");
   const valueOn = (points, day) => {
     let value = points[0].value;
     for (const p of points) {

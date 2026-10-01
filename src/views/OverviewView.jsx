@@ -9,6 +9,18 @@ import { formatDateDisplay, formatMoney, todayISO } from "../lib/utils.js";
 import { isUnconfirmedSuggestion } from "../lib/analysis.js";
 import { estimateBalance, hasStartingBalance, totalBalances } from "../lib/balances.js";
 
+// Fills leftover space at the bottom of a panel with a faint star, when the
+// panel is shorter than the one beside it (see .panel-filler in styles.js).
+function PanelFiller() {
+  return (
+    <div className="panel-filler" aria-hidden="true">
+      <span className="panel-filler-star">
+        <ThemedStar />
+      </span>
+    </div>
+  );
+}
+
 export function OverviewView({ transactions, categories, budgetGroups, onNavigate, transferPairCount = 0, upcomingBills = [], accounts = [] }) {
   const periodConfig = useMemo(() => loadReportPeriodConfig(), []);
   const { keyFn: periodKeyFn, labelFn: periodLabelFn } = useMemo(() => periodFnsForConfig(periodConfig), [periodConfig]);
@@ -257,6 +269,7 @@ export function OverviewView({ transactions, categories, budgetGroups, onNavigat
               </button>
             </p>
           )}
+          <PanelFiller />
         </div>
 
         <div className="panel">
@@ -306,6 +319,7 @@ export function OverviewView({ transactions, categories, budgetGroups, onNavigat
           <button className="btn btn-ghost btn-sm" style={{ marginTop: 12 }} onClick={() => onNavigate("reports")}>
             See full Reports
           </button>
+          <PanelFiller />
         </div>
 
         {accounts.some(hasStartingBalance) && (() => {
@@ -340,6 +354,7 @@ export function OverviewView({ transactions, categories, budgetGroups, onNavigat
               <button className="btn btn-ghost btn-sm" style={{ marginTop: 8 }} onClick={() => onNavigate("accounts")}>
                 See balance history
               </button>
+              <PanelFiller />
             </div>
           );
         })()}
@@ -367,6 +382,7 @@ export function OverviewView({ transactions, categories, budgetGroups, onNavigat
             <button className="btn btn-ghost btn-sm" style={{ marginTop: 8 }} onClick={() => onNavigate("insights")}>
               {upcomingBills.length > 4 ? `See all ${upcomingBills.length} in Insights` : "See Insights"}
             </button>
+            <PanelFiller />
           </div>
         )}
       </div>

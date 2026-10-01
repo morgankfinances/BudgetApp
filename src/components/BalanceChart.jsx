@@ -6,7 +6,7 @@
 // words (screen readers get the sentence; the chart itself is decorative).
 
 import React, { useMemo, useState } from "react";
-import { CartesianGrid, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
+import { CartesianGrid, Line, LineChart, ReferenceDot, ReferenceLine, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import { balanceHistory, combinedHistory, hasStartingBalance, summarizeHistory } from "../lib/balances.js";
 import { formatDateDisplay, formatMoney } from "../lib/utils.js";
 
@@ -36,6 +36,10 @@ export function BalanceChart({ accounts, transactions, height = 240 }) {
   if (!tracked.length || !summary) return null;
 
   const data = points.map((p) => ({ t: toTime(p.date), value: p.value }));
+  // Where the uploaded data begins (the real account goes back further),
+  // and the starting balance that anchors the estimate both ways.
+  const edge = points[0].edge ? points[0] : null;
+  const anchor = points.find((p) => p.anchor) || null;
   const what = showingCombined ? "In accounts minus owed" : owed ? "Amount owed" : "Balance";
   const direction = summary.change === 0 ? "no change" : `${summary.change > 0 ? "up" : "down"} ${formatMoney(Math.abs(summary.change))}`;
 
@@ -57,6 +61,10 @@ export function BalanceChart({ accounts, transactions, height = 240 }) {
         of {formatDateDisplay(summary.end.date)} ({direction}). Lowest {formatMoney(summary.low.value)} on{" "}
         {formatDateDisplay(summary.low.date)}; highest {formatMoney(summary.high.value)} on {formatDateDisplay(summary.high.date)}.
         {owed ? " For a card or loan, lower is better." : ""}
+        {edge
+          ? ` The account goes back further, but the chart starts just before the earliest uploaded transaction (${formatDateDisplay(edge.date)}).`
+          : ""}
+        {anchor && !showingCombined && edge ? ` It's worked out backward and forward from the starting balance you entered for ${formatDateDisplay(anchor.date)}.` : ""}
       </p>
       <div style={{ width: "100%", height }} aria-hidden="true">
         <ResponsiveContainer>
@@ -78,6 +86,17 @@ export function BalanceChart({ accounts, transactions, height = 240 }) {
               labelFormatter={(ms) => formatDateDisplay(new Date(ms).toISOString().slice(0, 10))}
               contentStyle={{ background: "var(--panel)", border: "1px solid var(--border)", borderRadius: 6, color: "var(--ink)" }}
             />
+            {edge && (
+              <ReferenceLine
+                x={toTime(edge.date)}
+                stroke="var(--ink-muted)"
+                strokeDasharray="4 4"
+                label={{ value: "Earliest uploaded data", position: "insideTopLeft", fill: "var(--ink-muted)", fontSize: 11 }}
+              />
+            )}
+            {anchor && !showingCombined && (
+              <ReferenceDot x={toTime(anchor.date)} y={anchor.value} r={4} fill="var(--panel)" stroke="var(--ink)" strokeWidth={2} />
+            )}
             <Line type="stepAfter" dataKey="value" stroke={owed ? "var(--expense)" : "var(--accent-button)"} strokeWidth={2} dot={false} isAnimationActive={false} />
           </LineChart>
         </ResponsiveContainer>

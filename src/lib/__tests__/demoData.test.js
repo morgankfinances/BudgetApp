@@ -100,15 +100,17 @@ describe("the demo's paychecks", () => {
   });
 });
 
-import { estimateBalance } from "../balances.js";
+import { balanceHistory, estimateBalance } from "../balances.js";
 describe("the demo's balances", () => {
-  it("every account has a starting balance from just before its history, so the estimates use every transaction", () => {
+  it("savings and the card start just before the history; checking from the end of last month, worked out both ways", () => {
     const d = buildDemoLedger("2026-09-28");
-    for (const a of d.accounts) {
-      expect(a.startingBalance.date).toBe("2026-05-31");
-      const e = estimateBalance(a, d.transactions);
-      expect(e.count).toBe(d.transactions.filter((t) => t.accountId === a.id).length);
-    }
-    expect(d.accounts.find((a) => a.id === "demo-card").startingBalance.owed).toBe(true);
+    const byId = Object.fromEntries(d.accounts.map((a) => [a.id, a]));
+    expect(byId["demo-sav"].startingBalance.date).toBe("2026-05-31");
+    expect(byId["demo-card"].startingBalance).toMatchObject({ date: "2026-05-31", owed: true });
+    expect(byId["demo-chk"].startingBalance.date).toBe("2026-08-31");
+    const history = balanceHistory(byId["demo-chk"], d.transactions);
+    expect(history[0]).toMatchObject({ date: "2026-05-31", value: 3180.42, edge: true }); // back to the same opening balance
+    expect(history.find((p) => p.anchor).date).toBe("2026-08-31");
+    expect(estimateBalance(byId["demo-chk"], d.transactions).earlierCount).toBeGreaterThan(20);
   });
 });

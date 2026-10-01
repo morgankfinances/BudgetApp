@@ -231,13 +231,23 @@ export function buildDemoLedger(today = todayISO()) {
     if (t.date >= recentStart && t.categoryId !== "demo-pay" && t.categoryId !== "demo-xfer" && !t.splits) t.categoryId = null;
   });
 
+  // Savings and the card get starting balances from just before the history
+  // begins. Checking's comes from the end of last month, as if copied from
+  // the latest statement, so the demo shows its history worked out both
+  // backward and forward from it.
+  const beforeHistory = addDaysISO(historyStart, -1);
+  const lastMonthEnd = addDaysISO(getMonthStartISO(today), -1);
+  const startingBalanceFor = (id) => {
+    const { amount, owed } = STARTING_BALANCES[id];
+    if (id !== "demo-chk") return { amount, date: beforeHistory, owed };
+    const net = transactions
+      .filter((t) => t.accountId === id && t.date <= lastMonthEnd)
+      .reduce((sum, t) => sum + Math.round((t.amountIn || 0) * 100) - Math.round((t.amountOut || 0) * 100), 0);
+    return { amount: Math.round(amount * 100 + net) / 100, date: lastMonthEnd, owed };
+  };
+
   return {
-    // Starting balances as of the day before the history begins, so every
-    // transaction counts toward the estimate.
-    accounts: ACCOUNTS.map((a) => ({
-      ...a,
-      startingBalance: { amount: STARTING_BALANCES[a.id].amount, date: addDaysISO(historyStart, -1), owed: STARTING_BALANCES[a.id].owed },
-    })),
+    accounts: ACCOUNTS.map((a) => ({ ...a, startingBalance: startingBalanceFor(a.id) })),
     categories: buildCategories(historyStart),
     budgetGroups: BUDGET_GROUPS.map((g) => ({ ...g, categoryIds: [...g.categoryIds] })),
     transactions,

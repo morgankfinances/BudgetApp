@@ -856,11 +856,13 @@ describe("balance over time", () => {
     render(<BalanceChart accounts={withBalances} transactions={F.transactions} />);
     const select = screen.getByLabelText("Show");
     expect([...select.options].map((o) => o.textContent)).toEqual(["Millbrook Checking", "Griffon Card", "All tracked accounts combined"]);
-    expect(summary()).toMatch(/^Balance: \$1,000\.00 on Aug 31, 2026, now \$[\d,.]+ as of Sep \d+, 2026 \((up|down) \$[\d,.]+\)\. Lowest .* highest .*\.$/);
+    expect(summary()).toMatch(/^Balance: \$[\d,.]+ on Aug \d+, 2026, now \$[\d,.]+ as of Sep \d+, 2026 \((up|down) \$[\d,.]+\)\. Lowest .* highest .*\./);
+    expect(summary()).toMatch(/The account goes back further, but the chart starts just before the earliest uploaded transaction \(Aug \d+, 2026\)\. It's worked out backward and forward from the starting balance you entered for Aug 31, 2026\.$/);
     fireEvent.change(select, { target: { value: "acct-card" } });
-    expect(summary()).toMatch(/^Amount owed: \$300\.00 on Aug 31, 2026.*For a card or loan, lower is better\.$/);
+    expect(summary()).toMatch(/^Amount owed: \$[\d,.]+ on .*For a card or loan, lower is better\./);
     fireEvent.change(select, { target: { value: "__all__" } });
-    expect(summary()).toMatch(/^In accounts minus owed: \$700\.00 on Aug 31, 2026/);
+    expect(summary()).toMatch(/^In accounts minus owed: \$[\d,.-]+ on Aug \d+, 2026/);
+    expect(summary()).not.toMatch(/starting balance you entered/); // the combined line has no single anchor
   });
   it("with one tracked account there's no 'combined' choice; with none, no chart", () => {
     const { unmount } = render(<BalanceChart accounts={[withBalances[0], F.accounts[1]]} transactions={F.transactions} />);
