@@ -1598,6 +1598,8 @@ function HouseholdPanel({ onClose, onDataChanged, onRoleKnown, theme, onThemeCha
           View disclosure
         </button>
         <p style={{ fontSize: 12.5, color: "var(--ink-muted)", margin: "0 0 8px", textAlign: "center" }}>
+          <a href="/help.html" target="_blank" rel="noopener" style={{ color: "var(--accent)" }}>Help &amp; FAQ</a>
+          {" · "}
           <a href="/privacy.html" target="_blank" rel="noopener" style={{ color: "var(--accent)" }}>Privacy Policy</a>
           {" · "}
           <a href="/terms.html" target="_blank" rel="noopener" style={{ color: "var(--accent)" }}>Terms of Use</a>

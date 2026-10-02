@@ -110,6 +110,11 @@ function DemoSettings({ onGetStarted }) {
             >
               View tutorial
             </button>
+            <p style={{ fontSize: 12.5, margin: "0 0 12px" }}>
+              <a href="/help.html" target="_blank" rel="noopener" style={{ color: "var(--accent)" }}>
+                Help &amp; FAQ
+              </a>
+            </p>
 
             <div style={sectionLabelStyle}>In your own account</div>
             <p style={{ fontSize: 13, margin: "0 0 8px" }}>

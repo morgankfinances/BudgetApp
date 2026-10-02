@@ -765,3 +765,21 @@ describe("the demo's banner and Settings", () => {
     expect(await screen.findByText("Welcome back")).toBeTruthy();
   });
 });
+
+describe("links to Help & FAQ", () => {
+  it("Settings links to the help page", async () => {
+    fake.reset({ membership: { household_id: "h1", role: "owner", households: household }, members: [owner] });
+    render(<HouseholdGate><TheApp /></HouseholdGate>);
+    await screen.findByText("the app");
+    fireEvent.click(screen.getByRole("button", { name: /^Settings/ }));
+    expect((await screen.findByRole("link", { name: "Help & FAQ" })).getAttribute("href")).toBe("/help.html");
+  });
+  it("the demo's Settings links to it too", async () => {
+    localStorage.setItem("coinrose-tutorial-seen-v1", "true");
+    window.history.replaceState({}, "", "/#demo");
+    render(<AuthGate><div>the app</div></AuthGate>);
+    await screen.findByText("Sample Household Ledger", {}, { timeout: 4000 });
+    fireEvent.click(screen.getByRole("button", { name: "Settings" }));
+    expect(within(screen.getByRole("dialog")).getByRole("link", { name: "Help & FAQ" }).getAttribute("href")).toBe("/help.html");
+  });
+});

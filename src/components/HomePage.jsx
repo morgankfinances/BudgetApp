@@ -240,7 +240,8 @@ export default function HomePage({ onSignIn, onGetStarted, onTryDemo }) {
       <footer className="home-footer">
         <div className="home-wrap home-footer-row">
           <span>© {new Date().getFullYear()} Morgan Keller</span>
-          <nav aria-label="Legal and contact" className="home-footer-links">
+          <nav aria-label="Help, legal, and contact" className="home-footer-links">
+            <a href="/help.html">Help &amp; FAQ</a>
             <a href="/privacy.html" target="_blank" rel="noopener">
               Privacy Policy
             </a>
