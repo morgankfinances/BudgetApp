@@ -750,6 +750,19 @@ export const STYLES = `
 /* Backup page. */
 .ledger-root .backup-subheading { font-size: 17px; margin: 36px 0 6px; }
 
+/* Planning: budget templates. */
+.budget-templates { margin-top: 24px; }
+.budget-import-table-wrap { overflow-x: auto; max-height: 360px; overflow-y: auto; border: 1px solid var(--border); border-radius: var(--radius); }
+.budget-import-table { width: 100%; border-collapse: collapse; font-size: 13.5px; }
+.budget-import-table th, .budget-import-table td { text-align: left; padding: 8px 10px; border-bottom: 1px solid var(--border); }
+.budget-import-table thead th { font-size: 11.5px; text-transform: uppercase; letter-spacing: .04em; color: var(--ink-muted); background: var(--subtle-bg); position: sticky; top: 0; }
+.budget-import-table tbody th { font-weight: 600; }
+.budget-import-table tr.is-skipped { color: var(--ink-muted); }
+.budget-format { margin-top: 16px; font-size: 13.5px; }
+.budget-format summary { cursor: pointer; font-weight: 600; color: var(--accent); }
+.budget-format summary:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.budget-format-example { font-family: monospace; font-size: 12.5px; background: var(--subtle-bg); padding: 10px 12px; border-radius: var(--radius); overflow-x: auto; }
+
 /* Accounts: estimated balances. */
 .balance-summary { margin-bottom: 16px; }
 .ledger-root .balance-chart-title { font-size: 16px; margin: 20px 0 8px; }

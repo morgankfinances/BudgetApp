@@ -3,6 +3,7 @@ import { StatBlock } from "../components/common.jsx";
 import { buildBudgetItems, getUnassignedCategoryIds } from "../lib/budget.js";
 import { getMonthStartISO, monthlyEquivalent } from "../lib/periods.js";
 import { formatMoney, parseMoney, todayISO } from "../lib/utils.js";
+import { BudgetTemplatesPanel } from "../components/BudgetTemplatesPanel.jsx";
 
 /* ------------------------------------------------------------------ */
 /* Planning view                                                        */
@@ -119,6 +120,7 @@ export function PlanningView({
   onDismissIncomeWarning,
   onSetCategoryBudget,
   onToggleExcludeUnassigned,
+  onApplyBudgetPlan,
 }) {
   const [draft, setDraft] = useState(plannedIncome != null ? String(plannedIncome) : "");
   const [editing, setEditing] = useState(plannedIncome == null);
@@ -409,6 +411,9 @@ export function PlanningView({
             </>
           )}
         </>
+      )}
+      {onApplyBudgetPlan && (
+        <BudgetTemplatesPanel categories={categories} budgetGroups={budgetGroups} plannedIncome={plannedIncome} onApply={onApplyBudgetPlan} />
       )}
     </div>
   );

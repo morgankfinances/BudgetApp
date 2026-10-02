@@ -684,3 +684,17 @@ describe("balances and complete backups, through the app", () => {
   });
 });
 import { buildFullBackup } from "../lib/backup.js";
+
+describe("importing a budget, through the app", () => {
+  it("applying saves only the budget changes, and says it can be undone", async () => {
+    const { nav, lastSave } = await openApp();
+    nav("Planning");
+    fireEvent.change(document.querySelector('.budget-templates input[type="file"]'), { target: { files: [new File(["Kind,Name,Amount,Period,Type,Goal,Group\nCategory,Groceries,500,monthly,Spend,,"], "t.csv")] } });
+    fireEvent.click(await screen.findByRole("button", { name: "Apply this budget" }));
+    await flush();
+    const save = lastSave();
+    expect(save.upserts.categories.map((c) => [c.name, c.props.budgetAmount])).toEqual([["Groceries", 500]]);
+    expect(save.upserts.transactions).toBeUndefined();
+    expect(document.body.textContent).toMatch(/Budget imported\. You can undo it from Settings → Data History for 7 days\./);
+  });
+});

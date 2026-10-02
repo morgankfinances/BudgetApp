@@ -405,6 +405,17 @@ function App({ householdName, currentUserId = null, householdMembers = [] } = {}
     [accounts, transactions, categories, budgetGroups, plannedIncome, incomeWarningDismissed, hiddenBudgetMonths, excludeUnassignedFromBudget, persist]
   );
 
+  // A budget imported from a template or another app: new budgets on
+  // categories and groups (and maybe planned income). Transactions and
+  // budget history are untouched; Data History can undo it.
+  const handleApplyBudgetPlan = useCallback(
+    (next) => {
+      persist(accounts, transactions, next.categories, next.budgetGroups, next.plannedIncome, incomeWarningDismissed, hiddenBudgetMonths, excludeUnassignedFromBudget);
+      setToast("Budget imported. You can undo it from Settings → Data History for 7 days.");
+    },
+    [accounts, transactions, incomeWarningDismissed, hiddenBudgetMonths, excludeUnassignedFromBudget, persist]
+  );
+
   // An account's starting balance ({ amount, date, owed }), or null to stop
   // tracking its balance.
   const handleSetStartingBalance = useCallback(
@@ -1216,6 +1227,7 @@ function App({ householdName, currentUserId = null, householdMembers = [] } = {}
               onDismissIncomeWarning={handleDismissIncomeWarning}
               onSetCategoryBudget={handleSetCategoryBudget}
               onToggleExcludeUnassigned={handleToggleExcludeUnassigned}
+              onApplyBudgetPlan={handleApplyBudgetPlan}
             />
           )}
           {view === "budget" && (

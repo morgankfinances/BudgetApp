@@ -1,0 +1,298 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Help & FAQ | Coinrose</title>
+<meta name="description" content="How to use Coinrose: uploading bank statements, categories, budgets, transfers, account balances, households, backups, and two-step sign-in.">
+<link rel="canonical" href="https://coinrose.io/help.html">
+<link rel="icon" type="image/svg+xml" href="/Black_Coin.svg">
+<link rel="stylesheet" href="/fonts/fonts.css">
+<style>
+  :root { --bg: #F3F5F8; --panel: #FFFFFF; --ink: #1C2430; --muted: #5B6675; --border: #D6DCE3; --accent: #2B6CB0; --subtle: #EDF1F6; }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg: #10131B; --panel: #1B2030; --ink: #E7E9F1; --muted: #9BA3B5; --border: #2C3346; --accent: #9AB6EA; --subtle: #232A3D; }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--ink); font: 16px/1.65 'Coinrose Body', -apple-system, 'Segoe UI', sans-serif; }
+  main { max-width: 760px; margin: 0 auto; padding: 40px 20px 64px; }
+  .brand { font-family: 'Coinrose Heading', -apple-system, 'Segoe UI', sans-serif; font-weight: 600; font-size: 22px; color: var(--ink); text-decoration: none; }
+  .card { background: var(--panel); border: 1px solid var(--border); border-radius: 10px; padding: 32px 36px; margin-top: 20px; }
+  h1 { font-family: 'Coinrose Heading', -apple-system, 'Segoe UI', sans-serif; font-weight: 500; font-size: 32px; margin: 0 0 4px; }
+  h2 { font-family: 'Coinrose Heading', -apple-system, 'Segoe UI', sans-serif; font-weight: 500; font-size: 22px; margin: 40px 0 10px; scroll-margin-top: 16px; }
+  .meta { color: var(--muted); margin: 0 0 20px; }
+  .summary { border-left: 4px solid var(--accent); padding: 4px 0 4px 18px; margin: 20px 0; }
+  a { color: var(--accent); font-weight: 600; }
+  nav.contents ul { columns: 2; column-gap: 28px; padding-left: 20px; margin: 8px 0 0; }
+  nav.contents li { margin: 2px 0; break-inside: avoid; }
+  details { border: 1px solid var(--border); border-radius: 8px; margin: 8px 0; background: var(--panel); }
+  summary { cursor: pointer; padding: 12px 16px; font-weight: 600; list-style-position: outside; margin-left: 4px; }
+  summary:focus-visible { outline: 3px solid var(--accent); outline-offset: 2px; border-radius: 8px; }
+  details[open] summary { border-bottom: 1px solid var(--border); background: var(--subtle); border-radius: 8px 8px 0 0; }
+  details > div { padding: 4px 18px 8px; }
+  details p, details li { margin: 8px 0; }
+  details ul, details ol { padding-left: 22px; }
+  kbd, code { font-family: monospace; font-size: 14px; background: var(--subtle); padding: 1px 5px; border-radius: 4px; }
+  footer { color: var(--muted); font-size: 14px; margin-top: 24px; text-align: center; }
+  @media (max-width: 600px) { .card { padding: 22px 18px; } h1 { font-size: 27px; } nav.contents ul { columns: 1; } }
+</style>
+</head>
+<body>
+<main>
+<a class="brand" href="/">Coinrose</a>
+<article class="card">
+<h1>Help &amp; FAQ</h1>
+<p class="meta">Last updated October 2026</p>
+
+<p class="summary">Can't find what you need? Email <a href="mailto:morgankfinances@gmail.com">morgankfinances@gmail.com</a>.
+Feedback and ideas are welcome too. You can also <a href="/#demo">try the demo</a> to explore with made-up data.</p>
+
+<nav class="contents" aria-label="On this page">
+  <strong>On this page</strong>
+  <ul>
+    <li><a href="#getting-started">Getting started</a></li>
+    <li><a href="#uploading">Uploading statements</a></li>
+    <li><a href="#categories">Categories, splits, and comments</a></li>
+    <li><a href="#transfers">Transfers between accounts</a></li>
+    <li><a href="#budgets">Budgets</a></li>
+    <li><a href="#insights">Insights and recurring bills</a></li>
+    <li><a href="#balances">Account balances</a></li>
+    <li><a href="#households">Households and members</a></li>
+    <li><a href="#backups">Backups and undo</a></li>
+    <li><a href="#signin">Signing in and two-step sign-in</a></li>
+    <li><a href="#privacy">Privacy and your data</a></li>
+    <li><a href="#trouble">Troubleshooting</a></li>
+  </ul>
+</nav>
+
+<h2 id="getting-started">Getting started</h2>
+<details><summary>What is Coinrose?</summary><div>
+<p>Coinrose is a budgeting app for households. You upload the statements you download from your bank or card company,
+and Coinrose combines them into one place: categorized spending, budgets, reports, and insights, shared with everyone in
+your household.</p>
+<p>It never connects to your bank. You decide exactly what goes in.</p>
+</div></details>
+<details><summary>How do I start?</summary><div>
+<ol>
+  <li>Create an account and a household (or join someone else's with their invite code).</li>
+  <li>Download a statement from your bank's website and upload it on the <strong>Upload</strong> page.</li>
+  <li>Categorize your transactions. Coinrose learns from your choices and fills in categories it recognizes.</li>
+  <li>Set budgets on <strong>Planning</strong>, then follow along on <strong>Budget</strong> and the <strong>Overview</strong>.</li>
+</ol>
+<p>The guided tour walks through each page. You can replay it anytime from <strong>Settings → View tutorial</strong>.</p>
+</div></details>
+<details><summary>Why doesn't Coinrose connect to my bank automatically?</summary><div>
+<p>On purpose. Automatic bank connections mean handing your bank login, or a standing link to your accounts, to a
+third-party data company. Uploading statements keeps you in control: Coinrose only ever has the transactions you choose
+to give it, and nothing else about your bank accounts. The trade-off is a few minutes of downloading and uploading now
+and then.</p>
+</div></details>
+
+<h2 id="uploading">Uploading statements</h2>
+<details><summary>What file types can I upload?</summary><div>
+<p>CSV, Excel (<code>.xlsx</code> or <code>.xls</code>), and OFX or QFX (sometimes called "Quicken" or "Money" format).</p>
+<p><strong>If your bank offers OFX or QFX, use it.</strong> Those files include the bank's own ID for every transaction,
+so Coinrose can tell with certainty whether a transaction is new or already uploaded.</p>
+</div></details>
+<details><summary>Where do I find the download on my bank's website?</summary><div>
+<p>It's usually on the account's transaction history page, under a button like <em>Download</em>, <em>Export</em>, or a
+download icon. Choose a date range, then a format (CSV, Excel, OFX, QFX, or "Quicken"). Some banks only offer it on their
+website, not in their phone app.</p>
+</div></details>
+<details><summary>The columns came in wrong. How do I fix that?</summary><div>
+<p>After choosing a file, Coinrose shows which column it's using for the date, description, and amounts. Change any that
+are wrong before continuing. Coinrose remembers your choices for that account, so the next upload from the same bank
+fills them in automatically. You can also change them later from <strong>Accounts → Settings</strong> on that account.</p>
+</div></details>
+<details><summary>What happens if I upload the same transactions twice?</summary><div>
+<p>By default, Coinrose sets aside exact matches (same account, date, amount, and description, or the same bank ID)
+instead of importing them again, so overlapping statements are fine. Anything set aside is listed under
+<strong>Skipped duplicates</strong> on the Transactions page, where you can restore it if it was actually a separate
+purchase.</p>
+<p>You can change this in <strong>Settings → Importing</strong>: skip duplicates (the default), import everything and flag
+likely duplicates, or turn duplicate checks off.</p>
+</div></details>
+
+<h2 id="categories">Categories, splits, and comments</h2>
+<details><summary>Why are some categories marked "Suggested"?</summary><div>
+<p>Coinrose fills in categories it recognizes from how you've categorized similar transactions before. They count right
+away, and stay marked <em>Suggested</em> until you confirm or change them. Coinrose only learns from categories you've
+confirmed or chosen yourself. You can turn this off in <strong>Settings → Importing</strong>.</p>
+</div></details>
+<details><summary>How do I split a purchase between categories?</summary><div>
+<p>On the Transactions page, choose <strong>Split</strong> on the transaction. Add a line for each category with its
+amount, or use the quick options to split evenly or by percentage. The lines have to add up to the transaction's
+total. Budgets and reports then count each piece in its own category.</p>
+</div></details>
+<details><summary>What are comments for?</summary><div>
+<p>Notes on a transaction that everyone in your household can see, like "Is this the vet bill?" Use the 💬 button on a
+transaction. Searching on the Transactions page also searches comments.</p>
+</div></details>
+<details><summary>What does "excluded" mean for a category?</summary><div>
+<p>Excluded categories don't count as spending or income in budgets and reports. They're meant for money that isn't
+really either, like moving money between your own accounts.</p>
+</div></details>
+
+<h2 id="transfers">Transfers between accounts</h2>
+<details><summary>Why does Coinrose ask about "possible transfers"?</summary><div>
+<p>When money moves between two of your own accounts (paying the credit card from checking, or moving money to
+savings), it shows up twice: once leaving one account and once arriving in the other. Neither is really spending or
+income. Coinrose looks for matching amounts in two of your accounts within a few days of each other and asks you to
+confirm. Confirmed pairs are marked as transfers and left out of spending, so nothing is counted twice.</p>
+<p>If a suggestion is wrong, choose <strong>Not a transfer</strong> and it won't be suggested again.</p>
+</div></details>
+
+<h2 id="budgets">Budgets</h2>
+<details><summary>What's the difference between "Spend" and "Accumulate" budgets?</summary><div>
+<p>A <strong>Spend</strong> budget is a limit that resets each period, like $600 a month for groceries. An
+<strong>Accumulate</strong> budget adds its amount every period and carries over what you don't use, which suits saving
+toward something, like car repairs or a vacation.</p>
+</div></details>
+<details><summary>Can I budget weekly instead of monthly?</summary><div>
+<p>Yes. Each budget can be weekly or monthly. Separately, <strong>Reports</strong> can follow your pay schedule: weekly,
+every two weeks, twice a month, or monthly.</p>
+<p>Budget Groups let several categories share one budget, like Groceries and Dining Out under a single Food limit.</p>
+</div></details>
+
+<details><summary>Can I import a budget from YNAB, or share mine?</summary><div>
+<p>Yes. At the bottom of <strong>Planning</strong>, choose <strong>Import a budget file</strong>. Coinrose shows exactly
+what would change before anything does, and you can undo it from Data History for 7 days.</p>
+<ul>
+  <li><strong>From YNAB:</strong> in YNAB's web app, click your plan's name, choose <em>Export Plan</em>, unzip it, and
+  import the plan file (not the register). Coinrose uses what you assigned each category, averaged over the last 3
+  months or from the most recent month.</li>
+  <li><strong>To share:</strong> choose <strong>Download my budget as a template</strong> and send the file. It holds
+  budgets only, with no transactions or spending history, and leaves out your income unless you include it.</li>
+</ul>
+<p>A template is a CSV file you can also make in any spreadsheet, with the columns <code>Kind</code> (Income, Category,
+or Group), <code>Name</code>, <code>Amount</code>, <code>Period</code> (monthly or weekly), <code>Type</code> (Spend or
+Accumulate), <code>Goal</code>, and <code>Group</code>. For example:</p>
+<pre style="overflow-x:auto;background:var(--subtle);padding:10px 12px;border-radius:6px;font-size:13px">Kind,Name,Amount,Period,Type,Goal,Group
+Category,Groceries,600,monthly,Spend,,Food
+Category,Car Repairs,75,monthly,Accumulate,1500,
+Group,Food,750,monthly,Spend,,</pre>
+<p>The Planning page can also download a full example to start from.</p>
+</div></details>
+
+<h2 id="insights">Insights and recurring bills</h2>
+<details><summary>How does Coinrose find recurring bills?</summary><div>
+<p>It looks for charges from the same place on a steady schedule: weekly, every two weeks, twice a month, monthly,
+every three months, or yearly. It needs at least three charges (two for quarterly or yearly ones). Amounts can vary for
+bills like utilities, but regular shopping at the same store isn't counted as a bill.</p>
+<p>If something is listed that isn't really recurring, choose <strong>Not recurring</strong> to hide it. You can bring it
+back later.</p>
+</div></details>
+<details><summary>Insights says something odd. Why?</summary><div>
+<p>Insights only know what's been uploaded. A missing statement, an uncategorized transaction, or an unconfirmed transfer
+can all skew them. Comparisons ignore a partial first month and only average months that actually had spending in a
+category, but they work best with a few complete months of records.</p>
+</div></details>
+
+<h2 id="balances">Account balances</h2>
+<details><summary>How does Coinrose know my account balance?</summary><div>
+<p>It doesn't know it for certain: it estimates it. On the <strong>Accounts</strong> page, choose <strong>Track this
+account's balance</strong> and enter a balance from a statement or your bank's website, plus the day it was for.
+Coinrose then works out the balance on other days from the transactions you've uploaded, both after that day and
+before it.</p>
+<p>Because Coinrose isn't connected to your bank, the estimate can differ from your real balance: for example, because of
+pending transactions, fees, or statements you haven't uploaded yet. If it drifts, enter a new starting balance from a
+recent statement.</p>
+</div></details>
+<details><summary>How do I track a credit card or loan?</summary><div>
+<p>When entering its starting balance, tick <strong>This is a credit card or loan</strong> and enter the amount you owe.
+Purchases then increase what's owed and payments reduce it, the way your statement reads.</p>
+</div></details>
+<details><summary>Why does the balance chart stop at "Earliest uploaded data"?</summary><div>
+<p>That's the day before your oldest uploaded transaction for that account. Your real account goes back further, but
+Coinrose can't know its balance before the records you've uploaded.</p>
+</div></details>
+
+<h2 id="households">Households and members</h2>
+<details><summary>How do I invite someone?</summary><div>
+<p>Open <strong>Settings</strong> and share your household's invite code. They enter it when they sign up, or later from
+Settings, which sends a request that an owner approves. Codes expire after 7 days, and owners can make a new one
+anytime.</p>
+</div></details>
+<details><summary>What's the difference between an owner and a member?</summary><div>
+<p>Both can see and change the household's finances. Owners can also approve join requests, make new invite codes,
+remove members, and change roles. A household can have more than one owner.</p>
+</div></details>
+<details><summary>Can I belong to more than one household?</summary><div>
+<p>Not at the same time: each person belongs to one household. To move to a different one, use <strong>Settings → Join a
+different household</strong> and enter its invite code. You'll keep using your current household normally until someone
+in the other household approves the request. Each household's data is completely separate.</p>
+</div></details>
+
+<h2 id="backups">Backups and undo</h2>
+<details><summary>How do I back up my data?</summary><div>
+<p>On the <strong>Backup</strong> page, choose <strong>Download complete backup</strong>. It's one file with everything:
+accounts and balances, every transaction with its splits, transfers, and comments, categories, budgets, and your
+household's settings. Keep it somewhere safe, since it contains your financial records.</p>
+<p>The same page restores from a complete backup, showing what's in the file before replacing anything. The spreadsheet
+(CSV) copies there are for opening in Excel or Google Sheets; they don't include everything.</p>
+</div></details>
+<details><summary>I made a mistake. Can I undo it?</summary><div>
+<p>Yes, for 7 days. <strong>Settings → Data History</strong> lists recent changes, and you can restore your household's
+data to how it was before any of them, including restores from a backup.</p>
+</div></details>
+
+<h2 id="signin">Signing in and two-step sign-in</h2>
+<details><summary>Do I need a password?</summary><div>
+<p>No. You can sign in with a link sent to your email each time, or set a password in Settings if you'd rather type
+one.</p>
+</div></details>
+<details><summary>How do I turn on two-step sign-in?</summary><div>
+<p>In <strong>Settings → Two-step sign-in</strong>, scan the QR code with an authenticator app (like Google Authenticator,
+1Password, or Authy) and enter the 6-digit code it shows. After that, signing in takes your password or email link plus
+a code from the app.</p>
+<p>You'll also get 10 one-time <strong>backup codes</strong>. Save them somewhere safe, like a password manager or a
+printed copy. They're shown only once.</p>
+</div></details>
+<details><summary>I lost my phone. How do I get in?</summary><div>
+<p>Sign in as usual, then choose <strong>Lost your phone? Use a backup code</strong> and enter one of your backup codes.
+Each works once. Using one turns two-step sign-in off, so you can set it up again with your new phone (and get fresh
+backup codes).</p>
+<p>No backup codes either? Email <a href="mailto:morgankfinances@gmail.com">morgankfinances@gmail.com</a> from the
+address you sign in with.</p>
+</div></details>
+
+<h2 id="privacy">Privacy and your data</h2>
+<details><summary>Does Coinrose sell my data or show ads?</summary><div>
+<p>No. Coinrose doesn't sell or share your data, and doesn't show ads. See the
+<a href="/privacy.html">Privacy Policy</a> for the details.</p>
+</div></details>
+<details><summary>What does Coinrose store about me?</summary><div>
+<p>Your email address, your sign-in details, and what you put into Coinrose: transactions, categories, budgets, and
+settings. It never stores bank logins or full account numbers. The <a href="/privacy.html">Privacy Policy</a> lists
+everything.</p>
+</div></details>
+<details><summary>How do I delete my account?</summary><div>
+<p>In <strong>Settings → Delete my account</strong>. Your sign-in is deleted, along with any household where you're the
+only member. Households you share with others keep their data for the remaining members. Download a complete backup
+first if you want a copy.</p>
+</div></details>
+
+<h2 id="trouble">Troubleshooting</h2>
+<details><summary>My sign-in email didn't arrive.</summary><div>
+<ul>
+  <li>Check your spam or junk folder, and search for "Coinrose."</li>
+  <li>Wait a minute or two. Emails occasionally take a moment.</li>
+  <li>Sign-in emails are limited to a few per hour, so repeated requests can be held back. Try again a little later.</li>
+  <li>If it never arrives, email <a href="mailto:morgankfinances@gmail.com">morgankfinances@gmail.com</a>.</li>
+</ul>
+</div></details>
+<details><summary>Amounts came in with the wrong sign (spending shows as income).</summary><div>
+<p>Banks show amounts differently: some use one column with negative numbers for spending, some use separate columns for
+money in and out. On the column step of an upload, check how the amount columns are set, and fix them for that account
+under <strong>Accounts → Settings</strong>. Then delete the affected transactions and upload the file again.</p>
+</div></details>
+<details><summary>Something's not working right.</summary><div>
+<p>Reloading the page fixes most problems, and your saved data is always safe. If it keeps happening, email
+<a href="mailto:morgankfinances@gmail.com">morgankfinances@gmail.com</a> with what you were doing and what you saw. A
+screenshot helps a lot.</p>
+</div></details>
+</article>
+<footer><a href="/privacy.html">Privacy Policy</a> · <a href="/terms.html">Terms of Use</a> · <a href="/">Back to Coinrose</a></footer>
+</main>
+</body>
+</html>

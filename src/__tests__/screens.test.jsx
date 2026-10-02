@@ -891,3 +891,57 @@ describe("Overview: account balances", () => {
     expect(screen.queryByRole("heading", { name: "Account balances" })).toBeNull();
   });
 });
+
+import { BudgetTemplatesPanel } from "../components/BudgetTemplatesPanel.jsx";
+describe("Planning: importing and sharing budgets", () => {
+  const open = (onApply = vi.fn()) => {
+    render(<BudgetTemplatesPanel categories={F.categories} budgetGroups={F.budgetGroups} plannedIncome={2700} onApply={onApply} />);
+    return onApply;
+  };
+  const pick = async (text, name = "budget.csv") => {
+    fireEvent.change(document.querySelector('.budget-templates input[type="file"]'), { target: { files: [new File([text], name)] } });
+    await waitFor(() => expect(document.querySelector('[role="region"][aria-label="Budget to import"], [role="alert"]')).toBeTruthy());
+  };
+  it("previews a template's changes, then applies them only when asked", async () => {
+    const onApply = open();
+    await pick("Kind,Name,Amount,Period,Type,Goal,Group\nCategory,Groceries,999,monthly,Spend,,\nCategory,Pet Care,40,weekly,Spend,,");
+    const region = screen.getByRole("region", { name: "Budget to import" });
+    expect(region.textContent).toMatch(/A Coinrose budget template\./);
+    expect(region.textContent).toMatch(/1 budget changed, 1 new category\./);
+    const rows = within(screen.getByRole("region", { name: "Changes this import would make" })).getAllByRole("row").slice(1).map((r) => r.textContent);
+    expect(rows).toEqual([expect.stringMatching(/^Groceries.*\$999\.00 a month$/), "Pet CareNew category$40.00 a week"]);
+    fireEvent.click(within(region).getByLabelText("Add categories that aren't in Coinrose yet"));
+    expect(region.textContent).toMatch(/Pet CareNot in CoinroseSkipped/);
+    expect(onApply).not.toHaveBeenCalled();
+    fireEvent.click(within(region).getByRole("button", { name: "Apply this budget" }));
+    expect(onApply).toHaveBeenCalledTimes(1);
+    expect(onApply.mock.calls[0][0].categories.find((c) => c.name === "Groceries").budgetAmount).toBe(999);
+    expect(onApply.mock.calls[0][0].categories.some((c) => c.name === "Pet Care")).toBe(false);
+    expect(screen.queryByRole("region", { name: "Budget to import" })).toBeNull();
+  });
+  it("a YNAB export explains where the amounts come from, and can switch to the latest month", async () => {
+    open();
+    await pick(["Month,Category Group/Category,Category Group,Category,Assigned,Activity,Available",
+      "Jul 2026,Everyday: Groceries,Everyday,Groceries,$600.00,$0,$0", "Aug 2026,Everyday: Groceries,Everyday,Groceries,$650.00,$0,$0", "Sep 2026,Everyday: Groceries,Everyday,Groceries,$700.00,$0,$0"].join("\n"));
+    const region = screen.getByRole("region", { name: "Budget to import" });
+    expect(region.textContent).toMatch(/A YNAB plan export\. Each category's budget is the average assigned over Jul 2026, Aug 2026, Sep 2026\./);
+    expect(region.textContent).toMatch(/\$650\.00 a month/);
+    fireEvent.click(within(region).getByLabelText("Most recent month only"));
+    expect(region.textContent).toMatch(/what was assigned in Sep 2026/);
+    expect(region.textContent).toMatch(/\$700\.00 a month/);
+  });
+  it("explains files it can't use, and says when nothing would change", async () => {
+    open();
+    await pick("Date,Payee,Category,Memo,Outflow,Inflow\n1,2,3,4,5,6");
+    expect(screen.getByRole("alert").textContent).toMatch(/This is YNAB's transaction register/);
+    await pick("Kind,Name,Amount\nCategory,Groceries,240");
+    expect(screen.getByRole("region", { name: "Budget to import" }).textContent).toMatch(/Nothing would change/);
+    expect(screen.getByRole("button", { name: "Apply this budget" }).disabled).toBe(true);
+  });
+  it("shows the template format right on the page", () => {
+    open();
+    fireEvent.click(screen.getByText("Template format, and importing from YNAB"));
+    expect(screen.getByRole("region", { name: "Template columns" }).textContent).toMatch(/Spend \(a limit that resets\) or Accumulate/);
+    expect(document.querySelector(".budget-format-example").textContent).toMatch(/^Kind,Name,Amount,Period,Type,Goal,Group/);
+  });
+});
